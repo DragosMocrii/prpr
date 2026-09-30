@@ -1,0 +1,162 @@
+package tui
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+
+	"prpr/internal/github"
+)
+
+func pickerModel() *model {
+	m := &model{ctx: context.Background(), width: 80, height: 12}
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{
+		{Number: 1, Repository: "acme/a", URL: "https://example.test/a/1"},
+		{Number: 2, Repository: "acme/b", URL: "https://example.test/b/2"},
+	}}})
+	return m
+}
+
+func press(m *model, key tea.Key) {
+	m.Update(tea.KeyPressMsg(key))
+}
+
+func openPicker(m *model) {
+	press(m, tea.Key{Code: 'p', Text: "p"})
+	if m.picker == nil || !m.picker.busy {
+		panic("picker did not open repository discovery")
+	}
+}
+
+func finishDiscovery(m *model, names []string, err error) {
+	m.Update(repositoryListFinishedMsg{requestID: m.repositoryRequestID, repositories: names, err: err})
+}
+
+func TestPickerSelectsRepositoryAndAllRepositories(t *testing.T) {
+	m := pickerModel()
+	openPicker(m)
+	finishDiscovery(m, []string{"acme/a", "acme/b", "acme/empty"}, nil)
+	m.picker.query = "acme/b"
+	m.picker.rebuildCandidates()
+	if got := m.picker.selectedCandidate().repository; got != "acme/b" {
+		t.Fatalf("selected candidate = %q, want acme/b", got)
+	}
+	press(m, tea.Key{Code: tea.KeyEnter})
+	if m.picker != nil || m.selectedRepository != "acme/b" || len(m.visiblePRs) != 1 {
+		t.Fatalf("repository selection did not apply: picker %v filter %q visible %v", m.picker, m.selectedRepository, m.visiblePRs)
+	}
+	openPicker(m)
+	finishDiscovery(m, []string{"acme/a", "acme/b"}, nil)
+	m.picker.query = "no-match"
+	m.picker.rebuildCandidates()
+	if len(m.picker.candidates) != 1 || m.picker.selectedCandidate().kind != allRepositoriesCandidate {
+		t.Fatalf("no-match candidates = %+v, want All repositories", m.picker.candidates)
+	}
+	press(m, tea.Key{Code: tea.KeyEnter})
+	if m.selectedRepository != "" || len(m.visiblePRs) != 2 {
+		t.Fatalf("All repositories selection = %q with %v visible", m.selectedRepository, m.visiblePRs)
+	}
+}
+
+func TestPickerCancelPreservesFilterAndPRSelection(t *testing.T) {
+	m := pickerModel()
+	m.snapshot.PullRequests[1].Repository = "acme/a"
+	m.rebuildVisiblePRs()
+	m.applyRepository("acme/a")
+	press(m, tea.Key{Code: tea.KeyDown})
+	previousCursor := m.cursor
+	openPicker(m)
+	press(m, tea.Key{Code: tea.KeyEsc})
+	if m.picker != nil || m.selectedRepository != "acme/a" || m.cursor != previousCursor || m.cursor != 1 {
+		t.Fatalf("cancel changed list state: picker %v filter %q cursor %d", m.picker, m.selectedRepository, m.cursor)
+	}
+}
+
+func TestPickerTextInputDoesNotInvokeMainKeys(t *testing.T) {
+	m := pickerModel()
+	openPicker(m)
+	for _, text := range []string{"q", "j", "r"} {
+		press(m, tea.Key{Code: rune(text[0]), Text: text})
+	}
+	if m.picker.query != "qjr" || m.loading || m.snapshot.Login != "alice" {
+		t.Fatalf("picker input changed main state or lost text: query %q loading %t", m.picker.query, m.loading)
+	}
+	press(m, tea.Key{Code: tea.KeyBackspace})
+	if m.picker.query != "qj" {
+		t.Fatalf("backspace query = %q, want qj", m.picker.query)
+	}
+	m.Update(tea.PasteMsg{Content: "\nowner/repo\x1b"})
+	if m.picker.query != "qjowner/repo" {
+		t.Fatalf("paste query = %q, want control characters discarded", m.picker.query)
+	}
+	press(m, tea.Key{Code: 'u', Mod: tea.ModCtrl})
+	if m.picker.query != "" || m.picker == nil {
+		t.Fatalf("Ctrl+U state: picker %v query %q", m.picker, m.picker.query)
+	}
+}
+
+func TestPickerDirectLookupFailureThenCanonicalSuccess(t *testing.T) {
+	m := pickerModel()
+	m.applyRepository("acme/b")
+	openPicker(m)
+	finishDiscovery(m, nil, errors.New("listing denied"))
+	m.picker.query = "public/other"
+	m.picker.rebuildCandidates()
+	press(m, tea.Key{Code: tea.KeyEnter})
+	failedID := m.repositoryRequestID
+	m.Update(repositoryLookupFinishedMsg{requestID: failedID, err: errors.New("GitHub repository lookup failed: not found")})
+	if m.picker == nil || m.selectedRepository != "acme/b" || m.picker.busy || m.picker.diagnostic == "" {
+		t.Fatalf("failed lookup changed filter or lost diagnostic: picker %+v filter %q", m.picker, m.selectedRepository)
+	}
+	press(m, tea.Key{Code: tea.KeyEnter})
+	m.Update(repositoryLookupFinishedMsg{requestID: m.repositoryRequestID, repository: "Public/Other"})
+	if m.picker != nil || m.selectedRepository != "Public/Other" || len(m.visiblePRs) != 0 {
+		t.Fatalf("canonical lookup result not applied: picker %v filter %q visible %v", m.picker, m.selectedRepository, m.visiblePRs)
+	}
+}
+
+func TestPickerIgnoresLateResultsAfterCloseAndReopen(t *testing.T) {
+	m := pickerModel()
+	openPicker(m)
+	oldID := m.repositoryRequestID
+	press(m, tea.Key{Code: tea.KeyEsc})
+	openPicker(m)
+	m.Update(repositoryListFinishedMsg{requestID: oldID, repositories: []string{"late/repo"}})
+	finishDiscovery(m, nil, nil)
+	if len(m.picker.repositories) != 2 || m.picker.repositories[0] != "acme/a" || m.picker.repositories[1] != "acme/b" {
+		t.Fatalf("stale discovery populated reopened picker: %v", m.picker.repositories)
+	}
+	currentID := m.repositoryRequestID
+	m.picker.query = "public/other"
+	m.picker.rebuildCandidates()
+	press(m, tea.Key{Code: tea.KeyEnter})
+	lookupID := m.repositoryRequestID
+	press(m, tea.Key{Code: tea.KeyEsc})
+	openPicker(m)
+	m.Update(repositoryLookupFinishedMsg{requestID: lookupID, repository: "Public/Other"})
+	if m.selectedRepository != "" || m.repositoryRequestID == currentID || m.picker == nil {
+		t.Fatalf("stale lookup affected reopened picker: filter %q id %d picker %v", m.selectedRepository, m.repositoryRequestID, m.picker)
+	}
+}
+
+func TestPickerNavigationAndResizeStayInBounds(t *testing.T) {
+	m := pickerModel()
+	openPicker(m)
+	finishDiscovery(m, []string{"org/a", "org/b", "org/c", "org/d", "org/e", "org/f"}, nil)
+	for i := 0; i < 20; i++ {
+		press(m, tea.Key{Code: tea.KeyDown})
+	}
+	if m.picker.cursor >= len(m.picker.candidates) || m.picker.offset+m.pickerViewportHeight() <= m.picker.cursor {
+		t.Fatalf("picker selection not visible: cursor %d offset %d height %d", m.picker.cursor, m.picker.offset, m.pickerViewportHeight())
+	}
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 8})
+	if m.picker.cursor >= len(m.picker.candidates) || m.picker.offset < 0 {
+		t.Fatalf("small resize left invalid selection: %+v", m.picker)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if m.picker.cursor >= len(m.picker.candidates) || m.picker.offset < 0 {
+		t.Fatalf("large resize left invalid selection: %+v", m.picker)
+	}
+}
