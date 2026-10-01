@@ -174,7 +174,7 @@ func TestFocusedEmptyPaneIgnoresTableKeys(t *testing.T) {
 	if m.panes[paneMine].table.Cursor() != 0 {
 		t.Fatalf("keys in empty review pane moved mine cursor to %d", m.panes[paneMine].table.Cursor())
 	}
-	if strings.Contains(m.View().Content, "https://github.com/acme/a/pull/1") {
+	if strings.Contains(ansi.Strip(m.View().Content), "https://github.com/acme/a/pull/1") {
 		t.Fatal("URL line shows the unfocused pane's PR")
 	}
 }

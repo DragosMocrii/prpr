@@ -61,11 +61,7 @@ func (m *model) layoutPanes() paneLayout {
 		return 2 // title and empty line
 	}
 	var layout paneLayout
-	// Trigger single-pane when focused pane is empty and other pane has rows,
-	// or when there's not enough space for both panes.
-	focusedEmpty := !filled(m.focus)
-	otherHasRows := filled(1 - m.focus)
-	if (focusedEmpty && otherHasRows) || avail < need(paneMine)+need(paneReview) {
+	if avail < need(paneMine)+need(paneReview) {
 		layout.single = true
 		if filled(m.focus) {
 			layout.tables[m.focus] = max(minTableHeight, avail-1)

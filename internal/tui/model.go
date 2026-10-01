@@ -170,15 +170,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.snapshot = msg.snapshot
 			m.err = nil
 			m.rebuildVisiblePRs()
-			// Auto-set focus to a pane with data if current focus is empty.
-			if len(m.panes[m.focus].visible) == 0 {
-				for _, id := range paneIDs {
-					if len(m.panes[id].visible) > 0 {
-						m.focus = id
-						break
-					}
-				}
-			}
 			for _, id := range paneIDs {
 				if previous[id].ok {
 					m.selectPR(id, previous[id].repository, previous[id].number)
