@@ -16,14 +16,16 @@ type PullRequest struct {
 	Title      string
 	URL        string
 	Repository string
+	Author     string
 	Draft      bool
 	Mergeable  string
 	UpdatedAt  time.Time
 }
 
 type Snapshot struct {
-	Login        string
-	PullRequests []PullRequest
+	Login          string
+	PullRequests   []PullRequest
+	ReviewRequests []PullRequest
 }
 
 type Client struct {
@@ -56,6 +58,27 @@ const pullRequestsQuery = `query($endCursor: String) {
   }
 }`
 
+// reviewRequestsQuery lists open pull requests that request a review from the
+// viewer directly or through one of the viewer's teams.
+const reviewRequestsQuery = `query($endCursor: String) {
+  search(type: ISSUE, first: 100, after: $endCursor,
+         query: "is:pr is:open review-requested:@me archived:false sort:updated-desc") {
+    nodes {
+      ... on PullRequest {
+        number
+        title
+        url
+        isDraft
+        mergeable
+        updatedAt
+        author { login }
+        repository { nameWithOwner }
+      }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}`
+
 func NewClient() (*Client, error) {
 	path, err := exec.LookPath("gh")
 	if err != nil {
@@ -75,7 +98,21 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, commandError("GitHub pull request query failed", err)
 	}
-	return decodePages(data)
+	snapshot, err := decodePages(data)
+	if err != nil {
+		return Snapshot{}, err
+	}
+
+	review := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+reviewRequestsQuery)
+	data, err = review.Output()
+	if err != nil {
+		return Snapshot{}, commandError("GitHub review request query failed", err)
+	}
+	snapshot.ReviewRequests, err = decodeReviewPages(data)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return snapshot, nil
 }
 
 func (c *Client) ListRepositories(ctx context.Context) ([]string, error) {
@@ -248,6 +285,71 @@ func decodePages(data []byte) (Snapshot, error) {
 		}
 	}
 	return snapshot, nil
+}
+
+func decodeReviewPages(data []byte) ([]PullRequest, error) {
+	var pages []json.RawMessage
+	if err := json.Unmarshal(data, &pages); err != nil {
+		return nil, fmt.Errorf("decode GitHub review request response: %w", err)
+	}
+	if len(pages) == 0 {
+		return nil, errors.New("decode GitHub review request response: no pages returned")
+	}
+
+	var prs []PullRequest
+	for i, pageData := range pages {
+		var page struct {
+			Data struct {
+				Search *struct {
+					Nodes []*struct {
+						Number    int       `json:"number"`
+						Title     string    `json:"title"`
+						URL       string    `json:"url"`
+						Draft     bool      `json:"isDraft"`
+						Mergeable string    `json:"mergeable"`
+						UpdatedAt time.Time `json:"updatedAt"`
+						Author    *struct {
+							Login string `json:"login"`
+						} `json:"author"`
+						Repository struct {
+							NameWithOwner string `json:"nameWithOwner"`
+						} `json:"repository"`
+					} `json:"nodes"`
+				} `json:"search"`
+			} `json:"data"`
+			Errors []json.RawMessage `json:"errors"`
+		}
+		if err := json.Unmarshal(pageData, &page); err != nil {
+			return nil, fmt.Errorf("decode GitHub review request page %d: %w", i+1, err)
+		}
+		if len(page.Errors) != 0 {
+			return nil, fmt.Errorf("GitHub review request page %d returned GraphQL errors: %s", i+1, strings.Join(rawMessages(page.Errors), "; "))
+		}
+		if page.Data.Search == nil {
+			return nil, fmt.Errorf("GitHub review request page %d has no search connection", i+1)
+		}
+		for _, node := range page.Data.Search.Nodes {
+			// Search can return non-pull-request nodes, which decode empty.
+			if node == nil || node.URL == "" {
+				continue
+			}
+			author := ""
+			if node.Author != nil {
+				author = node.Author.Login
+			}
+			prs = append(prs, PullRequest{
+				Number:     node.Number,
+				Title:      node.Title,
+				URL:        node.URL,
+				Repository: node.Repository.NameWithOwner,
+				Author:     author,
+				Draft:      node.Draft,
+				Mergeable:  node.Mergeable,
+				UpdatedAt:  node.UpdatedAt,
+			})
+		}
+	}
+	return prs, nil
 }
 
 func rawMessages(messages []json.RawMessage) []string {

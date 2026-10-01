@@ -163,3 +163,57 @@ func TestValidRepositoryName(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeReviewPagesPreservesOrderAndSkipsNonPullRequests(t *testing.T) {
+	data := []byte(`[
+		{"data":{"search":{"nodes":[
+			{"number":45,"title":"Bump deps","url":"https://github.com/acme/api/pull/45","isDraft":false,"mergeable":"MERGEABLE","updatedAt":"2026-06-02T12:00:00Z","author":{"login":"bob"},"repository":{"nameWithOwner":"acme/api"}},
+			null,
+			{},
+			{"number":9,"title":"Ghost","url":"https://github.com/acme/lib/pull/9","isDraft":true,"mergeable":"UNKNOWN","updatedAt":"2026-06-01T12:00:00Z","author":null,"repository":{"nameWithOwner":"acme/lib"}}
+		],"pageInfo":{"hasNextPage":true,"endCursor":"c1"}}}},
+		{"data":{"search":{"nodes":[
+			{"number":3,"title":"Oldest","url":"https://github.com/acme/api/pull/3","isDraft":false,"mergeable":"CONFLICTING","updatedAt":"2026-05-01T12:00:00Z","author":{"login":"carol"},"repository":{"nameWithOwner":"acme/api"}}
+		],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}
+	]`)
+	prs, err := decodeReviewPages(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []PullRequest{
+		{Number: 45, Title: "Bump deps", URL: "https://github.com/acme/api/pull/45", Repository: "acme/api", Mergeable: "MERGEABLE", Author: "bob", UpdatedAt: time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)},
+		{Number: 9, Title: "Ghost", URL: "https://github.com/acme/lib/pull/9", Repository: "acme/lib", Draft: true, Mergeable: "UNKNOWN", Author: "", UpdatedAt: time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)},
+		{Number: 3, Title: "Oldest", URL: "https://github.com/acme/api/pull/3", Repository: "acme/api", Mergeable: "CONFLICTING", Author: "carol", UpdatedAt: time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)},
+	}
+	if len(prs) != len(want) {
+		t.Fatalf("got %d review requests, want %d: %+v", len(prs), len(want), prs)
+	}
+	for i, expected := range want {
+		got := prs[i]
+		if got.Number != expected.Number || got.Title != expected.Title || got.URL != expected.URL || got.Repository != expected.Repository || got.Draft != expected.Draft || got.Mergeable != expected.Mergeable || got.Author != expected.Author || !got.UpdatedAt.Equal(expected.UpdatedAt) {
+			t.Errorf("review request %d = %+v, want %+v", i, got, expected)
+		}
+	}
+}
+
+func TestDecodeReviewPagesAcceptsEmptySearch(t *testing.T) {
+	prs, err := decodeReviewPages([]byte(`[{"data":{"search":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}]`))
+	if err != nil || len(prs) != 0 {
+		t.Fatalf("empty search = %+v, %v", prs, err)
+	}
+}
+
+func TestDecodeReviewPagesRejectsInvalidOrPartialResponses(t *testing.T) {
+	for name, data := range map[string]string{
+		"invalid JSON":   `not json`,
+		"no pages":       `[]`,
+		"GraphQL errors": `[{"data":{"search":null},"errors":[{"message":"rate limited"}]}]`,
+		"missing search": `[{"data":{}}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeReviewPages([]byte(data)); err == nil {
+				t.Fatal("decode succeeded")
+			}
+		})
+	}
+}
