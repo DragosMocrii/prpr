@@ -35,8 +35,13 @@ func newPRPane() prPane {
 	return prPane{pages: pages}
 }
 
-// minTableHeight is a table header (title and border) plus one row.
+// minTableHeight is a table header (title and border) plus one row. It is the
+// smallest table in single-pane mode.
 const minTableHeight = 3
+
+// minDualTableHeight is a table header plus two rows, the smallest table when
+// both panes are drawn.
+const minDualTableHeight = 4
 
 // paneLayout gives each pane's table height, including its header. A zero
 // height means the pane is empty or not drawn.
@@ -56,7 +61,7 @@ func (m *model) layoutPanes() paneLayout {
 	filled := func(id paneID) bool { return len(m.panes[id].visible) > 0 }
 	need := func(id paneID) int {
 		if filled(id) {
-			return 1 + minTableHeight
+			return 1 + minDualTableHeight
 		}
 		return 2 // title and empty line
 	}

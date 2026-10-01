@@ -325,3 +325,42 @@ func TestSelectedRowStaysVisibleAfterResize(t *testing.T) {
 		t.Fatalf("mine selection #40 not visible after resize:\n%s", view)
 	}
 }
+
+func TestDualLayoutGivesEachPaneHeaderPlusTwoRows(t *testing.T) {
+	const width = 80
+	for height := 8; height <= 20; height++ {
+		m := newPaneModel(t, width, height, manyPRs(30), reviewPRs(30))
+		layout := m.layoutPanes()
+		if !layout.single {
+			for _, id := range paneIDs {
+				// Height is the row viewport; the header takes two more lines.
+				if got := m.panes[id].table.Height(); got < 2 {
+					t.Fatalf("height %d: pane %d shows %d rows, want at least 2", height, id, got)
+				}
+				if got := layout.tables[id]; got < 4 {
+					t.Fatalf("height %d: pane %d table lines = %d, want at least 4", height, id, got)
+				}
+			}
+		}
+		assertBounded(t, m, width, height)
+	}
+	if m := newPaneModel(t, width, 12, manyPRs(30), reviewPRs(30)); !m.layoutPanes().single {
+		t.Fatal("80x12 should use the single-pane layout")
+	}
+}
+
+func TestMergeLegendOnlyWhenMyPRsIsDrawnWithRows(t *testing.T) {
+	const legend = "✓ clean"
+	m := newPaneModel(t, 80, 10, manyPRs(30), reviewPRs(30))
+	press(m, tea.Key{Code: tea.KeyTab})
+	if !m.layoutPanes().single || m.focus != paneReview {
+		t.Fatalf("want single layout on review pane, got %+v focus %d", m.layoutPanes(), m.focus)
+	}
+	if view := ansi.Strip(strings.Join(assertBounded(t, m, 80, 10), "\n")); strings.Contains(view, legend) {
+		t.Fatalf("legend shown without My PRs pane:\n%s", view)
+	}
+	m = newPaneModel(t, 100, 24, manyPRs(3), reviewPRs(2))
+	if view := ansi.Strip(strings.Join(assertBounded(t, m, 100, 24), "\n")); !strings.Contains(view, legend) {
+		t.Fatalf("legend missing in dual layout:\n%s", view)
+	}
+}
