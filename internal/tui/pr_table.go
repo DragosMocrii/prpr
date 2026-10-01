@@ -147,6 +147,19 @@ func (m *model) selectedPR() (*github.PullRequest, bool) {
 	return &m.snapshot.PullRequests[prIndex], true
 }
 
+// selectPR moves the table cursor to the visible row for repository and
+// number, if that pull request is still visible.
+func (m *model) selectPR(repository string, number int) {
+	for row, index := range m.visiblePRs {
+		pr := &m.snapshot.PullRequests[index]
+		if pr.Number == number && strings.EqualFold(pr.Repository, repository) {
+			m.prTable.SetCursor(row)
+			m.syncPages()
+			return
+		}
+	}
+}
+
 func prNumberLink(number int, rawURL string) string {
 	label := lipgloss.NewStyle().Underline(true).Render("#" + strconv.Itoa(number))
 	if !safePullRequestURL(rawURL) {

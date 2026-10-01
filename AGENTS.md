@@ -33,7 +33,7 @@ Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package 
 - Preserve the authored, open pull-request query, pagination, updated-descending ordering, and draft status.
 - A missing saved account choice is different from a saved empty repository value: missing prompts for a choice; empty means the user explicitly chose All repositories. Restoring a saved choice must not write preferences. `chooseRepository` is the explicit commit-and-save path.
 - Preference-save failures are nonfatal: keep the in-session selection and show the warning.
-- Clear old rows when a fetch starts or fails; do not show stale results as current.
+- Keep the previous rows visible during a refresh only while the refresh indicator is shown, and clear them when a fetch fails; do not show stale results as current.
 - Keep picker cancellation and request-ID checks so obsolete asynchronous results cannot change current state.
 - Pull-request identity is the visible-row index mapped through `visiblePRs` to the source snapshot. Do not identify rows by PR number alone.
 - Bubbles owns the pull-request table cursor and scrolling. Preserve ANSI/grapheme-aware width behavior and safe OSC 8 hyperlink targets.

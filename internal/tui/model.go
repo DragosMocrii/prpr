@@ -93,14 +93,16 @@ func (m *model) startFetch() tea.Cmd {
 	m.loading = true
 	m.loginActive = false
 	m.err = nil
-	m.snapshot = github.Snapshot{}
-	m.visiblePRs = nil
-	m.rebuildPRTable(true)
 	client, ctx := m.client, m.ctx
 	return tea.Batch(func() tea.Msg {
 		snapshot, err := client.Fetch(ctx)
 		return fetchFinishedMsg{snapshot: snapshot, err: err}
 	}, m.spinner.Tick)
+}
+
+// refreshing reports whether a fetch is replacing rows that are still shown.
+func (m *model) refreshing() bool {
+	return m.loading && !m.loginActive && m.snapshot.Login != ""
 }
 
 // spinning reports whether a visible request is in flight. Spinner ticks
@@ -157,9 +159,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.scopeChoiceCursor = 0
 				}
 			}
+			previous, hadSelection := m.selectedPR()
+			var repository string
+			var number int
+			if hadSelection {
+				repository, number = previous.Repository, previous.Number
+			}
 			m.snapshot = msg.snapshot
 			m.err = nil
 			m.rebuildVisiblePRs()
+			if hadSelection {
+				m.selectPR(repository, number)
+			}
 		}
 	case loginFinishedMsg:
 		m.loginActive = false
@@ -303,7 +314,7 @@ func (m *model) View() tea.View {
 	switch {
 	case m.width < minimumWidth || m.height < minimumHeight:
 		lines = wrapWords("Terminal too small; resize or press Ctrl+C to quit.", m.width)
-	case m.loading && !m.loginActive:
+	case m.loading && !m.loginActive && !m.refreshing():
 		lines = []string{m.spinner.View() + " Loading open pull requests..."}
 	case m.err != nil:
 		lines = m.errorLines()
@@ -320,6 +331,9 @@ func (m *model) View() tea.View {
 		lines[i] = ansi.Truncate(lines[i], m.width, "…")
 	}
 	view := tea.NewView(strings.Join(lines, "\n"))
+	// Screens fill the terminal height; inline rendering lets the terminal
+	// scroll the top line away.
+	view.AltScreen = true
 	return view
 }
 
@@ -353,7 +367,7 @@ func (m *model) scopeChoiceLines() []string {
 		all = "> Show all my PRs"
 	}
 	return append([]string{
-		fmt.Sprintf("prpr — @%s", m.snapshot.Login),
+		m.titleLine(fmt.Sprintf("prpr — @%s", m.snapshot.Login)),
 		"What would you like to watch?",
 		pick,
 		all,
@@ -371,7 +385,7 @@ func (m *model) errorLines() []string {
 }
 
 func (m *model) listLines() []string {
-	lines := []string{fmt.Sprintf("prpr — @%s — %d open PRs", m.snapshot.Login, len(m.visiblePRs))}
+	lines := []string{m.titleLine(fmt.Sprintf("prpr — @%s — %d open PRs", m.snapshot.Login, len(m.visiblePRs)))}
 	if m.selectedRepository == "" {
 		lines = append(lines, "Repository: All repositories")
 	} else {
@@ -401,6 +415,21 @@ func (m *model) listLines() []string {
 	}
 	lines = append(lines, status)
 	return append(lines, m.helpLines(keyMap.listHelp)...)
+}
+
+// titleLine puts a refresh indicator in the top-right corner while a fetch
+// replaces the rows on screen. The title is truncated to keep it visible.
+func (m *model) titleLine(title string) string {
+	if !m.refreshing() {
+		return title
+	}
+	indicator := m.spinner.View() + " Refreshing"
+	space := m.width - lipgloss.Width(indicator) - 1
+	if space < 1 {
+		return indicator
+	}
+	title = ansi.Truncate(title, space, "…")
+	return title + strings.Repeat(" ", m.width-lipgloss.Width(title)-lipgloss.Width(indicator)) + indicator
 }
 
 func singleLine(value string) string {
