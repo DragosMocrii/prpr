@@ -2,14 +2,15 @@
 
 ## Project
 
-`prpr` monitors open pull requests authored by the active GitHub CLI account, including drafts, across repositories visible to that account.
+`prpr` monitors open pull requests authored by the active GitHub CLI account, including drafts, across repositories visible to that account, and open pull requests that request the account's review (`review-requested:@me`).
 
 - `cmd/prpr/main.go` wires configuration, the GitHub client, and the Bubble Tea program.
 - `internal/github` invokes `gh` and decodes GitHub API responses.
 - `internal/preferences` stores per-account repository scope.
 - `internal/tui/model.go` owns app transitions and scope state.
 - `internal/tui/repository_picker.go` owns repository-picker input and requests.
-- `internal/tui/pr_table.go` owns pull-request table layout, links, and the page indicator.
+- `internal/tui/pr_pane.go` owns the two pull-request panes: focus, layout, per-pane selection, and the page indicator.
+- `internal/tui/pr_table.go` owns pull-request table columns and links.
 - `internal/tui/keys.go` owns key bindings, their enabled state, and per-screen help.
 
 ## Development commands
@@ -31,11 +32,12 @@ Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package 
 
 - Do not store GitHub tokens. Runtime GitHub access goes through the user's active `gh` account.
 - Preserve the authored, open pull-request query, pagination, updated-descending ordering, and draft status.
+- Preserve the review-request query `is:pr is:open review-requested:@me archived:false sort:updated-desc`. Both lists are fetched and replaced together.
 - A missing saved account choice is different from a saved empty repository value: missing prompts for a choice; empty means the user explicitly chose All repositories. Restoring a saved choice must not write preferences. `chooseRepository` is the explicit commit-and-save path.
 - Preference-save failures are nonfatal: keep the in-session selection and show the warning.
-- Keep the previous rows visible during a refresh only while the refresh indicator is shown, and clear them when a fetch fails; do not show stale results as current.
+- Keep both panes' previous rows visible during a refresh only while the refresh indicator is shown, and clear them when a fetch fails; do not show stale results as current.
 - Keep picker cancellation and request-ID checks so obsolete asynchronous results cannot change current state.
-- Pull-request identity is the visible-row index mapped through `visiblePRs` to the source snapshot. Do not identify rows by PR number alone.
+- Pull-request identity is the pane's visible-row index mapped through that pane's `visible` slice to its own source list (`PullRequests` or `ReviewRequests`). Do not identify rows by PR number alone.
 - Bubbles owns the pull-request table cursor and scrolling. Preserve ANSI/grapheme-aware width behavior and safe OSC 8 hyperlink targets.
 - Unknown mergeability is not a clean merge state, and mergeability says nothing about checks or review readiness.
 
