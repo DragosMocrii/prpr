@@ -207,7 +207,7 @@ func TestDecodeReviewPagesRejectsInvalidOrPartialResponses(t *testing.T) {
 	for name, data := range map[string]string{
 		"invalid JSON":   `not json`,
 		"no pages":       `[]`,
-		"GraphQL errors": `[{"data":{"search":null},"errors":[{"message":"rate limited"}]}]`,
+		"GraphQL errors": `[{"data":{"search":{"nodes":[],"pageInfo":{"hasNextPage":false}}},"errors":[{"message":"rate limited"}]}]`,
 		"missing search": `[{"data":{}}]`,
 	} {
 		t.Run(name, func(t *testing.T) {
