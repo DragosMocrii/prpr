@@ -10,7 +10,7 @@ func TestDecodePagesPreservesAllRowsAndOrder(t *testing.T) {
 		{"data":{"viewer":{"login":"octocat","pullRequests":{"nodes":[
 			{"number":12,"title":"Newest","url":"https://github.com/acme/one/pull/12","isDraft":true,"mergeable":"MERGEABLE","updatedAt":"2026-06-01T12:00:00Z","repository":{"nameWithOwner":"acme/one"}},
 			null,
-			{"number":8,"title":"Second","url":"https://github.com/acme/two/pull/8","isDraft":false,"mergeable":"CONFLICTING","updatedAt":"2026-05-31T12:00:00Z","repository":{"nameWithOwner":"acme/two"}}
+			{"number":8,"title":"Second","url":"https://github.com/acme/two/pull/8","isDraft":false,"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","updatedAt":"2026-05-31T12:00:00Z","repository":{"nameWithOwner":"acme/two"}}
 		],"pageInfo":{"hasNextPage":true,"endCursor":"cursor"}}}}},
 		{"data":{"viewer":{"login":"octocat","pullRequests":{"nodes":[
 			{"number":4,"title":"Oldest","url":"https://github.com/acme/one/pull/4","isDraft":false,"mergeable":"UNKNOWN","updatedAt":"2026-05-30T12:00:00Z","repository":{"nameWithOwner":"acme/one"}}
@@ -29,12 +29,12 @@ func TestDecodePagesPreservesAllRowsAndOrder(t *testing.T) {
 	}
 	want := []PullRequest{
 		{Number: 12, Title: "Newest", Repository: "acme/one", Draft: true, Mergeable: "MERGEABLE", UpdatedAt: time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)},
-		{Number: 8, Title: "Second", Repository: "acme/two", Mergeable: "CONFLICTING", UpdatedAt: time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)},
+		{Number: 8, Title: "Second", Repository: "acme/two", Mergeable: "CONFLICTING", MergeState: "DIRTY", UpdatedAt: time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)},
 		{Number: 4, Title: "Oldest", Repository: "acme/one", Mergeable: "UNKNOWN", UpdatedAt: time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)},
 	}
 	for i, expected := range want {
 		got := snapshot.PullRequests[i]
-		if got.Number != expected.Number || got.Title != expected.Title || got.Repository != expected.Repository || got.Draft != expected.Draft || got.Mergeable != expected.Mergeable || !got.UpdatedAt.Equal(expected.UpdatedAt) {
+		if got.Number != expected.Number || got.Title != expected.Title || got.Repository != expected.Repository || got.Draft != expected.Draft || got.Mergeable != expected.Mergeable || got.MergeState != expected.MergeState || !got.UpdatedAt.Equal(expected.UpdatedAt) {
 			t.Errorf("pull request %d = %+v, want %+v", i, got, expected)
 		}
 	}
@@ -167,7 +167,7 @@ func TestValidRepositoryName(t *testing.T) {
 func TestDecodeReviewPagesPreservesOrderAndSkipsNonPullRequests(t *testing.T) {
 	data := []byte(`[
 		{"data":{"search":{"nodes":[
-			{"number":45,"title":"Bump deps","url":"https://github.com/acme/api/pull/45","isDraft":false,"mergeable":"MERGEABLE","updatedAt":"2026-06-02T12:00:00Z","author":{"login":"bob"},"repository":{"nameWithOwner":"acme/api"}},
+			{"number":45,"title":"Bump deps","url":"https://github.com/acme/api/pull/45","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","updatedAt":"2026-06-02T12:00:00Z","author":{"login":"bob"},"repository":{"nameWithOwner":"acme/api"}},
 			null,
 			{},
 			{"number":9,"title":"Ghost","url":"https://github.com/acme/lib/pull/9","isDraft":true,"mergeable":"UNKNOWN","updatedAt":"2026-06-01T12:00:00Z","author":null,"repository":{"nameWithOwner":"acme/lib"}}
@@ -181,7 +181,7 @@ func TestDecodeReviewPagesPreservesOrderAndSkipsNonPullRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []PullRequest{
-		{Number: 45, Title: "Bump deps", URL: "https://github.com/acme/api/pull/45", Repository: "acme/api", Mergeable: "MERGEABLE", Author: "bob", UpdatedAt: time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)},
+		{Number: 45, Title: "Bump deps", URL: "https://github.com/acme/api/pull/45", Repository: "acme/api", Mergeable: "MERGEABLE", MergeState: "BLOCKED", Author: "bob", UpdatedAt: time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)},
 		{Number: 9, Title: "Ghost", URL: "https://github.com/acme/lib/pull/9", Repository: "acme/lib", Draft: true, Mergeable: "UNKNOWN", Author: "", UpdatedAt: time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)},
 		{Number: 3, Title: "Oldest", URL: "https://github.com/acme/api/pull/3", Repository: "acme/api", Mergeable: "CONFLICTING", Author: "carol", UpdatedAt: time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)},
 	}
@@ -190,7 +190,7 @@ func TestDecodeReviewPagesPreservesOrderAndSkipsNonPullRequests(t *testing.T) {
 	}
 	for i, expected := range want {
 		got := prs[i]
-		if got.Number != expected.Number || got.Title != expected.Title || got.URL != expected.URL || got.Repository != expected.Repository || got.Draft != expected.Draft || got.Mergeable != expected.Mergeable || got.Author != expected.Author || !got.UpdatedAt.Equal(expected.UpdatedAt) {
+		if got.Number != expected.Number || got.Title != expected.Title || got.URL != expected.URL || got.Repository != expected.Repository || got.Draft != expected.Draft || got.Mergeable != expected.Mergeable || got.MergeState != expected.MergeState || got.Author != expected.Author || !got.UpdatedAt.Equal(expected.UpdatedAt) {
 			t.Errorf("review request %d = %+v, want %+v", i, got, expected)
 		}
 	}

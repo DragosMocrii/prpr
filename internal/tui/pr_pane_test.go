@@ -357,7 +357,7 @@ func TestDualLayoutGivesEachPaneHeaderPlusTwoRows(t *testing.T) {
 }
 
 func TestMergeLegendOnlyWhenMyPRsIsDrawnWithRows(t *testing.T) {
-	const legend = "✓ clean"
+	const legend = "✓ ready"
 	m := newPaneModel(t, 80, 10, manyPRs(30), reviewPRs(30))
 	press(m, tea.Key{Code: tea.KeyTab})
 	if !m.layoutPanes().single || m.focus != paneReview {

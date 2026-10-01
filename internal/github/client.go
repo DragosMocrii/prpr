@@ -20,6 +20,9 @@ type PullRequest struct {
 	Author     string
 	Draft      bool
 	Mergeable  string
+	// MergeState is GitHub's mergeStateStatus, which accounts for branch
+	// protection; empty means unknown.
+	MergeState string
 	UpdatedAt  time.Time
 	// WaitingSince is when the pull request last became ready for review or,
 	// for a review request, when the viewer was last requested directly. It is
@@ -72,6 +75,7 @@ func pullRequestFields(bots bool) string {
         url
         isDraft
         mergeable
+        mergeStateStatus
         updatedAt
         createdAt
         additions
@@ -126,6 +130,7 @@ type pullRequestNode struct {
 	URL            string    `json:"url"`
 	Draft          bool      `json:"isDraft"`
 	Mergeable      string    `json:"mergeable"`
+	MergeState     string    `json:"mergeStateStatus"`
 	UpdatedAt      time.Time `json:"updatedAt"`
 	CreatedAt      time.Time `json:"createdAt"`
 	Additions      int       `json:"additions"`
@@ -181,6 +186,7 @@ func (node *pullRequestNode) pullRequest(login string, bots []Bot) PullRequest {
 		Repository:     node.Repository.NameWithOwner,
 		Draft:          node.Draft,
 		Mergeable:      node.Mergeable,
+		MergeState:     node.MergeState,
 		UpdatedAt:      node.UpdatedAt,
 		ReviewDecision: node.ReviewDecision,
 		Additions:      node.Additions,

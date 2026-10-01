@@ -95,7 +95,7 @@ func (m *model) rebuildPane(id paneID, height int, resetSelection bool) {
 		if pr.Draft {
 			state = "draft"
 		}
-		last := mergeableIcon(pr.Mergeable)
+		last := mergeIcon(pr.Draft, pr.Mergeable, pr.MergeState)
 		if review {
 			last = singleLine(pr.Author)
 		}
@@ -306,12 +306,23 @@ func safePullRequestURL(rawURL string) bool {
 		parsed.User == nil && strings.EqualFold(parsed.Host, parsed.Hostname())
 }
 
-func mergeableIcon(status string) string {
-	switch status {
-	case "MERGEABLE":
-		return coloredIcon("✓", "2")
-	case "CONFLICTING":
+// mergeIcon is green only when GitHub reports the pull request can be merged
+// under branch protection; conflicts win over every other state. Drafts are
+// read from isDraft, since GitHub deprecated the DRAFT merge state.
+func mergeIcon(draft bool, mergeable, state string) string {
+	if mergeable == "CONFLICTING" || state == "DIRTY" {
 		return coloredIcon("✗", "1")
+	}
+	if draft {
+		return "–"
+	}
+	switch state {
+	case "CLEAN", "HAS_HOOKS", "UNSTABLE":
+		return coloredIcon("✓", "2")
+	case "BLOCKED":
+		return coloredIcon("●", "3")
+	case "BEHIND":
+		return coloredIcon("↓", "3")
 	default:
 		return coloredIcon("?", "3")
 	}

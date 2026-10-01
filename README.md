@@ -102,7 +102,7 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 
 Repository filtering applies to both lists: the active account's authored open pull requests, and open pull requests requesting the account's review (`review-requested:@me`, including team requests). Both keep updated-descending order and draft status. The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no matching pull requests in either list remains selectable and shows empty scoped lists. Repository and All selections are saved separately for each GitHub account.
 
-The pull request table shows draft/open state and merge-conflict status (`MERGEABLE`, `CONFLICTING`, or unknown); mergeability does not represent checks or review readiness. The review list shows the PR author instead of merge status. 
+The pull request table shows draft/open state and whether GitHub would allow a merge now, branch protection included: `✓` ready (optional checks may still be failing), `●` blocked by required reviews or checks, `↓` behind the base branch, `✗` conflicts, `–` draft, and `?` not yet computed. The review list shows the PR author instead of merge status. 
 
 Both lists also show statistics columns, which narrow terminals drop in this order: Size, Review, CI, Bots, Age.
 

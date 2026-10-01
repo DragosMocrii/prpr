@@ -66,7 +66,7 @@ func TestNumberHyperlinksRejectUnsafeURLs(t *testing.T) {
 
 func TestAllTableShowsRepositoryIdentityAndIndependentStatuses(t *testing.T) {
 	m := newTableModel(t, 80, 12, []github.PullRequest{
-		{Number: 1, Repository: "acme/a", Title: "draft", Draft: true, Mergeable: "MERGEABLE"},
+		{Number: 1, Repository: "acme/a", Title: "draft", Draft: true, Mergeable: "MERGEABLE", MergeState: "CLEAN"},
 		{Number: 2, Repository: "acme/b", Title: "conflicts", Mergeable: "CONFLICTING"},
 		{Number: 3, Repository: "acme/c", Title: "unknown", Mergeable: "new-value"},
 	})
@@ -75,13 +75,41 @@ func TestAllTableShowsRepositoryIdentityAndIndependentStatuses(t *testing.T) {
 		t.Fatalf("All table columns = %+v", columns)
 	}
 	rows := m.panes[paneMine].table.Rows()
-	if rows[0][3] != "draft" || ansi.Strip(rows[0][4]) != "✓" || ansi.Strip(rows[1][4]) != "✗" || ansi.Strip(rows[2][4]) != "?" {
+	if rows[0][3] != "draft" || ansi.Strip(rows[0][4]) != "–" || ansi.Strip(rows[1][4]) != "✗" || ansi.Strip(rows[2][4]) != "?" {
 		t.Fatalf("state/merge rows = %+v", rows)
 	}
 	m.width = 79
 	m.rebuildPRTable(true)
 	if m.panes[paneMine].table.Columns()[0].Title == "Repository" || !strings.HasPrefix(m.panes[paneMine].table.Rows()[0][0], "acme/a — ") {
 		t.Fatalf("narrow All table lost repository identity: cols %+v row %+v", m.panes[paneMine].table.Columns(), m.panes[paneMine].table.Rows()[0])
+	}
+}
+
+func TestMergeColumnIsGreenOnlyWhenGitHubAllowsMerging(t *testing.T) {
+	for _, tc := range []struct {
+		draft                  bool
+		mergeable, state, want string
+		green                  bool
+	}{
+		{false, "MERGEABLE", "CLEAN", "✓", true},
+		{false, "MERGEABLE", "HAS_HOOKS", "✓", true},
+		{false, "MERGEABLE", "UNSTABLE", "✓", true},
+		{false, "MERGEABLE", "BLOCKED", "●", false},
+		{false, "MERGEABLE", "BEHIND", "↓", false},
+		{true, "MERGEABLE", "CLEAN", "–", false},
+		{true, "CONFLICTING", "DIRTY", "✗", false},
+		{false, "MERGEABLE", "", "?", false},
+		{false, "MERGEABLE", "UNKNOWN", "?", false},
+		{false, "CONFLICTING", "BLOCKED", "✗", false},
+		{false, "UNKNOWN", "DIRTY", "✗", false},
+		{false, "UNKNOWN", "UNKNOWN", "?", false},
+	} {
+		m := newTableModel(t, 80, 12, []github.PullRequest{{Number: 1, Repository: "acme/a", Title: "pr", Draft: tc.draft, Mergeable: tc.mergeable, MergeState: tc.state}})
+		columns := m.panes[paneMine].table.Columns()
+		cell := m.panes[paneMine].table.Rows()[0][4]
+		if columns[4].Title != "Merge" || ansi.Strip(cell) != tc.want || (cell == coloredIcon(tc.want, "2")) != tc.green {
+			t.Errorf("mergeable %s, state %q: merge cell %q, want %s (green %v)", tc.mergeable, tc.state, cell, tc.want, tc.green)
+		}
 	}
 }
 

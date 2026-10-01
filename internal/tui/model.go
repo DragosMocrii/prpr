@@ -562,7 +562,7 @@ func (m *model) listLines() []string {
 	if m.preferenceErr != nil {
 		fixed = strings.TrimLeft(fixed+"  "+m.preferenceErr.Error(), " ")
 	} else if !(layout.single && m.focus != paneMine) && len(m.panes[paneMine].visible) > 0 {
-		legend = "✓ clean  ✗ conflicts  ? unknown"
+		legend = "✓ ready  ● blocked  ↓ behind  ✗ conflicts  ? unknown"
 	}
 	lines = append(lines, m.statusLine(fixed, legend))
 	return append(lines, m.helpLines(keyMap.listHelp)...)
