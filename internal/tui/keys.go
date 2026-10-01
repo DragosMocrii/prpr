@@ -19,6 +19,7 @@ type keyMap struct {
 	PrevPane        key.Binding
 	Refresh         key.Binding
 	ClearMarks      key.Binding
+	Mouse           key.Binding
 	Retry           key.Binding
 	Login           key.Binding
 	Help            key.Binding
@@ -53,6 +54,7 @@ func defaultKeyMap() keyMap {
 		PrevPane:        key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev list")),
 		Refresh:         key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		ClearMarks:      key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "clear marks")),
+		Mouse:           key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mouse on")),
 		Retry:           key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
 		Login:           key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log in to GitHub")),
 		Help:            key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "more")),
@@ -97,6 +99,12 @@ func (m *model) syncKeys() {
 	k.PrevPane.SetEnabled(viewing)
 	k.Refresh.SetEnabled(idle && m.err == nil && m.picker == nil)
 	k.ClearMarks.SetEnabled(viewing && m.hasMarks())
+	k.Mouse.SetEnabled(viewing)
+	if m.mouse {
+		k.Mouse.SetHelp("m", "mouse off")
+	} else {
+		k.Mouse.SetHelp("m", "mouse on")
+	}
 	k.Retry.SetEnabled(idle && m.err != nil)
 	k.Login.SetEnabled(idle && m.err != nil)
 	k.Help.SetEnabled(viewing)
@@ -151,14 +159,14 @@ func (k keyMap) errorHelp() helpKeys {
 func (k keyMap) listHelp() helpKeys {
 	t := k.Table
 	return helpKeys{
-		short: []key.Binding{t.LineUp, t.LineDown, k.NextPane, k.PickRepository, k.AllRepositories, k.Refresh, k.Help, k.Quit, k.ClearMarks},
+		short: []key.Binding{t.LineUp, t.LineDown, k.NextPane, k.PickRepository, k.AllRepositories, k.Refresh, k.Help, k.Quit, k.Mouse, k.ClearMarks},
 		full: [][]key.Binding{
 			{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom},
 			{t.PageUp, t.PageDown, t.HalfPageUp, t.HalfPageDown},
 			{k.Pages.PrevPage, k.Pages.NextPage},
 			{k.NextPane, k.PrevPane},
 			{k.PickRepository, k.AllRepositories, k.Refresh, k.ClearMarks},
-			{k.Help, k.Quit},
+			{k.Mouse, k.Help, k.Quit},
 		},
 	}
 }

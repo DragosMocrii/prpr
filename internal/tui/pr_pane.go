@@ -186,12 +186,15 @@ func (m *model) applyFocusStyles() {
 	}
 }
 
-// Row backgrounds in 256-color indices: stripes are fainter than the
-// selected row on both dark and light terminals.
+// Row backgrounds in 256-color indices: stripes are fainter than the hovered
+// row, and the hovered row fainter than the selected one, on both dark and
+// light terminals.
 const (
 	darkStripe    = 235
+	darkHover     = 237
 	darkSelected  = 238
 	lightStripe   = 254
+	lightHover    = 253
 	lightSelected = 252
 )
 
@@ -214,19 +217,26 @@ func tableStyles(focused, dark bool) table.Styles {
 	}
 }
 
-// tableLines renders a pane's table with every other row striped. Cells end
+// tableLines renders a pane's table with every other row striped and the
+// hovered row highlighted. Cells end
 // their colors with full resets, so each row's background, the selected
 // row's included, is turned back on after every reset to span the row.
 func (m *model) tableLines(id paneID) []string {
 	pane := &m.panes[id]
 	lines := strings.Split(pane.table.View(), "\n")
-	stripe := lightStripe
+	stripe, hover := lightStripe, lightHover
 	if m.darkBackground {
-		stripe = darkStripe
+		stripe, hover = darkStripe, darkHover
+	}
+	hovered := -1
+	if row := m.hoveredRow(id); row >= 0 {
+		hovered = tableHeaderLen + row - firstVisibleRow(pane.table)
 	}
 	for i := tableHeaderLen; i < len(lines) && i-tableHeaderLen < len(pane.table.Rows()); i++ {
 		if background := leadingBackground(lines[i]); background != "" {
 			lines[i] = keepBackground(lines[i], background)
+		} else if i == hovered {
+			lines[i] = keepBackground(lines[i], fmt.Sprintf("\x1b[48;5;%dm", hover))
 		} else if (i-tableHeaderLen)%2 == 1 {
 			lines[i] = keepBackground(lines[i], fmt.Sprintf("\x1b[48;5;%dm", stripe))
 		}

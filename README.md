@@ -98,6 +98,7 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - In the repository picker, type to search (Left/Right move within the query), Enter to apply, Esc to cancel, Ctrl+U to clear, and Ctrl+R to reload accessible repositories. Enter `owner/repo` to check a repository outside the browsed list.
 - `r`: refresh using the currently active GitHub CLI account, and restart the auto-refresh timer.
 - `x`: clear every change mark and drop gone rows (shown only while there are marks).
+- `m`: turn mouse mode on or off; see [Mouse](#mouse).
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
 
@@ -131,6 +132,16 @@ After each refresh, the column at the left of each list marks what changed since
 - `−`: the pull request left the list (merged, closed, or the review request was withdrawn). It stays as a dimmed, struck-through row at the bottom of the list, and its link still opens it.
 
 Marks pile up across refreshes until you look: a row's mark clears when the cursor leaves it, and a gone row is removed the same way. `x` clears them all, and is the only way to clear a list's last remaining row. Each list's title counts its new, changed, and gone rows when that fits. A failed refresh does not reset the comparison, and switching GitHub accounts starts over. Changes are kept in memory only.
+
+### Mouse
+
+Mouse mode is off at start, so the terminal handles the mouse as usual. Press `m` to turn it on for the session:
+
+- Hovering highlights the row under the pointer. It does not move the selection or clear change marks.
+- Clicking a row selects it and focuses its list; clicking a list title focuses that list. Moving off a row this way clears its mark, as the keys do.
+- The scroll wheel moves the selection one row in the list under the pointer.
+
+While mouse mode is on, the terminal passes the mouse to prpr, so selecting text and clicking links need a modifier key: Shift in most terminals, Option in iTerm2. The key varies by terminal. Other screens, such as the repository picker, leave the mouse to the terminal. Press `m` again to turn it off.
 
 On short terminals only the focused list is shown. PR numbers use OSC 8 links in supporting terminals. The selected pull request URL is also shown below the table for copying. A refresh replaces the visible account and both lists together; failed refreshes do not leave stale results displayed. Gone rows are the one exception: they are kept on purpose and always marked as gone.
 

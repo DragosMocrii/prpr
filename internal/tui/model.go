@@ -65,6 +65,10 @@ type model struct {
 	quotaPaused         bool
 	// bots shows the Bots column and the selected PR's bot breakdown.
 	bots bool
+	// mouse is mouse mode: hover, click, and wheel input instead of the
+	// terminal's own selection. pointer is where the mouse was last seen.
+	mouse   bool
+	pointer pointer
 }
 
 type fetchFinishedMsg struct {
@@ -296,6 +300,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.KeyPressMsg:
 		return m, m.handleKey(msg)
+	case tea.MouseClickMsg, tea.MouseWheelMsg, tea.MouseMotionMsg:
+		m.handleMouse(msg.(tea.MouseMsg))
 	}
 	return m, nil
 }
@@ -337,6 +343,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			m.rebuildVisiblePRs()
 		})
+	case key.Matches(msg, k.Mouse):
+		m.toggleMouse()
 	case key.Matches(msg, k.Help):
 		m.help.ShowAll = !m.help.ShowAll
 		m.rebuildPRTable(false)
@@ -506,7 +514,10 @@ func (m *model) chooseRepository(repository string) {
 
 func (m *model) View() tea.View {
 	var lines []string
+	list := m.showingList()
 	switch {
+	case list:
+		lines = m.listLines()
 	case m.width < minimumWidth || m.height < minimumHeight:
 		lines = wrapWords("Terminal too small; resize or press Ctrl+C to quit.", m.width)
 	case m.loading && !m.loginActive && !m.refreshing():
@@ -517,10 +528,9 @@ func (m *model) View() tea.View {
 		lines = m.repositoryPickerLines()
 	case !m.scopeChosen:
 		lines = m.scopeChoiceLines()
-	case !m.panesFit():
-		lines = wrapWords("Terminal too small; resize or press Ctrl+C to quit.", m.width)
 	default:
-		lines = m.listLines()
+		// The panes do not fit.
+		lines = wrapWords("Terminal too small; resize or press Ctrl+C to quit.", m.width)
 	}
 	for i := range lines {
 		lines[i] = ansi.Truncate(lines[i], m.width, "…")
@@ -529,6 +539,10 @@ func (m *model) View() tea.View {
 	// Screens fill the terminal height; inline rendering lets the terminal
 	// scroll the top line away.
 	view.AltScreen = true
+	// Other screens leave the mouse to the terminal.
+	if list && m.mouse {
+		view.MouseMode = tea.MouseModeAllMotion
+	}
 	return view
 }
 
