@@ -278,11 +278,11 @@ func TestDecodeReviewPagesWaitsSinceViewerRequest(t *testing.T) {
 }
 
 func TestDecodeRateLimitReadsGraphQLPool(t *testing.T) {
-	got, err := decodeRateLimit([]byte(`{"resources":{"core":{"limit":5000,"remaining":4999,"reset":1790000000,"used":1},"graphql":{"limit":5000,"remaining":4981,"reset":1790838876,"used":19}},"rate":{"limit":5000}}`))
+	got, err := decodeRateLimit([]byte(`{"data":{"rateLimit":{"limit":5000,"remaining":4579,"resetAt":"2026-10-01T16:17:30Z"}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Limit != 5000 || got.Remaining != 4981 || !got.Reset.Equal(time.Unix(1790838876, 0)) {
+	if got.Limit != 5000 || got.Remaining != 4579 || !got.Reset.Equal(time.Date(2026, 10, 1, 16, 17, 30, 0, time.UTC)) {
 		t.Fatalf("rate limit = %+v", got)
 	}
 }
@@ -290,11 +290,13 @@ func TestDecodeRateLimitReadsGraphQLPool(t *testing.T) {
 func TestDecodeRateLimitRejectsInvalidResponses(t *testing.T) {
 	for name, data := range map[string]string{
 		"invalid JSON":      `not json`,
-		"missing resources": `{}`,
-		"missing graphql":   `{"resources":{"core":{"limit":5000,"remaining":1,"reset":1}}}`,
-		"missing remaining": `{"resources":{"graphql":{"limit":5000,"reset":1}}}`,
-		"zero limit":        `{"resources":{"graphql":{"limit":0,"remaining":0,"reset":1}}}`,
-		"negative":          `{"resources":{"graphql":{"limit":5000,"remaining":-1,"reset":1}}}`,
+		"missing data":      `{}`,
+		"null rate limit":   `{"data":{"rateLimit":null}}`,
+		"GraphQL error":     `{"data":{"rateLimit":{"limit":5000,"remaining":1,"resetAt":"2026-10-01T16:17:30Z"}},"errors":[{"message":"boom"}]}`,
+		"missing remaining": `{"data":{"rateLimit":{"limit":5000,"resetAt":"2026-10-01T16:17:30Z"}}}`,
+		"missing reset":     `{"data":{"rateLimit":{"limit":5000,"remaining":1}}}`,
+		"zero limit":        `{"data":{"rateLimit":{"limit":0,"remaining":0,"resetAt":"2026-10-01T16:17:30Z"}}}`,
+		"negative":          `{"data":{"rateLimit":{"limit":5000,"remaining":-1,"resetAt":"2026-10-01T16:17:30Z"}}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := decodeRateLimit([]byte(data)); err == nil {

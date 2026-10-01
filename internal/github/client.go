@@ -484,9 +484,14 @@ type RateLimit struct {
 	Reset     time.Time
 }
 
-// RateLimit reads the quota. GitHub does not count this request against it.
+// rateLimitQuery selects only rateLimit, which GitHub does not charge for.
+// The REST rate_limit endpoint's graphql resource does not track the points
+// GraphQL queries spend, so it is not used.
+const rateLimitQuery = `{ rateLimit { limit remaining resetAt } }`
+
+// RateLimit reads the quota without spending it.
 func (c *Client) RateLimit(ctx context.Context) (RateLimit, error) {
-	api := exec.CommandContext(ctx, c.path, "api", "--hostname", "github.com", "rate_limit")
+	api := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "-f", "query="+rateLimitQuery)
 	data, err := api.Output()
 	if err != nil {
 		return RateLimit{}, commandError("GitHub rate limit query failed", err)
@@ -496,23 +501,24 @@ func (c *Client) RateLimit(ctx context.Context) (RateLimit, error) {
 
 func decodeRateLimit(data []byte) (RateLimit, error) {
 	var response struct {
-		Resources *struct {
-			GraphQL *struct {
-				Limit     *int   `json:"limit"`
-				Remaining *int   `json:"remaining"`
-				Reset     *int64 `json:"reset"`
-			} `json:"graphql"`
-		} `json:"resources"`
+		Data struct {
+			RateLimit *struct {
+				Limit     *int       `json:"limit"`
+				Remaining *int       `json:"remaining"`
+				ResetAt   *time.Time `json:"resetAt"`
+			} `json:"rateLimit"`
+		} `json:"data"`
+		Errors []json.RawMessage `json:"errors"`
 	}
 	if err := json.Unmarshal(data, &response); err != nil {
 		return RateLimit{}, fmt.Errorf("decode GitHub rate limit: %w", err)
 	}
-	if response.Resources == nil || response.Resources.GraphQL == nil {
-		return RateLimit{}, errors.New("decode GitHub rate limit: no graphql resource")
+	if len(response.Errors) != 0 {
+		return RateLimit{}, fmt.Errorf("GitHub rate limit query returned GraphQL errors: %s", strings.Join(rawMessages(response.Errors), "; "))
 	}
-	pool := response.Resources.GraphQL
-	if pool.Limit == nil || pool.Remaining == nil || pool.Reset == nil || *pool.Limit <= 0 || *pool.Remaining < 0 {
-		return RateLimit{}, errors.New("decode GitHub rate limit: invalid graphql resource")
+	pool := response.Data.RateLimit
+	if pool == nil || pool.Limit == nil || pool.Remaining == nil || pool.ResetAt == nil || *pool.Limit <= 0 || *pool.Remaining < 0 {
+		return RateLimit{}, errors.New("decode GitHub rate limit: invalid rateLimit")
 	}
-	return RateLimit{Limit: *pool.Limit, Remaining: *pool.Remaining, Reset: time.Unix(*pool.Reset, 0)}, nil
+	return RateLimit{Limit: *pool.Limit, Remaining: *pool.Remaining, Reset: *pool.ResetAt}, nil
 }
