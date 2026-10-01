@@ -254,21 +254,74 @@ func TestFirstLoadFocusesReviewsWhenOwnListIsEmpty(t *testing.T) {
 	}
 }
 
-func TestSelectedRowStaysVisibleAfterJumps(t *testing.T) {
-	mine, review := manyPRs(40), reviewPRs(25)
-	m := newPaneModel(t, 100, 16, mine, review)
+func visibleIn(m *model, id paneID, number int) (string, bool) {
+	view := ansi.Strip(m.panes[id].table.View())
+	return view, strings.Contains(view, fmt.Sprintf("#%d", number))
+}
+
+func TestSelectedRowStaysVisibleAfterPageJump(t *testing.T) {
+	review := reviewPRs(25)
+	m := newPaneModel(t, 100, 16, manyPRs(40), review)
 	press(m, tea.Key{Code: tea.KeyTab})
 	press(m, tea.Key{Code: tea.KeyRight})
 	selected := review[m.panes[paneReview].table.Cursor()]
-	if view := ansi.Strip(m.panes[paneReview].table.View()); !strings.Contains(view, fmt.Sprintf("#%d", selected.Number)) {
+	if view, ok := visibleIn(m, paneReview, selected.Number); !ok {
 		t.Fatalf("review selection #%d not visible after page jump:\n%s", selected.Number, view)
 	}
+}
 
-	press(m, tea.Key{Code: tea.KeyTab})
+func TestSelectedRowStaysVisibleAfterRebuildRestore(t *testing.T) {
+	mine, review := manyPRs(40), reviewPRs(25)
+	m := newPaneModel(t, 100, 16, mine, review)
 	press(m, tea.Key{Code: 'G', Text: "G"})
 	m.startFetch()
 	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: mine, ReviewRequests: review}})
-	if view := ansi.Strip(m.panes[paneMine].table.View()); !strings.Contains(view, "#40") {
+	if view, ok := visibleIn(m, paneMine, 40); !ok {
 		t.Fatalf("mine selection #40 not visible after refresh:\n%s", view)
+	}
+}
+
+func TestSelectedRowStaysVisibleAfterSelectPR(t *testing.T) {
+	mine, review := manyPRs(40), reviewPRs(25)
+	m := newPaneModel(t, 100, 16, mine, review)
+	press(m, tea.Key{Code: 'G', Text: "G"})
+	reordered := append([]github.PullRequest(nil), mine...)
+	moved := reordered[39]
+	reordered = append(reordered[:39], reordered[40:]...)
+	reordered = append(reordered[:30], append([]github.PullRequest{moved}, reordered[30:]...)...)
+	m.startFetch()
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: reordered, ReviewRequests: review}})
+	pr, ok := m.paneSelectedPR(paneMine)
+	if !ok || pr.Number != 40 {
+		t.Fatalf("selected = %+v, %v; want #40", pr, ok)
+	}
+	if view, ok := visibleIn(m, paneMine, 40); !ok {
+		t.Fatalf("selection #40 not visible after reorder:\n%s", view)
+	}
+}
+
+func TestSelectedRowStaysVisibleAfterMultiRowKeys(t *testing.T) {
+	mine := manyPRs(40)
+	m := newPaneModel(t, 100, 16, mine, reviewPRs(25))
+	keys := []tea.Key{{Code: tea.KeyPgDown}, {Code: 'd', Text: "d"}, {Code: tea.KeyPgDown}, {Code: 'd', Text: "d"}, {Code: 'd', Text: "d"}, {Code: tea.KeyPgDown},
+		{Code: tea.KeyPgUp}, {Code: 'u', Text: "u"}, {Code: tea.KeyPgUp}, {Code: 'u', Text: "u"}}
+	for i, k := range keys {
+		press(m, k)
+		pr, ok := m.paneSelectedPR(paneMine)
+		if !ok {
+			t.Fatalf("press %d: no selection", i)
+		}
+		if view, ok := visibleIn(m, paneMine, pr.Number); !ok {
+			t.Fatalf("press %d (%v): selection #%d not visible:\n%s", i, k, pr.Number, view)
+		}
+	}
+}
+
+func TestSelectedRowStaysVisibleAfterResize(t *testing.T) {
+	m := newPaneModel(t, 100, 16, manyPRs(40), reviewPRs(25))
+	press(m, tea.Key{Code: 'G', Text: "G"})
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 18})
+	if view, ok := visibleIn(m, paneMine, 40); !ok {
+		t.Fatalf("mine selection #40 not visible after resize:\n%s", view)
 	}
 }

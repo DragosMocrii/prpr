@@ -61,7 +61,7 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - Tab / Shift+Tab: switch between **My PRs** and **Review requested**. Each list keeps its own selection and scroll position; navigation keys move only the focused list.
 - `?`: show or hide all key bindings.
 - `p`: find and select a repository to filter both lists; choose `All repositories` to clear the filter.
-- `c`: clear the repository filter and show all authored open PRs.
+- `c`: clear the repository filter and show all authored open PRs and review requests.
 - In the repository picker, type to search (Left/Right move within the query), Enter to apply, Esc to cancel, Ctrl+U to clear, and Ctrl+R to reload accessible repositories. Enter `owner/repo` to check a repository outside the browsed list.
 - `r`: refresh using the currently active GitHub CLI account.
 - `l`: start GitHub CLI login from an error screen.

@@ -210,7 +210,7 @@ func (m *model) setFocus(id paneID) {
 
 // moveCursor selects row one step at a time. Bubbles' table keeps its
 // viewport in sync with the cursor only for incremental moves; SetCursor and
-// large MoveDown jumps can leave the selected row off-screen.
+// multi-row MoveDown/MoveUp jumps can leave the selected row off-screen.
 func moveCursor(t *table.Model, row int) {
 	row = min(max(row, 0), max(len(t.Rows())-1, 0))
 	for t.Cursor() > row {
