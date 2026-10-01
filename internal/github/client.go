@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -53,6 +54,11 @@ type AuthError struct {
 func (e *AuthError) Error() string { return e.Err.Error() }
 func (e *AuthError) Unwrap() error { return e.Err }
 
+// pageSize keeps each GraphQL request well inside GitHub's time limit of
+// about 10 seconds, after which it answers 502 or 504. With bot fields a
+// pull request takes roughly 0.15 seconds to resolve.
+const pageSize = 25
+
 // pullRequestFields are selected for both lists. Nested connections select no
 // pageInfo, so gh --paginate follows only the outer connection.
 func pullRequestFields(bots bool) string {
@@ -84,7 +90,7 @@ func pullRequestsQuery(bots bool) string {
 	return `query($endCursor: String) {
   viewer {
     login
-    pullRequests(first: 100, after: $endCursor, states: [OPEN],
+    pullRequests(first: ` + strconv.Itoa(pageSize) + `, after: $endCursor, states: [OPEN],
                  orderBy: {field: UPDATED_AT, direction: DESC}) {
       nodes {` + pullRequestFields(bots) + `
       }
@@ -98,7 +104,7 @@ func pullRequestsQuery(bots bool) string {
 // viewer directly or through one of the viewer's teams.
 func reviewRequestsQuery(bots bool) string {
 	return `query($endCursor: String) {
-  search(type: ISSUE, first: 100, after: $endCursor,
+  search(type: ISSUE, first: ` + strconv.Itoa(pageSize) + `, after: $endCursor,
          query: "is:pr is:open review-requested:@me archived:false sort:updated-desc") {
     nodes {
       ... on PullRequest {` + pullRequestFields(bots) + `
@@ -238,8 +244,21 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, &AuthError{Err: commandError("GitHub authentication check failed", err)}
 	}
 
+	// The lists are independent, so both queries run at once.
+	type output struct {
+		data []byte
+		err  error
+	}
+	reviews := make(chan output, 1)
+	go func() {
+		review := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+reviewRequestsQuery(len(c.bots) > 0))
+		data, err := review.Output()
+		reviews <- output{data, err}
+	}()
+
 	api := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+pullRequestsQuery(len(c.bots) > 0))
 	data, err := api.Output()
+	review := <-reviews
 	if err != nil {
 		return Snapshot{}, commandError("GitHub pull request query failed", err)
 	}
@@ -247,13 +266,10 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-
-	review := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+reviewRequestsQuery(len(c.bots) > 0))
-	data, err = review.Output()
-	if err != nil {
-		return Snapshot{}, commandError("GitHub review request query failed", err)
+	if review.err != nil {
+		return Snapshot{}, commandError("GitHub review request query failed", review.err)
 	}
-	snapshot.ReviewRequests, err = decodeReviewPages(data, snapshot.Login, c.bots)
+	snapshot.ReviewRequests, err = decodeReviewPages(review.data, snapshot.Login, c.bots)
 	if err != nil {
 		return Snapshot{}, err
 	}

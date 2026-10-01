@@ -79,7 +79,7 @@ prpr --bots 'Rabbit=coderabbitai'
 prpr --bots ''
 ```
 
-Bot reporting costs more GraphQL quota, mostly to read review threads: each page of up to 100 pull requests costs about 28 points, so a refresh with one page per list uses about 56 points instead of about 7.
+Bot reporting costs more GraphQL quota, mostly to read review threads: about 28 points per 100 pull requests listed, against about 3 without bots.
 
 Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository choice per GitHub account; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice.
 
