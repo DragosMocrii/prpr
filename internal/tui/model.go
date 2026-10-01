@@ -441,12 +441,15 @@ func (m *model) listLines() []string {
 		selectedURL = singleLine(pr.URL)
 	}
 	lines = append(lines, selectedURL)
-	status := "✓ clean  ✗ conflicts  ? unknown"
+	status := ""
+	if !(layout.single && m.focus != paneMine) && len(m.panes[paneMine].visible) > 0 {
+		status = "✓ clean  ✗ conflicts  ? unknown"
+	}
 	if m.preferenceErr != nil {
 		status = m.preferenceErr.Error()
 	}
 	if pane := m.focused(); len(pane.visible) > 0 && pane.pages.TotalPages > 1 {
-		status = m.pageIndicator() + "  " + status
+		status = strings.TrimRight(m.pageIndicator()+"  "+status, " ")
 	}
 	lines = append(lines, status)
 	return append(lines, m.helpLines(keyMap.listHelp)...)
