@@ -138,3 +138,85 @@ func TestAutoRefreshTitleFitsNarrowTerminalsWhileRefreshing(t *testing.T) {
 		assertBounded(t, m, width, 16)
 	}
 }
+
+func titleOf(m *model) string {
+	return ansi.Strip(m.listLines()[0])
+}
+
+func TestAutoRefreshCountdownShownAndResetByManualRefresh(t *testing.T) {
+	m := autoRefreshModel(t, 5*time.Minute)
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now }
+	m.startFetch()
+	if title := titleOf(m); strings.Contains(title, "refresh in") {
+		t.Fatalf("countdown shown while loading: %q", title)
+	}
+	finishFetch(m, aliceSnapshot())
+	if title := titleOf(m); !strings.HasSuffix(title, "refresh in 5:00") || !strings.Contains(title, "auto 5m") {
+		t.Fatalf("title after fetch = %q", title)
+	}
+	now = now.Add(28*time.Second + 500*time.Millisecond)
+	if title := titleOf(m); !strings.HasSuffix(title, "refresh in 4:32") {
+		t.Fatalf("title after 28.5s = %q", title)
+	}
+	press(m, tea.Key{Code: 'r', Text: "r"})
+	if title := titleOf(m); strings.Contains(title, "refresh in") || !strings.Contains(title, "Refreshing") {
+		t.Fatalf("title during manual refresh = %q", title)
+	}
+	finishFetch(m, aliceSnapshot())
+	if title := titleOf(m); !strings.HasSuffix(title, "refresh in 5:00") {
+		t.Fatalf("manual refresh did not reset the countdown: %q", title)
+	}
+}
+
+func TestAutoRefreshCountdownHiddenWithoutPendingRefresh(t *testing.T) {
+	m := autoRefreshModel(t, 0)
+	m.startFetch()
+	finishFetch(m, aliceSnapshot())
+	if title := titleOf(m); strings.Contains(title, "refresh in") {
+		t.Fatalf("countdown shown with auto-refresh off: %q", title)
+	}
+
+	m = autoRefreshModel(t, time.Minute)
+	m.startFetch()
+	finishFetch(m, aliceSnapshot())
+	press(m, tea.Key{Code: 'r', Text: "r"})
+	finishFetch(m, fetchFinishedMsg{err: &github.AuthError{Err: errors.New("logged out")}})
+	if m.countdownText() != "" {
+		t.Fatalf("countdown pending after an auth failure: %q", m.countdownText())
+	}
+}
+
+func TestCountdownTicksStopWhenRescheduledOrDue(t *testing.T) {
+	m := autoRefreshModel(t, time.Minute)
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now }
+	m.startFetch()
+	finishFetch(m, aliceSnapshot())
+	old := m.countdownGeneration
+	if _, cmd := m.Update(countdownTickMsg{generation: old}); cmd == nil {
+		t.Fatal("current countdown tick did not schedule the next one")
+	}
+	press(m, tea.Key{Code: 'p', Text: "p"})
+	m.Update(autoRefreshMsg{generation: m.refreshGeneration})
+	if _, cmd := m.Update(countdownTickMsg{generation: old}); cmd != nil {
+		t.Fatal("countdown tick from before a reschedule kept its chain alive")
+	}
+	now = now.Add(time.Minute)
+	if _, cmd := m.Update(countdownTickMsg{generation: m.countdownGeneration}); cmd != nil {
+		t.Fatal("countdown kept ticking once the refresh was due")
+	}
+}
+
+func TestCountdownFitsNarrowTerminals(t *testing.T) {
+	for _, width := range []int{40, 60} {
+		m := autoRefreshModel(t, time.Hour+time.Minute)
+		m.Update(tea.WindowSizeMsg{Width: width, Height: 16})
+		m.startFetch()
+		finishFetch(m, aliceSnapshot())
+		lines := assertBounded(t, m, width, 16)
+		if title := ansi.Strip(lines[0]); !strings.HasSuffix(title, "refresh in 1:01:00") {
+			t.Fatalf("width %d title = %q", width, title)
+		}
+	}
+}

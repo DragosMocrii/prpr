@@ -53,10 +53,15 @@ type model struct {
 	// refreshGeneration increments with every fetch so that auto-refresh
 	// ticks scheduled before it are ignored.
 	refreshGeneration uint64
-	quota             github.RateLimit
-	quotaKnown        bool
-	quotaStale        bool
-	quotaPaused       bool
+	// refreshDue is when the scheduled auto-refresh fires; zero when none is
+	// pending. countdownGeneration increments with every schedule so only the
+	// newest countdown tick chain keeps running.
+	refreshDue          time.Time
+	countdownGeneration uint64
+	quota               github.RateLimit
+	quotaKnown          bool
+	quotaStale          bool
+	quotaPaused         bool
 	// bots shows the Bots column and the selected PR's bot breakdown.
 	bots bool
 }
@@ -69,6 +74,8 @@ type fetchFinishedMsg struct {
 type loginFinishedMsg struct{ err error }
 
 type autoRefreshMsg struct{ generation uint64 }
+
+type countdownTickMsg struct{ generation uint64 }
 
 // New returns the app model. A positive refreshInterval refetches both lists
 // that long after each fetch finishes.
@@ -107,6 +114,7 @@ func (m *model) startFetch() tea.Cmd {
 	m.loading = true
 	m.loginActive = false
 	m.refreshGeneration++
+	m.refreshDue = time.Time{}
 	m.err = nil
 	client, ctx := m.client, m.ctx
 	return tea.Batch(func() tea.Msg {
@@ -122,9 +130,43 @@ func (m *model) scheduleAutoRefresh() tea.Cmd {
 		return nil
 	}
 	generation := m.refreshGeneration
-	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
+	m.refreshDue = m.now().Add(m.refreshInterval)
+	m.countdownGeneration++
+	return tea.Batch(tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
 		return autoRefreshMsg{generation: generation}
+	}), m.countdownTick())
+}
+
+// countdownTick redraws the countdown when its shown second changes. The
+// chain ends when the refresh is due, starts, or is rescheduled.
+func (m *model) countdownTick() tea.Cmd {
+	remaining := m.refreshDue.Sub(m.now())
+	if m.refreshDue.IsZero() || remaining <= 0 {
+		return nil
+	}
+	delay := remaining % time.Second
+	if delay == 0 {
+		delay = time.Second
+	}
+	generation := m.countdownGeneration
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		return countdownTickMsg{generation: generation}
 	})
+}
+
+// countdownText is the time left before the auto-refresh, rounded up to the
+// second, or empty when none is pending.
+func (m *model) countdownText() string {
+	if m.refreshDue.IsZero() {
+		return ""
+	}
+	seconds := int((m.refreshDue.Sub(m.now()) + time.Second - 1) / time.Second)
+	seconds = max(seconds, 0)
+	text := fmt.Sprintf("%d:%02d", seconds/60%60, seconds%60)
+	if seconds >= 3600 {
+		text = fmt.Sprintf("%d:%02d:%02d", seconds/3600, seconds/60%60, seconds%60)
+	}
+	return "refresh in " + text
 }
 
 // refreshing reports whether a fetch is replacing rows that are still shown.
@@ -166,6 +208,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleRepositoryLookupFinished(msg)
 	case rateLimitMsg, quotaTickMsg:
 		return m, m.handleQuota(msg)
+	case countdownTickMsg:
+		if msg.generation != m.countdownGeneration {
+			return m, nil
+		}
+		return m, m.countdownTick()
 	case autoRefreshMsg:
 		if msg.generation != m.refreshGeneration {
 			return m, nil
@@ -440,7 +487,7 @@ func (m *model) scopeChoiceLines() []string {
 		all = "> Show all my PRs"
 	}
 	return append([]string{
-		m.titleLine(fmt.Sprintf("prpr — @%s", m.snapshot.Login)),
+		m.titleLine(fmt.Sprintf("prpr — @%s", m.snapshot.Login), ""),
 		"What would you like to watch?",
 		pick,
 		all,
@@ -484,7 +531,7 @@ func (m *model) listLines() []string {
 	if m.refreshInterval > 0 {
 		title += " · auto " + intervalText(m.refreshInterval)
 	}
-	lines := []string{m.titleLine(title)}
+	lines := []string{m.titleLine(title, m.countdownText())}
 	layout := m.layoutPanes()
 	for _, id := range paneIDs {
 		if layout.single && id != m.focus {
@@ -521,12 +568,16 @@ func (m *model) listLines() []string {
 }
 
 // titleLine puts a refresh indicator in the top-right corner while a fetch
-// replaces the rows on screen. The title is truncated to keep it visible.
-func (m *model) titleLine(title string) string {
-	if !m.refreshing() {
+// replaces the rows on screen, and otherwise the countdown when one is given.
+// The title is truncated to keep the corner visible.
+func (m *model) titleLine(title, countdown string) string {
+	indicator := countdown
+	if m.refreshing() {
+		indicator = m.spinner.View() + " Refreshing"
+	}
+	if indicator == "" {
 		return title
 	}
-	indicator := m.spinner.View() + " Refreshing"
 	space := m.width - lipgloss.Width(indicator) - 1
 	if space < 1 {
 		return indicator

@@ -67,7 +67,7 @@ prpr --refresh 10m
 prpr --refresh 0
 ```
 
-The title shows the active interval. A manual refresh restarts the timer. Auto-refresh waits while the repository picker, the first-run repository prompt, or GitHub login is open, and retries failed fetches except authentication failures, which need `l`.
+The title shows the active interval, and its top-right corner counts down to the next refresh. A manual refresh restarts the timer. Auto-refresh waits while the repository picker, the first-run repository prompt, or GitHub login is open, and retries failed fetches except authentication failures, which need `l`.
 
 The status line shows the remaining GitHub GraphQL quota and its reset time (for example `API 4,981/5,000 · resets 06:14`), read every 10 seconds with a GraphQL query for the rate limit alone, which GitHub does not count against the quota. The quota is shared by everything using your GitHub account. It turns yellow below 20% and red below 5%, is marked `?` when the latest read failed. On narrow terminals the merge legend is dropped first, then the reset time, then the quota shortens to bare numbers and finally hides.
 
