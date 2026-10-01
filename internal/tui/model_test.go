@@ -164,11 +164,10 @@ func TestFailedRefreshDoesNotExposeStaleRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := testModel(store, 80, 24)
-	m.snapshot = github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{{Number: 7}}}
-	m.filterLogin, m.scopeChosen = "alice", true
+	updateSnapshot(m, "alice", github.PullRequest{Number: 7, Repository: "acme/a"})
 	m.startFetch()
-	if len(m.snapshot.PullRequests) != 0 || !m.loading {
-		t.Fatalf("refresh did not clear old list while loading: %+v", m)
+	if !m.loading || !m.refreshing() || len(m.visiblePRs) != 1 {
+		t.Fatalf("refresh did not keep rows under an indicator: loading %t refreshing %t visible %v", m.loading, m.refreshing(), m.visiblePRs)
 	}
 	m.Update(fetchFinishedMsg{err: errors.New("offline")})
 	if len(m.snapshot.PullRequests) != 0 || m.snapshot.Login != "" || m.loading || m.err == nil {
@@ -199,5 +198,40 @@ func TestDisabledKeysDoNothing(t *testing.T) {
 	}
 	if m.scopeChosen || m.picker != nil || m.loading || m.help.ShowAll {
 		t.Fatalf("scope choice accepted list keys: chosen %t picker %v loading %t help %t", m.scopeChosen, m.picker, m.loading, m.help.ShowAll)
+	}
+}
+
+func TestRefreshKeepsRowsNavigableAndRestoresSelection(t *testing.T) {
+	store := testPreferences(t)
+	if err := store.Save("alice", ""); err != nil {
+		t.Fatal(err)
+	}
+	m := testModel(store, 80, 24)
+	prs := []github.PullRequest{
+		{Number: 1, Repository: "acme/a"},
+		{Number: 1, Repository: "acme/b"},
+		{Number: 2, Repository: "acme/a"},
+	}
+	updateSnapshot(m, "alice", prs...)
+	press(m, tea.Key{Code: 'r', Text: "r"})
+	if !m.refreshing() {
+		t.Fatal("r did not start a refresh")
+	}
+	press(m, tea.Key{Code: 'j', Text: "j"})
+	press(m, tea.Key{Code: 'p', Text: "p"})
+	press(m, tea.Key{Code: 'c', Text: "c"})
+	press(m, tea.Key{Code: 'r', Text: "r"})
+	if m.prTable.Cursor() != 1 || m.picker != nil {
+		t.Fatalf("refresh keys: cursor %d picker %v", m.prTable.Cursor(), m.picker)
+	}
+	// The selected acme/b #1 moves to the top; selection follows it, not the row index.
+	updateSnapshot(m, "alice", prs[1], prs[0], prs[2])
+	if selected, ok := m.selectedPR(); !ok || selected.Repository != "acme/b" || selected.Number != 1 || m.refreshing() {
+		t.Fatalf("selection after refresh = %+v, %v (refreshing %t)", selected, ok, m.refreshing())
+	}
+	press(m, tea.Key{Code: 'r', Text: "r"})
+	updateSnapshot(m, "alice", prs[0], prs[2])
+	if selected, ok := m.selectedPR(); !ok || selected.Repository != "acme/a" || selected.Number != 1 {
+		t.Fatalf("selection after selected PR closed = %+v, %v", selected, ok)
 	}
 }

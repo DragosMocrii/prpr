@@ -77,7 +77,9 @@ func (m *model) syncKeys() {
 	ready := idle && m.err == nil && m.picker == nil
 	scopeChoice := ready && !m.scopeChosen && m.snapshot.Login != ""
 	browsing := ready && m.scopeChosen && m.snapshot.Login != ""
-	rows := browsing && len(m.visiblePRs) > 0
+	// Rows kept on screen during a refresh stay navigable.
+	viewing := !m.loginActive && m.err == nil && m.picker == nil && m.scopeChosen && m.snapshot.Login != ""
+	rows := viewing && len(m.visiblePRs) > 0
 
 	k.ChoiceUp.SetEnabled(scopeChoice)
 	k.ChoiceDown.SetEnabled(scopeChoice)
@@ -87,7 +89,7 @@ func (m *model) syncKeys() {
 	k.Refresh.SetEnabled(idle && m.err == nil && m.picker == nil)
 	k.Retry.SetEnabled(idle && m.err != nil)
 	k.Login.SetEnabled(idle && m.err != nil)
-	k.Help.SetEnabled(browsing)
+	k.Help.SetEnabled(viewing)
 	if m.help.ShowAll {
 		k.Help.SetHelp("?", "less")
 	} else {
