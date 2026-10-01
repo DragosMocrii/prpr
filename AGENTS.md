@@ -2,7 +2,7 @@
 
 ## Project
 
-`prpr` monitors open pull requests authored by the active GitHub CLI account, including drafts, across repositories visible to that account, and open pull requests that request the account's review (`review-requested:@me`).
+`prpr` monitors open pull requests authored by the active GitHub CLI account, including drafts, across repositories visible to that account, and open pull requests that request the account's review directly (`user-review-requested:@me`); team requests are excluded.
 
 - `cmd/prpr/main.go` wires configuration, the GitHub client, and the Bubble Tea program.
 - `internal/github` invokes `gh` and decodes GitHub API responses; `bots.go` parses the bot list and derives each bot's review state.
@@ -33,7 +33,7 @@ Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package 
 
 - Do not store GitHub tokens. Runtime GitHub access goes through the user's active `gh` account.
 - Preserve the authored, open pull-request query, pagination, updated-descending ordering, and draft status.
-- Preserve the review-request query `is:pr is:open review-requested:@me archived:false sort:updated-desc`. Both lists are fetched and replaced together.
+- Preserve the review-request query `is:pr is:open user-review-requested:@me archived:false sort:updated-desc`. Both lists are fetched and replaced together.
 - A missing saved account choice is different from a saved empty repository value: missing prompts for a choice; empty means the user explicitly chose All repositories. Restoring a saved choice must not write preferences. `chooseRepository` is the explicit commit-and-save path.
 - Preference-save failures are nonfatal: keep the in-session selection and show the warning.
 - Keep both panes' previous rows visible during a refresh only while the refresh indicator is shown, and clear them when a fetch fails; do not show stale results as current.

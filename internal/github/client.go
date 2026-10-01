@@ -105,11 +105,11 @@ func pullRequestsQuery(bots bool) string {
 }
 
 // reviewRequestsQuery lists open pull requests that request a review from the
-// viewer directly or through one of the viewer's teams.
+// viewer directly; requests to the viewer's teams are excluded.
 func reviewRequestsQuery(bots bool) string {
 	return `query($endCursor: String) {
   search(type: ISSUE, first: ` + strconv.Itoa(pageSize) + `, after: $endCursor,
-         query: "is:pr is:open review-requested:@me archived:false sort:updated-desc") {
+         query: "is:pr is:open user-review-requested:@me archived:false sort:updated-desc") {
     nodes {
       ... on PullRequest {` + pullRequestFields(bots) + `
         author { login }

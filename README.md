@@ -1,6 +1,6 @@
 # prpr
 
-`prpr` is a terminal app for monitoring open pull requests authored by the active GitHub CLI account. It includes drafts and pulls across repositories visible to that account, and lists open pull requests that request a review from you or one of your teams in a second pane.
+`prpr` is a terminal app for monitoring open pull requests authored by the active GitHub CLI account. It includes drafts and pulls across repositories visible to that account, and lists open pull requests that request a review from you directly in a second pane; requests to your teams, such as code-owner teams, are left out.
 
 ## Requirements
 
@@ -100,13 +100,13 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
 
-Repository filtering applies to both lists: the active account's authored open pull requests, and open pull requests requesting the account's review (`review-requested:@me`, including team requests). Both keep updated-descending order and draft status. The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no matching pull requests in either list remains selectable and shows empty scoped lists. Repository and All selections are saved separately for each GitHub account.
+Repository filtering applies to both lists: the active account's authored open pull requests, and open pull requests requesting the account's review (`user-review-requested:@me`, which excludes requests to the account's teams). Both keep updated-descending order and draft status. The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no matching pull requests in either list remains selectable and shows empty scoped lists. Repository and All selections are saved separately for each GitHub account.
 
 The pull request table shows draft/open state and whether GitHub would allow a merge now, branch protection included: `✓` ready (optional checks may still be failing), `●` blocked by required reviews or checks, `↓` behind the base branch, `✗` conflicts, `–` draft, and `?` not yet computed. The review list shows the PR author instead of merge status. 
 
 Both lists also show statistics columns, which narrow terminals drop in this order: Size, Review, CI, Bots, Age.
 
-- **Age**: how long the PR has waited. In **My PRs** it counts from when the PR was last marked ready for review, or from when it was opened if it was never a draft; drafts show `—`. In **Review requested** it counts from the latest review request naming you directly, and falls back to the ready-for-review time for team-only requests. Ages are computed when the lists load, refresh, resize, or change scope, so between refreshes they show the age as of the last update.
+- **Age**: how long the PR has waited. In **My PRs** it counts from when the PR was last marked ready for review, or from when it was opened if it was never a draft; drafts show `—`. In **Review requested** it counts from the latest review request naming you directly, and falls back to the ready-for-review time when that request is not found. Ages are computed when the lists load, refresh, resize, or change scope, so between refreshes they show the age as of the last update.
 - **CI**: the head commit's check rollup — passing, failing, pending, or `–` when there are no checks.
 - **Review**: the review decision (approved, changes requested, review required, or `–` when none applies) followed by the number of current approvals.
 - **Size**: lines added and removed.

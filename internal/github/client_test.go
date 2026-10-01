@@ -1,6 +1,7 @@
 package github
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -268,7 +269,7 @@ func TestDecodeReviewPagesWaitsSinceViewerRequest(t *testing.T) {
 	}
 	for i, want := range []time.Time{
 		time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC), // latest direct request, matched case-insensitively
-		time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC), // team-only request falls back to ready time
+		time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC), // no direct request event falls back to ready time
 		time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC), // a direct request on a draft still counts
 	} {
 		if !prs[i].WaitingSince.Equal(want) {
@@ -303,5 +304,15 @@ func TestDecodeRateLimitRejectsInvalidResponses(t *testing.T) {
 				t.Fatal("decode succeeded")
 			}
 		})
+	}
+}
+
+func TestReviewRequestsQueryExcludesTeamRequests(t *testing.T) {
+	for _, bots := range []bool{false, true} {
+		query := reviewRequestsQuery(bots)
+		if !strings.Contains(query, `"is:pr is:open user-review-requested:@me archived:false sort:updated-desc"`) ||
+			strings.Contains(query, " review-requested:") {
+			t.Errorf("review query does not ask for direct requests only:\n%s", query)
+		}
 	}
 }
