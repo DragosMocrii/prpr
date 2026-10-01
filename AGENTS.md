@@ -10,6 +10,7 @@
 - `internal/tui/model.go` owns app transitions and scope state.
 - `internal/tui/repository_picker.go` owns repository-picker input and requests.
 - `internal/tui/pr_pane.go` owns the two pull-request panes: focus, layout, per-pane selection, and the page indicator.
+- `internal/tui/quota.go` owns rate-limit polling and the status line.
 - `internal/tui/pr_table.go` owns pull-request table columns, statistics cells, and links.
 - `internal/tui/keys.go` owns key bindings, their enabled state, and per-screen help.
 
@@ -38,6 +39,7 @@ Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package 
 - Keep both panes' previous rows visible during a refresh only while the refresh indicator is shown, and clear them when a fetch fails; do not show stale results as current.
 - Keep picker cancellation and request-ID checks so obsolete asynchronous results cannot change current state.
 - Every fetch start increments `refreshGeneration`; auto-refresh ticks from an older generation are ignored, so any refresh restarts the timer. A due tick never closes the picker or skips the scope prompt; it reschedules instead. Authentication failures are not retried automatically.
+- Quota polling uses the free REST `rate_limit` endpoint, never a GraphQL query, and runs as a single chain: each result schedules the next tick. It pauses during login or after an authentication failure and resumes after a successful fetch.
 - Pull-request identity is the pane's visible-row index mapped through that pane's `visible` slice to its own source list (`PullRequests` or `ReviewRequests`). Do not identify rows by PR number alone.
 - Bubbles owns the pull-request table cursor and scrolling. Preserve ANSI/grapheme-aware width behavior and safe OSC 8 hyperlink targets.
 - Unknown mergeability is not a clean merge state, and mergeability says nothing about checks or review readiness.

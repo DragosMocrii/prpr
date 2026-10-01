@@ -425,3 +425,43 @@ func rawMessages(messages []json.RawMessage) []string {
 	}
 	return result
 }
+
+// RateLimit is the viewer's GraphQL quota, which pull request fetches use.
+type RateLimit struct {
+	Limit     int
+	Remaining int
+	Reset     time.Time
+}
+
+// RateLimit reads the quota. GitHub does not count this request against it.
+func (c *Client) RateLimit(ctx context.Context) (RateLimit, error) {
+	api := exec.CommandContext(ctx, c.path, "api", "--hostname", "github.com", "rate_limit")
+	data, err := api.Output()
+	if err != nil {
+		return RateLimit{}, commandError("GitHub rate limit query failed", err)
+	}
+	return decodeRateLimit(data)
+}
+
+func decodeRateLimit(data []byte) (RateLimit, error) {
+	var response struct {
+		Resources *struct {
+			GraphQL *struct {
+				Limit     *int   `json:"limit"`
+				Remaining *int   `json:"remaining"`
+				Reset     *int64 `json:"reset"`
+			} `json:"graphql"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		return RateLimit{}, fmt.Errorf("decode GitHub rate limit: %w", err)
+	}
+	if response.Resources == nil || response.Resources.GraphQL == nil {
+		return RateLimit{}, errors.New("decode GitHub rate limit: no graphql resource")
+	}
+	pool := response.Resources.GraphQL
+	if pool.Limit == nil || pool.Remaining == nil || pool.Reset == nil || *pool.Limit <= 0 || *pool.Remaining < 0 {
+		return RateLimit{}, errors.New("decode GitHub rate limit: invalid graphql resource")
+	}
+	return RateLimit{Limit: *pool.Limit, Remaining: *pool.Remaining, Reset: time.Unix(*pool.Reset, 0)}, nil
+}

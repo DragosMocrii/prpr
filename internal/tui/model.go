@@ -53,6 +53,10 @@ type model struct {
 	// refreshGeneration increments with every fetch so that auto-refresh
 	// ticks scheduled before it are ignored.
 	refreshGeneration uint64
+	quota             github.RateLimit
+	quotaKnown        bool
+	quotaStale        bool
+	quotaPaused       bool
 }
 
 type fetchFinishedMsg struct {
@@ -92,7 +96,7 @@ func newModel(ctx context.Context, client *github.Client, preferences *preferenc
 }
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(tea.RequestBackgroundColor, m.startFetch())
+	return tea.Batch(tea.RequestBackgroundColor, m.startFetch(), m.pollQuota())
 }
 
 func (m *model) startFetch() tea.Cmd {
@@ -157,6 +161,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleRepositoryListFinished(msg)
 	case repositoryLookupFinishedMsg:
 		return m, m.handleRepositoryLookupFinished(msg)
+	case rateLimitMsg, quotaTickMsg:
+		return m, m.handleQuota(msg)
 	case autoRefreshMsg:
 		if msg.generation != m.refreshGeneration {
 			return m, nil
@@ -223,6 +229,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.setFocus(focus)
 			}
+		}
+		if m.err == nil {
+			return m, tea.Batch(m.scheduleAutoRefresh(), m.resumeQuota())
 		}
 		return m, m.scheduleAutoRefresh()
 	case loginFinishedMsg:
@@ -441,7 +450,11 @@ func (m *model) errorLines() []string {
 	if errors.As(m.err, &authErr) {
 		message = m.err.Error()
 	}
-	return append(append([]string{message}, m.helpLines(keyMap.errorHelp)...),
+	lines := []string{message}
+	if quota := m.quotaText(0); quota != "" {
+		lines = append(lines, quota)
+	}
+	return append(append(lines, m.helpLines(keyMap.errorHelp)...),
 		"Login command: gh auth login --hostname github.com --web")
 }
 
@@ -486,17 +499,16 @@ func (m *model) listLines() []string {
 		selectedURL = singleLine(pr.URL)
 	}
 	lines = append(lines, selectedURL)
-	status := ""
-	if !(layout.single && m.focus != paneMine) && len(m.panes[paneMine].visible) > 0 {
-		status = "✓ clean  ✗ conflicts  ? unknown"
+	fixed, legend := "", ""
+	if pane := m.focused(); len(pane.visible) > 0 && pane.pages.TotalPages > 1 {
+		fixed = m.pageIndicator()
 	}
 	if m.preferenceErr != nil {
-		status = m.preferenceErr.Error()
+		fixed = strings.TrimLeft(fixed+"  "+m.preferenceErr.Error(), " ")
+	} else if !(layout.single && m.focus != paneMine) && len(m.panes[paneMine].visible) > 0 {
+		legend = "✓ clean  ✗ conflicts  ? unknown"
 	}
-	if pane := m.focused(); len(pane.visible) > 0 && pane.pages.TotalPages > 1 {
-		status = strings.TrimRight(m.pageIndicator()+"  "+status, " ")
-	}
-	lines = append(lines, status)
+	lines = append(lines, m.statusLine(fixed, legend))
 	return append(lines, m.helpLines(keyMap.listHelp)...)
 }
 

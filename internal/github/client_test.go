@@ -276,3 +276,30 @@ func TestDecodeReviewPagesWaitsSinceViewerRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeRateLimitReadsGraphQLPool(t *testing.T) {
+	got, err := decodeRateLimit([]byte(`{"resources":{"core":{"limit":5000,"remaining":4999,"reset":1790000000,"used":1},"graphql":{"limit":5000,"remaining":4981,"reset":1790838876,"used":19}},"rate":{"limit":5000}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Limit != 5000 || got.Remaining != 4981 || !got.Reset.Equal(time.Unix(1790838876, 0)) {
+		t.Fatalf("rate limit = %+v", got)
+	}
+}
+
+func TestDecodeRateLimitRejectsInvalidResponses(t *testing.T) {
+	for name, data := range map[string]string{
+		"invalid JSON":      `not json`,
+		"missing resources": `{}`,
+		"missing graphql":   `{"resources":{"core":{"limit":5000,"remaining":1,"reset":1}}}`,
+		"missing remaining": `{"resources":{"graphql":{"limit":5000,"reset":1}}}`,
+		"zero limit":        `{"resources":{"graphql":{"limit":0,"remaining":0,"reset":1}}}`,
+		"negative":          `{"resources":{"graphql":{"limit":5000,"remaining":-1,"reset":1}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeRateLimit([]byte(data)); err == nil {
+				t.Fatal("decode succeeded")
+			}
+		})
+	}
+}
