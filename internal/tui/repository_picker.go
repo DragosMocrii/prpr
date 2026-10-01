@@ -144,7 +144,7 @@ func (m *model) handleRepositoryLookupFinished(msg repositoryLookupFinishedMsg) 
 		return
 	}
 	m.closeRepositoryPicker()
-	m.applyRepository(msg.repository)
+	m.chooseRepository(msg.repository)
 }
 
 func sortedRepositoryNames(names []string) []string {

@@ -35,11 +35,12 @@ go install ./cmd/prpr
 - `j` / Down: select the next pull request.
 - `k` / Up: select the previous pull request.
 - `p`: find and select a repository to filter the authored open PR list; choose `All repositories` to clear the filter.
+- `c`: clear the repository filter and show all authored open PRs.
 - In the repository picker, type to search, Enter to apply, Esc to cancel, Ctrl+U to clear, and Ctrl+R to reload accessible repositories. Enter `owner/repo` to check a repository outside the browsed list.
 - `r`: refresh using the currently active GitHub CLI account.
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
 
-Repository filtering affects only the active account's authored open pull requests and preserves their updated-descending order and draft status. The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no authored open PRs remains selectable and shows an empty scoped list. The filter lasts for the current app session, survives same-account refreshes, and resets when the active account changes.
+Repository filtering affects only the active account's authored open pull requests and preserves their updated-descending order and draft status. The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no authored open PRs remains selectable and shows an empty scoped list. Repository and All selections are saved separately for each GitHub account in the user configuration directory.
 
-The selected pull request URL is shown below the list for copying. A refresh replaces the visible account and list together; failed refreshes do not leave stale results displayed.
+The pull request table shows draft/open state and merge-conflict status (`MERGEABLE`, `CONFLICTING`, or unknown); mergeability does not represent checks or review readiness. PR numbers use OSC 8 links in supporting terminals. The selected pull request URL is also shown below the table for copying. A refresh replaces the visible account and list together; failed refreshes do not leave stale results displayed.

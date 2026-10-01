@@ -17,6 +17,7 @@ type PullRequest struct {
 	URL        string
 	Repository string
 	Draft      bool
+	Mergeable  string
 	UpdatedAt  time.Time
 }
 
@@ -46,6 +47,7 @@ const pullRequestsQuery = `query($endCursor: String) {
         title
         url
         isDraft
+        mergeable
         updatedAt
         repository { nameWithOwner }
       }
@@ -204,6 +206,7 @@ func decodePages(data []byte) (Snapshot, error) {
 							Title      string    `json:"title"`
 							URL        string    `json:"url"`
 							Draft      bool      `json:"isDraft"`
+							Mergeable  string    `json:"mergeable"`
 							UpdatedAt  time.Time `json:"updatedAt"`
 							Repository struct {
 								NameWithOwner string `json:"nameWithOwner"`
@@ -239,6 +242,7 @@ func decodePages(data []byte) (Snapshot, error) {
 				URL:        node.URL,
 				Repository: node.Repository.NameWithOwner,
 				Draft:      node.Draft,
+				Mergeable:  node.Mergeable,
 				UpdatedAt:  node.UpdatedAt,
 			})
 		}

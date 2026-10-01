@@ -8,12 +8,12 @@ import (
 func TestDecodePagesPreservesAllRowsAndOrder(t *testing.T) {
 	data := []byte(`[
 		{"data":{"viewer":{"login":"octocat","pullRequests":{"nodes":[
-			{"number":12,"title":"Newest","url":"https://github.com/acme/one/pull/12","isDraft":true,"updatedAt":"2026-06-01T12:00:00Z","repository":{"nameWithOwner":"acme/one"}},
+			{"number":12,"title":"Newest","url":"https://github.com/acme/one/pull/12","isDraft":true,"mergeable":"MERGEABLE","updatedAt":"2026-06-01T12:00:00Z","repository":{"nameWithOwner":"acme/one"}},
 			null,
-			{"number":8,"title":"Second","url":"https://github.com/acme/two/pull/8","isDraft":false,"updatedAt":"2026-05-31T12:00:00Z","repository":{"nameWithOwner":"acme/two"}}
+			{"number":8,"title":"Second","url":"https://github.com/acme/two/pull/8","isDraft":false,"mergeable":"CONFLICTING","updatedAt":"2026-05-31T12:00:00Z","repository":{"nameWithOwner":"acme/two"}}
 		],"pageInfo":{"hasNextPage":true,"endCursor":"cursor"}}}}},
 		{"data":{"viewer":{"login":"octocat","pullRequests":{"nodes":[
-			{"number":4,"title":"Oldest","url":"https://github.com/acme/one/pull/4","isDraft":false,"updatedAt":"2026-05-30T12:00:00Z","repository":{"nameWithOwner":"acme/one"}}
+			{"number":4,"title":"Oldest","url":"https://github.com/acme/one/pull/4","isDraft":false,"mergeable":"UNKNOWN","updatedAt":"2026-05-30T12:00:00Z","repository":{"nameWithOwner":"acme/one"}}
 		],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
 	]`)
 
@@ -28,15 +28,18 @@ func TestDecodePagesPreservesAllRowsAndOrder(t *testing.T) {
 		t.Fatalf("got %d pull requests, want 3", len(snapshot.PullRequests))
 	}
 	want := []PullRequest{
-		{Number: 12, Title: "Newest", Repository: "acme/one", Draft: true, UpdatedAt: time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)},
-		{Number: 8, Title: "Second", Repository: "acme/two", UpdatedAt: time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)},
-		{Number: 4, Title: "Oldest", Repository: "acme/one", UpdatedAt: time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)},
+		{Number: 12, Title: "Newest", Repository: "acme/one", Draft: true, Mergeable: "MERGEABLE", UpdatedAt: time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)},
+		{Number: 8, Title: "Second", Repository: "acme/two", Mergeable: "CONFLICTING", UpdatedAt: time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)},
+		{Number: 4, Title: "Oldest", Repository: "acme/one", Mergeable: "UNKNOWN", UpdatedAt: time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)},
 	}
 	for i, expected := range want {
 		got := snapshot.PullRequests[i]
-		if got.Number != expected.Number || got.Title != expected.Title || got.Repository != expected.Repository || got.Draft != expected.Draft || !got.UpdatedAt.Equal(expected.UpdatedAt) {
+		if got.Number != expected.Number || got.Title != expected.Title || got.Repository != expected.Repository || got.Draft != expected.Draft || got.Mergeable != expected.Mergeable || !got.UpdatedAt.Equal(expected.UpdatedAt) {
 			t.Errorf("pull request %d = %+v, want %+v", i, got, expected)
 		}
+	}
+	if !snapshot.PullRequests[0].Draft || snapshot.PullRequests[0].Mergeable != "MERGEABLE" {
+		t.Fatalf("draft and mergeability were not independent: %+v", snapshot.PullRequests[0])
 	}
 }
 

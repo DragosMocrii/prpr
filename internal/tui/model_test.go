@@ -3,46 +3,162 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"prpr/internal/github"
+	"prpr/internal/preferences"
 )
 
-func TestNavigationKeepsEmptyListAtZero(t *testing.T) {
-	m := &model{ctx: context.Background(), snapshot: github.Snapshot{Login: "octocat"}, width: 80, height: 24}
-	m.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
-	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
-	if m.cursor != 0 || m.offset != 0 {
-		t.Fatalf("empty-list selection = (%d, %d), want (0, 0)", m.cursor, m.offset)
+func testPreferences(t *testing.T) *preferences.Store {
+	t.Helper()
+	store, err := preferences.Open(filepath.Join(t.TempDir(), "preferences.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+func updateSnapshot(m *model, login string, prs ...github.PullRequest) {
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: login, PullRequests: prs}})
+}
+
+func TestFreshAccountPromptsAndPickerCancellationDoesNotChoose(t *testing.T) {
+	store := testPreferences(t)
+	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 24}
+	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/repo"})
+	if m.scopeChosen || len(m.visiblePRs) != 1 || !strings.Contains(strings.Join(m.scopeChoiceLines(), "\n"), "Pick a repository") {
+		t.Fatalf("fresh account did not show the uncommitted choice: %+v", m)
+	}
+	press(m, tea.Key{Code: tea.KeyEnter})
+	if m.picker == nil {
+		t.Fatal("default Pick choice did not open the picker")
+	}
+	press(m, tea.Key{Code: tea.KeyEsc})
+	if m.scopeChosen || m.picker != nil {
+		t.Fatalf("cancelling picker committed scope: chosen %t picker %v", m.scopeChosen, m.picker)
+	}
+	if _, found := store.Lookup("alice"); found {
+		t.Fatal("cancelling picker persisted a choice")
 	}
 }
 
-func TestSuccessfulRefreshReplacesAccountAndClampsSelection(t *testing.T) {
-	m := &model{
-		ctx: context.Background(),
-		snapshot: github.Snapshot{Login: "old", PullRequests: []github.PullRequest{
-			{Number: 1}, {Number: 2}, {Number: 3}, {Number: 4},
-		}},
-		cursor: 3, offset: 2, width: 80, height: 8,
+func TestExplicitAllPersistsAndSuppressesPromptAfterReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	store, err := preferences.Open(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "new", PullRequests: []github.PullRequest{{Number: 9}}}})
-	if m.snapshot.Login != "new" || len(m.snapshot.PullRequests) != 1 || m.snapshot.PullRequests[0].Number != 9 {
-		t.Fatalf("snapshot after account replacement = %+v", m.snapshot)
+	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 24}
+	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/repo"})
+	press(m, tea.Key{Code: 'j', Text: "j"})
+	press(m, tea.Key{Code: tea.KeyEnter})
+	if !m.scopeChosen || m.selectedRepository != "" {
+		t.Fatalf("All selection = chosen %t repo %q", m.scopeChosen, m.selectedRepository)
 	}
-	if m.cursor != 0 || m.offset != 0 {
-		t.Fatalf("selection after shorter refresh = (%d, %d), want (0, 0)", m.cursor, m.offset)
+	reopened, err := preferences.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, found := reopened.Lookup("ALICE"); !found || got != "" {
+		t.Fatalf("saved explicit All = %q, %v", got, found)
+	}
+	next := &model{ctx: context.Background(), preferences: reopened, width: 80, height: 24}
+	updateSnapshot(next, "Alice", github.PullRequest{Number: 2, Repository: "acme/repo"})
+	if !next.scopeChosen || len(next.visiblePRs) != 1 {
+		t.Fatalf("reopened account still prompted or lost rows: chosen %t visible %v", next.scopeChosen, next.visiblePRs)
+	}
+}
+
+func TestAccountSwitchRestoresSavedScopeOrPrompts(t *testing.T) {
+	store := testPreferences(t)
+	if err := store.Save("alice", "acme/a"); err != nil {
+		t.Fatal(err)
+	}
+	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 24}
+	updateSnapshot(m, "Alice", github.PullRequest{Number: 1, Repository: "acme/a"}, github.PullRequest{Number: 2, Repository: "other/b"})
+	if !m.scopeChosen || m.selectedRepository != "acme/a" || len(m.visiblePRs) != 1 {
+		t.Fatalf("saved Alice scope not restored: chosen %t repo %q visible %v", m.scopeChosen, m.selectedRepository, m.visiblePRs)
+	}
+	m.preferenceErr = errors.New("Selection not saved: disk error")
+	updateSnapshot(m, "bob", github.PullRequest{Number: 3, Repository: "other/b"})
+	if m.scopeChosen || m.selectedRepository != "" || m.preferenceErr != nil {
+		t.Fatalf("unconfigured Bob inherited Alice state: chosen %t repo %q warning %v", m.scopeChosen, m.selectedRepository, m.preferenceErr)
+	}
+	m.chooseRepository("")
+	if got, found := store.Lookup("bob"); !found || got != "" {
+		t.Fatalf("Bob's explicit All choice was not saved: %q, %v", got, found)
+	}
+	updateSnapshot(m, "ALICE", github.PullRequest{Number: 4, Repository: "acme/a"})
+	if !m.scopeChosen || m.selectedRepository != "acme/a" || m.preferenceErr != nil || len(m.visiblePRs) != 1 {
+		t.Fatalf("switching back did not restore Alice state: chosen %t repo %q warning %v visible %v", m.scopeChosen, m.selectedRepository, m.preferenceErr, m.visiblePRs)
+	}
+}
+
+func TestSameAccountRefreshRetainsChosenEmptyScope(t *testing.T) {
+	store := testPreferences(t)
+	if err := store.Save("alice", "acme/empty"); err != nil {
+		t.Fatal(err)
+	}
+	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 24}
+	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/empty"})
+	m.preferenceErr = errors.New("Selection not saved: transient")
+	updateSnapshot(m, "alice", github.PullRequest{Number: 2, Repository: "acme/other"})
+	if !m.scopeChosen || m.selectedRepository != "acme/empty" || len(m.visiblePRs) != 0 || m.preferenceErr == nil {
+		t.Fatalf("same-account refresh changed choice: chosen %t repo %q visible %v warning %v", m.scopeChosen, m.selectedRepository, m.visiblePRs, m.preferenceErr)
+	}
+}
+
+func TestClearFilterPersistsAll(t *testing.T) {
+	store := testPreferences(t)
+	if err := store.Save("alice", "acme/repo"); err != nil {
+		t.Fatal(err)
+	}
+	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 24}
+	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/repo"})
+	press(m, tea.Key{Code: 'c', Text: "c"})
+	if !m.scopeChosen || m.selectedRepository != "" || len(m.visiblePRs) != 1 {
+		t.Fatalf("clear filter state = chosen %t repo %q visible %v", m.scopeChosen, m.selectedRepository, m.visiblePRs)
+	}
+	if got, found := store.Lookup("alice"); !found || got != "" {
+		t.Fatalf("clear filter was not persisted: %q, %v", got, found)
+	}
+}
+
+func TestPreferenceSaveFailureKeepsSessionChoiceUsable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	store, err := preferences.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 24}
+	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/repo"})
+	m.chooseRepository("acme/repo")
+	if !m.scopeChosen || m.selectedRepository != "acme/repo" || len(m.visiblePRs) != 1 || m.err != nil {
+		t.Fatalf("failed save made session selection unusable: %+v", m)
+	}
+	if m.preferenceErr == nil || !strings.Contains(strings.Join(m.listLines(), "\n"), "Selection not saved:") {
+		t.Fatalf("failed save warning missing from list: %v", m.preferenceErr)
+	}
+	if _, found := store.Lookup("alice"); found {
+		t.Fatal("failed save mutated the stored choice")
 	}
 }
 
 func TestFailedRefreshDoesNotExposeStaleRows(t *testing.T) {
-	m := &model{
-		ctx:      context.Background(),
-		snapshot: github.Snapshot{Login: "old", PullRequests: []github.PullRequest{{Number: 7}}},
-		width:    80, height: 24,
+	store := testPreferences(t)
+	if err := store.Save("alice", ""); err != nil {
+		t.Fatal(err)
 	}
+	m := &model{ctx: context.Background(), preferences: store, snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{{Number: 7}}}, width: 80, height: 24}
+	m.filterLogin, m.scopeChosen = "alice", true
 	m.startFetch()
 	if len(m.snapshot.PullRequests) != 0 || !m.loading {
 		t.Fatalf("refresh did not clear old list while loading: %+v", m)
@@ -51,98 +167,7 @@ func TestFailedRefreshDoesNotExposeStaleRows(t *testing.T) {
 	if len(m.snapshot.PullRequests) != 0 || m.snapshot.Login != "" || m.loading || m.err == nil {
 		t.Fatalf("failed refresh retained or hid stale state: %+v", m)
 	}
-}
-
-func TestSuccessfulRefreshToEmptyListResetsSelection(t *testing.T) {
-	m := &model{
-		ctx:      context.Background(),
-		snapshot: github.Snapshot{Login: "old", PullRequests: []github.PullRequest{{Number: 1}, {Number: 2}}},
-		cursor:   1, offset: 1, width: 80, height: 24,
-	}
-	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "new"}})
-	if m.snapshot.Login != "new" || len(m.snapshot.PullRequests) != 0 || m.cursor != 0 || m.offset != 0 {
-		t.Fatalf("empty refresh left stale selection/account state: %+v", m)
-	}
-}
-
-func TestFailedLoginReturnsToRetryableErrorState(t *testing.T) {
-	m := &model{ctx: context.Background(), loading: true, loginActive: true}
-	m.Update(loginFinishedMsg{err: errors.New("cancelled")})
-	if m.loading || m.loginActive || m.err == nil {
-		t.Fatalf("failed login state = loading:%t active:%t error:%v", m.loading, m.loginActive, m.err)
-	}
-}
-
-func TestRepositoryFilterKeepsInterleavedOrderAndSelectedIdentity(t *testing.T) {
-	m := &model{ctx: context.Background(), width: 80, height: 12}
-	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{
-		{Number: 1, Repository: "Acme/A", URL: "https://example.test/a/1", Draft: true},
-		{Number: 1, Repository: "Acme/B", URL: "https://example.test/b/1"},
-		{Number: 2, Repository: "acme/a", URL: "https://example.test/a/2"},
-	}}})
-	m.applyRepository("acme/A")
-	if len(m.visiblePRs) != 2 {
-		t.Fatalf("visible PR indices = %v, want two", m.visiblePRs)
-	}
-	first := m.snapshot.PullRequests[m.visiblePRs[0]]
-	second := m.snapshot.PullRequests[m.visiblePRs[1]]
-	if first.Repository != "Acme/A" || first.Number != 1 || !first.Draft ||
-		second.Repository != "acme/a" || second.Number != 2 {
-		t.Fatalf("filtered PR order/identity = %+v, %+v", first, second)
-	}
-	m.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
-	selected := m.snapshot.PullRequests[m.visiblePRs[m.cursor]]
-	if selected.URL != "https://example.test/a/2" {
-		t.Fatalf("selected URL = %q, want second filtered PR", selected.URL)
-	}
-	m.applyRepository("")
-	if len(m.visiblePRs) != 3 || m.cursor != 0 || m.offset != 0 {
-		t.Fatalf("all-repository state = indices %v, cursor %d offset %d", m.visiblePRs, m.cursor, m.offset)
-	}
-}
-
-func TestRefreshRetainsFilterWhenRepositoryHasNoPullRequests(t *testing.T) {
-	m := &model{ctx: context.Background(), width: 80, height: 24}
-	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{
-		{Number: 4, Repository: "acme/empty"},
-		{Number: 5, Repository: "acme/other"},
-	}}})
-	m.applyRepository("acme/empty")
-	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{
-		{Number: 6, Repository: "acme/other"},
-	}}})
-	if m.selectedRepository != "acme/empty" || len(m.visiblePRs) != 0 || m.cursor != 0 || m.offset != 0 {
-		t.Fatalf("same-account refresh lost empty repository filter: filter %q visible %v", m.selectedRepository, m.visiblePRs)
-	}
-}
-
-func TestEmptyRepositoryFilterKeepsNavigationSafeAndExplainsScope(t *testing.T) {
-	m := &model{ctx: context.Background(), width: 80, height: 12}
-	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{
-		{Number: 1, Repository: "acme/other"},
-	}}})
-	m.applyRepository("acme/empty")
-	press(m, tea.Key{Code: tea.KeyDown})
-	if m.cursor != 0 || m.offset != 0 || len(m.visiblePRs) != 0 {
-		t.Fatalf("empty filter navigation state: cursor %d offset %d visible %v", m.cursor, m.offset, m.visiblePRs)
-	}
-	lines := strings.Join(m.listLines(), "\n")
-	if !strings.Contains(lines, "No open pull requests in acme/empty.") {
-		t.Fatalf("empty repository scope missing its empty-state explanation: %q", lines)
-	}
-}
-
-func TestAccountChangeResetsRepositoryFilter(t *testing.T) {
-	m := &model{ctx: context.Background(), width: 80, height: 24}
-	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{
-		{Number: 1, Repository: "acme/repo"},
-	}}})
-	m.applyRepository("acme/repo")
-	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "bob", PullRequests: []github.PullRequest{
-		{Number: 2, Repository: "other/repo"},
-	}}})
-	if m.selectedRepository != "" || len(m.visiblePRs) != 1 ||
-		m.snapshot.PullRequests[m.visiblePRs[0]].Repository != "other/repo" {
-		t.Fatalf("account switch retained previous filter: filter %q visible %v", m.selectedRepository, m.visiblePRs)
+	if got, found := store.Lookup("alice"); !found || got != "" {
+		t.Fatalf("failed refresh changed saved choice: %q, %v", got, found)
 	}
 }

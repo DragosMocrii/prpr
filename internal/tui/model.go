@@ -7,33 +7,39 @@ import (
 	"strings"
 	"unicode"
 
+	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"prpr/internal/github"
+	"prpr/internal/preferences"
 )
 
 const (
-	minimumWidth  = 20
+	minimumWidth  = 40
 	minimumHeight = 8
 )
 
 type model struct {
 	ctx                 context.Context
 	client              *github.Client
+	preferences         *preferences.Store
 	cancel              context.CancelFunc
 	snapshot            github.Snapshot
 	selectedRepository  string
 	filterLogin         string
 	visiblePRs          []int
+	prTable             table.Model
+	prTableFits         bool
 	picker              *repositoryPicker
 	repositoryRequestID uint64
-	cursor              int
-	offset              int
 	width               int
 	height              int
 	loading             bool
 	loginActive         bool
+	scopeChosen         bool
+	scopeChoiceCursor   int
+	preferenceErr       error
 	err                 error
 }
 
@@ -44,9 +50,11 @@ type fetchFinishedMsg struct {
 
 type loginFinishedMsg struct{ err error }
 
-func New(ctx context.Context, client *github.Client) tea.Model {
+func New(ctx context.Context, client *github.Client, preferences *preferences.Store) tea.Model {
 	appCtx, cancel := context.WithCancel(ctx)
-	return &model{ctx: appCtx, client: client, cancel: cancel}
+	m := &model{ctx: appCtx, client: client, preferences: preferences, cancel: cancel}
+	m.rebuildPRTable(true)
+	return m
 }
 
 func (m *model) Init() tea.Cmd {
@@ -60,8 +68,7 @@ func (m *model) startFetch() tea.Cmd {
 	m.err = nil
 	m.snapshot = github.Snapshot{}
 	m.visiblePRs = nil
-	m.cursor = 0
-	m.offset = 0
+	m.rebuildPRTable(true)
 	return func() tea.Msg {
 		snapshot, err := m.client.Fetch(m.ctx)
 		return fetchFinishedMsg{snapshot: snapshot, err: err}
@@ -72,7 +79,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.clampSelection()
+		m.rebuildPRTable(false)
 		if m.picker != nil {
 			m.picker.clamp(m.pickerViewportHeight())
 		}
@@ -86,17 +93,25 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			m.snapshot = github.Snapshot{}
 			m.visiblePRs = nil
-			m.cursor, m.offset = 0, 0
+			m.rebuildPRTable(true)
 		} else {
-			if m.filterLogin != "" && m.filterLogin != msg.snapshot.Login {
-				m.selectedRepository = ""
+			if !strings.EqualFold(m.filterLogin, msg.snapshot.Login) {
+				if m.filterLogin != "" {
+					m.preferenceErr = nil
+				}
+				m.filterLogin = msg.snapshot.Login
+				if repository, found := m.preferences.Lookup(msg.snapshot.Login); found {
+					m.selectedRepository = repository
+					m.scopeChosen = true
+				} else {
+					m.selectedRepository = ""
+					m.scopeChosen = false
+					m.scopeChoiceCursor = 0
+				}
 			}
-			m.filterLogin = msg.snapshot.Login
 			m.snapshot = msg.snapshot
 			m.err = nil
 			m.rebuildVisiblePRs()
-			m.cursor, m.offset = 0, 0
-			m.clampSelection()
 		}
 	case loginFinishedMsg:
 		m.loginActive = false
@@ -136,19 +151,33 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return loginFinishedMsg{err: err}
 				})
 			}
-		case "up", "k":
-			if !m.loading && !m.loginActive && m.cursor > 0 {
-				m.cursor--
-				m.clampSelection()
-			}
-		case "down", "j":
-			if !m.loading && !m.loginActive && m.cursor+1 < len(m.visiblePRs) {
-				m.cursor++
-				m.clampSelection()
-			}
 		case "p":
-			if !m.loading && !m.loginActive && m.err == nil && m.snapshot.Login != "" {
+			if m.scopeChosen && !m.loading && !m.loginActive && m.err == nil && m.snapshot.Login != "" {
 				return m, m.openRepositoryPicker()
+			}
+		case "c":
+			if m.scopeChosen && !m.loading && !m.loginActive && m.err == nil && m.snapshot.Login != "" {
+				m.chooseRepository("")
+			}
+		case "up", "k", "down", "j":
+			if !m.loading && !m.loginActive && m.err == nil {
+				if m.scopeChosen {
+					if len(m.visiblePRs) > 0 {
+						m.prTable, _ = m.prTable.Update(msg)
+					}
+				} else if msg.String() == "up" || msg.String() == "k" {
+					m.scopeChoiceCursor = 0
+				} else {
+					m.scopeChoiceCursor = 1
+				}
+			}
+		case "enter":
+			if !m.scopeChosen && !m.loading && !m.loginActive && m.err == nil && m.snapshot.Login != "" {
+				if m.scopeChoiceCursor == 1 {
+					m.chooseRepository("")
+				} else {
+					return m, m.openRepositoryPicker()
+				}
 			}
 		}
 	}
@@ -174,10 +203,10 @@ func (m *model) updateRepositoryPicker(msg tea.KeyPressMsg) tea.Cmd {
 		switch candidate.kind {
 		case allRepositoriesCandidate:
 			m.closeRepositoryPicker()
-			m.applyRepository("")
+			m.chooseRepository("")
 		case knownRepositoryCandidate:
 			m.closeRepositoryPicker()
-			m.applyRepository(candidate.repository)
+			m.chooseRepository(candidate.repository)
 		case lookupRepositoryCandidate:
 			return m.startRepositoryLookup(candidate.repository)
 		}
@@ -208,8 +237,7 @@ func (m *model) rebuildVisiblePRs() {
 			m.visiblePRs = append(m.visiblePRs, index)
 		}
 	}
-	m.cursor, m.offset = 0, 0
-	m.clampSelection()
+	m.rebuildPRTable(true)
 }
 
 func (m *model) applyRepository(repository string) {
@@ -217,60 +245,31 @@ func (m *model) applyRepository(repository string) {
 	m.rebuildVisiblePRs()
 }
 
-func (m *model) clampSelection() {
-	count := len(m.visiblePRs)
-	if count == 0 {
-		m.cursor, m.offset = 0, 0
+func (m *model) chooseRepository(repository string) {
+	m.applyRepository(repository)
+	m.scopeChosen = true
+	if err := m.preferences.Save(m.snapshot.Login, repository); err != nil {
+		m.preferenceErr = fmt.Errorf("Selection not saved: %w", err)
 		return
 	}
-	if m.cursor >= count {
-		m.cursor = count - 1
-	}
-	if m.cursor < 0 {
-		m.cursor = 0
-	}
-	visible := m.viewportHeight()
-	if visible < 1 {
-		m.offset = m.cursor
-		return
-	}
-	if m.offset > m.cursor {
-		m.offset = m.cursor
-	}
-	if m.cursor >= m.offset+visible {
-		m.offset = m.cursor - visible + 1
-	}
-	maxOffset := count - visible
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-	if m.offset > maxOffset {
-		m.offset = maxOffset
-	}
-	if m.offset < 0 {
-		m.offset = 0
-	}
-}
-
-func (m *model) viewportHeight() int {
-	available := m.height - 4 // account header, repository scope, selected URL, and controls
-	if available < 0 {
-		return 0
-	}
-	return available
+	m.preferenceErr = nil
 }
 
 func (m *model) View() tea.View {
 	var lines []string
 	switch {
 	case m.width < minimumWidth || m.height < minimumHeight:
-		lines = wrapWords("Terminal too small; resize or press q to quit.", m.width)
-	case m.picker != nil:
-		lines = m.repositoryPickerLines()
+		lines = wrapWords("Terminal too small; resize or press Ctrl+C to quit.", m.width)
 	case m.loading && !m.loginActive:
 		lines = []string{"Loading open pull requests..."}
 	case m.err != nil:
 		lines = m.errorLines()
+	case m.picker != nil:
+		lines = m.repositoryPickerLines()
+	case !m.scopeChosen:
+		lines = m.scopeChoiceLines()
+	case len(m.visiblePRs) > 0 && !m.prTableFits:
+		lines = wrapWords("Terminal too small; resize or press Ctrl+C to quit.", m.width)
 	default:
 		lines = m.listLines()
 	}
@@ -279,6 +278,22 @@ func (m *model) View() tea.View {
 	}
 	view := tea.NewView(strings.Join(lines, "\n"))
 	return view
+}
+
+func (m *model) scopeChoiceLines() []string {
+	pick, all := "  Pick a repository", "  Show all my PRs"
+	if m.scopeChoiceCursor == 0 {
+		pick = "> Pick a repository"
+	} else {
+		all = "> Show all my PRs"
+	}
+	return []string{
+		fmt.Sprintf("prpr — @%s", m.snapshot.Login),
+		"What would you like to watch?",
+		pick,
+		all,
+		"↑/↓ or j/k: Select    Enter: Continue    q: Quit",
+	}
 }
 
 func (m *model) errorLines() []string {
@@ -307,28 +322,20 @@ func (m *model) listLines() []string {
 		} else {
 			lines = append(lines, "No open pull requests in "+singleLine(m.selectedRepository)+".")
 		}
+		lines = append(lines, "")
 	} else {
-		end := m.offset + m.viewportHeight()
-		if end > len(m.visiblePRs) {
-			end = len(m.visiblePRs)
+		selectedURL := ""
+		if pr, ok := m.selectedPR(); ok {
+			selectedURL = singleLine(pr.URL)
 		}
-		for i := m.offset; i < end; i++ {
-			pr := m.snapshot.PullRequests[m.visiblePRs[i]]
-			marker := "  "
-			if i == m.cursor {
-				marker = "> "
-			}
-			row := fmt.Sprintf("%s%s #%d", marker, singleLine(pr.Repository), pr.Number)
-			if pr.Draft {
-				row += " [draft]"
-			}
-			row += " " + singleLine(pr.Title)
-			lines = append(lines, row)
-		}
-		selected := m.snapshot.PullRequests[m.visiblePRs[m.cursor]]
-		lines = append(lines, singleLine(selected.URL))
+		lines = append(lines, selectedURL)
+		lines = append(lines, strings.Split(m.prTable.View(), "\n")...)
 	}
-	lines = append(lines, "↑/k: Up    ↓/j: Down    p: Repository    r: Refresh    q: Quit")
+	status := "✓ clean  ✗ conflicts  ? unknown"
+	if m.preferenceErr != nil {
+		status = m.preferenceErr.Error()
+	}
+	lines = append(lines, status, "↑/k: Up    ↓/j: Down    p: Change repo    c: All PRs    r: Refresh    q: Quit")
 	return lines
 }
 

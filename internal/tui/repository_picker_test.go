@@ -3,15 +3,25 @@ package tui
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"prpr/internal/github"
+	"prpr/internal/preferences"
 )
 
-func pickerModel() *model {
-	m := &model{ctx: context.Background(), width: 80, height: 12}
+func pickerModel(t *testing.T) *model {
+	t.Helper()
+	store, err := preferences.Open(filepath.Join(t.TempDir(), "preferences.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save("alice", ""); err != nil {
+		t.Fatal(err)
+	}
+	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 12}
 	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{
 		{Number: 1, Repository: "acme/a", URL: "https://example.test/a/1"},
 		{Number: 2, Repository: "acme/b", URL: "https://example.test/b/2"},
@@ -35,7 +45,7 @@ func finishDiscovery(m *model, names []string, err error) {
 }
 
 func TestPickerSelectsRepositoryAndAllRepositories(t *testing.T) {
-	m := pickerModel()
+	m := pickerModel(t)
 	openPicker(m)
 	finishDiscovery(m, []string{"acme/a", "acme/b", "acme/empty"}, nil)
 	m.picker.query = "acme/b"
@@ -46,6 +56,9 @@ func TestPickerSelectsRepositoryAndAllRepositories(t *testing.T) {
 	press(m, tea.Key{Code: tea.KeyEnter})
 	if m.picker != nil || m.selectedRepository != "acme/b" || len(m.visiblePRs) != 1 {
 		t.Fatalf("repository selection did not apply: picker %v filter %q visible %v", m.picker, m.selectedRepository, m.visiblePRs)
+	}
+	if got, found := m.preferences.Lookup("alice"); !found || got != "acme/b" {
+		t.Fatalf("known repository choice not persisted: %q, %v", got, found)
 	}
 	openPicker(m)
 	finishDiscovery(m, []string{"acme/a", "acme/b"}, nil)
@@ -58,24 +71,27 @@ func TestPickerSelectsRepositoryAndAllRepositories(t *testing.T) {
 	if m.selectedRepository != "" || len(m.visiblePRs) != 2 {
 		t.Fatalf("All repositories selection = %q with %v visible", m.selectedRepository, m.visiblePRs)
 	}
+	if got, found := m.preferences.Lookup("alice"); !found || got != "" {
+		t.Fatalf("All choice not persisted: %q, %v", got, found)
+	}
 }
 
 func TestPickerCancelPreservesFilterAndPRSelection(t *testing.T) {
-	m := pickerModel()
+	m := pickerModel(t)
 	m.snapshot.PullRequests[1].Repository = "acme/a"
 	m.rebuildVisiblePRs()
 	m.applyRepository("acme/a")
 	press(m, tea.Key{Code: tea.KeyDown})
-	previousCursor := m.cursor
+	previousCursor := m.prTable.Cursor()
 	openPicker(m)
 	press(m, tea.Key{Code: tea.KeyEsc})
-	if m.picker != nil || m.selectedRepository != "acme/a" || m.cursor != previousCursor || m.cursor != 1 {
-		t.Fatalf("cancel changed list state: picker %v filter %q cursor %d", m.picker, m.selectedRepository, m.cursor)
+	if m.picker != nil || m.selectedRepository != "acme/a" || m.prTable.Cursor() != previousCursor || m.prTable.Cursor() != 1 {
+		t.Fatalf("cancel changed list state: picker %v filter %q cursor %d", m.picker, m.selectedRepository, m.prTable.Cursor())
 	}
 }
 
 func TestPickerTextInputDoesNotInvokeMainKeys(t *testing.T) {
-	m := pickerModel()
+	m := pickerModel(t)
 	openPicker(m)
 	for _, text := range []string{"q", "j", "r"} {
 		press(m, tea.Key{Code: rune(text[0]), Text: text})
@@ -98,7 +114,7 @@ func TestPickerTextInputDoesNotInvokeMainKeys(t *testing.T) {
 }
 
 func TestPickerDirectLookupFailureThenCanonicalSuccess(t *testing.T) {
-	m := pickerModel()
+	m := pickerModel(t)
 	m.applyRepository("acme/b")
 	openPicker(m)
 	finishDiscovery(m, nil, errors.New("listing denied"))
@@ -110,15 +126,21 @@ func TestPickerDirectLookupFailureThenCanonicalSuccess(t *testing.T) {
 	if m.picker == nil || m.selectedRepository != "acme/b" || m.picker.busy || m.picker.diagnostic == "" {
 		t.Fatalf("failed lookup changed filter or lost diagnostic: picker %+v filter %q", m.picker, m.selectedRepository)
 	}
+	if got, found := m.preferences.Lookup("alice"); !found || got != "" {
+		t.Fatalf("failed lookup changed persisted choice: %q, %v", got, found)
+	}
 	press(m, tea.Key{Code: tea.KeyEnter})
 	m.Update(repositoryLookupFinishedMsg{requestID: m.repositoryRequestID, repository: "Public/Other"})
 	if m.picker != nil || m.selectedRepository != "Public/Other" || len(m.visiblePRs) != 0 {
 		t.Fatalf("canonical lookup result not applied: picker %v filter %q visible %v", m.picker, m.selectedRepository, m.visiblePRs)
 	}
+	if got, found := m.preferences.Lookup("alice"); !found || got != "Public/Other" {
+		t.Fatalf("canonical lookup choice not saved: %q, %v", got, found)
+	}
 }
 
 func TestPickerIgnoresLateResultsAfterCloseAndReopen(t *testing.T) {
-	m := pickerModel()
+	m := pickerModel(t)
 	openPicker(m)
 	oldID := m.repositoryRequestID
 	press(m, tea.Key{Code: tea.KeyEsc})
@@ -139,10 +161,13 @@ func TestPickerIgnoresLateResultsAfterCloseAndReopen(t *testing.T) {
 	if m.selectedRepository != "" || m.repositoryRequestID == currentID || m.picker == nil {
 		t.Fatalf("stale lookup affected reopened picker: filter %q id %d picker %v", m.selectedRepository, m.repositoryRequestID, m.picker)
 	}
+	if got, found := m.preferences.Lookup("alice"); !found || got != "" {
+		t.Fatalf("stale lookup changed persisted choice: %q, %v", got, found)
+	}
 }
 
 func TestPickerNavigationAndResizeStayInBounds(t *testing.T) {
-	m := pickerModel()
+	m := pickerModel(t)
 	openPicker(m)
 	finishDiscovery(m, []string{"org/a", "org/b", "org/c", "org/d", "org/e", "org/f"}, nil)
 	for i := 0; i < 20; i++ {

@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"charm.land/bubbletea/v2"
 	"prpr/internal/github"
+	"prpr/internal/preferences"
 	"prpr/internal/tui"
 )
 
@@ -28,9 +30,19 @@ func run() error {
 		return err
 	}
 
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return fmt.Errorf("resolve user configuration directory: %w", err)
+	}
+	preferencePath := filepath.Join(configDir, "prpr", "preferences.json")
+	store, err := preferences.Open(preferencePath)
+	if err != nil {
+		return fmt.Errorf("cannot load preferences at %q; repair or remove this file before retrying: %w", preferencePath, err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, err = tea.NewProgram(tui.New(ctx, client)).Run()
+	_, err = tea.NewProgram(tui.New(ctx, client, store)).Run()
 	return err
 }
