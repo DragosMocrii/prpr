@@ -49,6 +49,10 @@ type model struct {
 	preferenceErr       error
 	err                 error
 	now                 func() time.Time
+	refreshInterval     time.Duration
+	// refreshGeneration increments with every fetch so that auto-refresh
+	// ticks scheduled before it are ignored.
+	refreshGeneration uint64
 }
 
 type fetchFinishedMsg struct {
@@ -58,10 +62,15 @@ type fetchFinishedMsg struct {
 
 type loginFinishedMsg struct{ err error }
 
-func New(ctx context.Context, client *github.Client, preferences *preferences.Store) tea.Model {
+type autoRefreshMsg struct{ generation uint64 }
+
+// New returns the app model. A positive refreshInterval refetches both lists
+// that long after each fetch finishes.
+func New(ctx context.Context, client *github.Client, preferences *preferences.Store, refreshInterval time.Duration) tea.Model {
 	appCtx, cancel := context.WithCancel(ctx)
 	m := newModel(appCtx, client, preferences)
 	m.cancel = cancel
+	m.refreshInterval = refreshInterval
 	return m
 }
 
@@ -90,12 +99,25 @@ func (m *model) startFetch() tea.Cmd {
 	m.closeRepositoryPicker()
 	m.loading = true
 	m.loginActive = false
+	m.refreshGeneration++
 	m.err = nil
 	client, ctx := m.client, m.ctx
 	return tea.Batch(func() tea.Msg {
 		snapshot, err := client.Fetch(ctx)
 		return fetchFinishedMsg{snapshot: snapshot, err: err}
 	}, m.spinner.Tick)
+}
+
+// scheduleAutoRefresh starts the auto-refresh timer for the current fetch
+// generation.
+func (m *model) scheduleAutoRefresh() tea.Cmd {
+	if m.refreshInterval <= 0 {
+		return nil
+	}
+	generation := m.refreshGeneration
+	return tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
+		return autoRefreshMsg{generation: generation}
+	})
 }
 
 // refreshing reports whether a fetch is replacing rows that are still shown.
@@ -135,6 +157,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleRepositoryListFinished(msg)
 	case repositoryLookupFinishedMsg:
 		return m, m.handleRepositoryLookupFinished(msg)
+	case autoRefreshMsg:
+		if msg.generation != m.refreshGeneration {
+			return m, nil
+		}
+		// Fetching would close the picker or skip the scope choice, and login
+		// fetches when it finishes.
+		if m.picker != nil || m.loginActive || (!m.scopeChosen && m.snapshot.Login != "") {
+			return m, m.scheduleAutoRefresh()
+		}
+		return m, m.startFetch()
 	case fetchFinishedMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -144,6 +176,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.panes[id].visible = nil
 			}
 			m.rebuildPRTable(true)
+			// Authentication failures need a login, not a retry.
+			var authErr *github.AuthError
+			if errors.As(msg.err, &authErr) {
+				return m, nil
+			}
 		} else {
 			accountChanged := !strings.EqualFold(m.filterLogin, msg.snapshot.Login)
 			if accountChanged {
@@ -187,6 +224,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setFocus(focus)
 			}
 		}
+		return m, m.scheduleAutoRefresh()
 	case loginFinishedMsg:
 		m.loginActive = false
 		m.loading = false
@@ -426,7 +464,11 @@ func (m *model) listLines() []string {
 	if m.selectedRepository != "" {
 		scope = singleLine(m.selectedRepository)
 	}
-	lines := []string{m.titleLine(fmt.Sprintf("prpr — @%s — %s", m.snapshot.Login, scope))}
+	title := fmt.Sprintf("prpr — @%s — %s", m.snapshot.Login, scope)
+	if m.refreshInterval > 0 {
+		title += " · auto " + intervalText(m.refreshInterval)
+	}
+	lines := []string{m.titleLine(title)}
 	layout := m.layoutPanes()
 	for _, id := range paneIDs {
 		if layout.single && id != m.focus {
@@ -510,4 +552,17 @@ func wrapWords(value string, width int) []string {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+// intervalText drops the zero units time.Duration.String prints, so 5m0s
+// reads as 5m.
+func intervalText(d time.Duration) string {
+	text := d.String()
+	if strings.HasSuffix(text, "m0s") {
+		text = strings.TrimSuffix(text, "0s")
+	}
+	if strings.HasSuffix(text, "h0m") {
+		text = strings.TrimSuffix(text, "0m")
+	}
+	return text
 }

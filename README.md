@@ -48,6 +48,15 @@ go install ./cmd/prpr
 
 ## Configuration
 
+Both lists refresh automatically 5 minutes after each fetch finishes. Change the interval with `--refresh`, which takes a Go duration of at least `30s`, or turn it off with `0`:
+
+```sh
+prpr --refresh 10m
+prpr --refresh 0
+```
+
+The title shows the active interval. A manual refresh restarts the timer. Auto-refresh waits while the repository picker, the first-run repository prompt, or GitHub login is open, and retries failed fetches except authentication failures, which need `l`.
+
 Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository choice per GitHub account; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice.
 
 If startup reports invalid preferences, back up, repair, or remove only the reported `prpr/preferences.json` file before retrying. Do not remove GitHub CLI credentials to repair app preferences.
@@ -63,7 +72,7 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `p`: find and select a repository to filter both lists; choose `All repositories` to clear the filter.
 - `c`: clear the repository filter and show all authored open PRs and review requests.
 - In the repository picker, type to search (Left/Right move within the query), Enter to apply, Esc to cancel, Ctrl+U to clear, and Ctrl+R to reload accessible repositories. Enter `owner/repo` to check a repository outside the browsed list.
-- `r`: refresh using the currently active GitHub CLI account.
+- `r`: refresh using the currently active GitHub CLI account, and restart the auto-refresh timer.
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
 
