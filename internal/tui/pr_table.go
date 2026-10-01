@@ -102,7 +102,7 @@ func (m *model) rebuildPane(id paneID, height int, resetSelection bool) {
 		table.WithKeyMap(m.keys.Table),
 	)
 	if !resetSelection && len(rows) > 0 {
-		pane.table.MoveDown(min(max(previous, 0), len(rows)-1))
+		moveCursor(&pane.table, previous)
 	}
 	m.syncPages(id)
 }

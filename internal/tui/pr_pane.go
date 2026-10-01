@@ -118,7 +118,7 @@ func (m *model) selectPR(id paneID, repository string, number int) {
 	for row, index := range pane.visible {
 		pr := &source[index]
 		if pr.Number == number && strings.EqualFold(pr.Repository, repository) {
-			pane.table.SetCursor(row)
+			moveCursor(&pane.table, row)
 			m.syncPages(id)
 			return
 		}
@@ -206,4 +206,17 @@ func (m *model) setFocus(id paneID) {
 		return
 	}
 	m.applyFocusStyles()
+}
+
+// moveCursor selects row one step at a time. Bubbles' table keeps its
+// viewport in sync with the cursor only for incremental moves; SetCursor and
+// large MoveDown jumps can leave the selected row off-screen.
+func moveCursor(t *table.Model, row int) {
+	row = min(max(row, 0), max(len(t.Rows())-1, 0))
+	for t.Cursor() > row {
+		t.MoveUp(1)
+	}
+	for t.Cursor() < row {
+		t.MoveDown(1)
+	}
 }

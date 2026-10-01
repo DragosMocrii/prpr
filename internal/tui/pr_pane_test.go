@@ -253,3 +253,22 @@ func TestFirstLoadFocusesReviewsWhenOwnListIsEmpty(t *testing.T) {
 		t.Fatal("same-account refresh moved focus")
 	}
 }
+
+func TestSelectedRowStaysVisibleAfterJumps(t *testing.T) {
+	mine, review := manyPRs(40), reviewPRs(25)
+	m := newPaneModel(t, 100, 16, mine, review)
+	press(m, tea.Key{Code: tea.KeyTab})
+	press(m, tea.Key{Code: tea.KeyRight})
+	selected := review[m.panes[paneReview].table.Cursor()]
+	if view := ansi.Strip(m.panes[paneReview].table.View()); !strings.Contains(view, fmt.Sprintf("#%d", selected.Number)) {
+		t.Fatalf("review selection #%d not visible after page jump:\n%s", selected.Number, view)
+	}
+
+	press(m, tea.Key{Code: tea.KeyTab})
+	press(m, tea.Key{Code: 'G', Text: "G"})
+	m.startFetch()
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: mine, ReviewRequests: review}})
+	if view := ansi.Strip(m.panes[paneMine].table.View()); !strings.Contains(view, "#40") {
+		t.Fatalf("mine selection #40 not visible after refresh:\n%s", view)
+	}
+}

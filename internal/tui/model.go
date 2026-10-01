@@ -250,7 +250,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		page := pane.pages.Page
 		pane.pages, _ = pane.pages.Update(msg)
 		if pane.pages.Page != page {
-			pane.table.SetCursor(pane.pages.Page * pane.pages.PerPage)
+			moveCursor(&pane.table, pane.pages.Page*pane.pages.PerPage)
 		}
 		m.syncPages(m.focus)
 	default:
