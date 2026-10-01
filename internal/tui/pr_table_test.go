@@ -2,7 +2,6 @@ package tui
 
 import (
 	tea "charm.land/bubbletea/v2"
-	"context"
 	"fmt"
 	"github.com/charmbracelet/x/ansi"
 	"path/filepath"
@@ -23,7 +22,7 @@ func newTableModel(t *testing.T, width, height int, prs []github.PullRequest) *m
 	if err := store.Save("alice", ""); err != nil {
 		t.Fatal(err)
 	}
-	m := &model{ctx: context.Background(), preferences: store, width: width, height: height}
+	m := testModel(store, width, height)
 	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: prs}})
 	return m
 }
@@ -146,5 +145,104 @@ func TestDynamicColumnBudgetShowsResizePrompt(t *testing.T) {
 	}
 	if !strings.Contains(m.View().Content, "Terminal too small") {
 		t.Fatalf("dynamic width guard did not show resize prompt: %q", m.View().Content)
+	}
+}
+
+func manyPRs(n int) []github.PullRequest {
+	prs := make([]github.PullRequest, n)
+	for i := range prs {
+		prs[i] = github.PullRequest{Number: i + 1, Repository: "acme/a", URL: fmt.Sprintf("https://github.com/acme/a/pull/%d", i+1), Title: "title"}
+	}
+	return prs
+}
+
+func TestTableNavigationKeysAndPageIndicator(t *testing.T) {
+	m := newTableModel(t, 80, 12, manyPRs(30))
+	perPage := m.prTable.Height()
+	if perPage < 1 || m.prPages.TotalPages != (30+perPage-1)/perPage {
+		t.Fatalf("pages = %d with %d rows per page", m.prPages.TotalPages, perPage)
+	}
+	press(m, tea.Key{Code: 'G', Text: "G"})
+	if selected, ok := m.selectedPR(); !ok || selected.Number != 30 || m.prPages.Page != m.prPages.TotalPages-1 {
+		t.Fatalf("G selected %+v on page %d", selected, m.prPages.Page)
+	}
+	press(m, tea.Key{Code: 'g', Text: "g"})
+	if m.prTable.Cursor() != 0 || m.prPages.Page != 0 {
+		t.Fatalf("g cursor %d page %d", m.prTable.Cursor(), m.prPages.Page)
+	}
+	press(m, tea.Key{Code: tea.KeyPgDown})
+	if m.prTable.Cursor() != perPage {
+		t.Fatalf("pgdown cursor = %d, want %d", m.prTable.Cursor(), perPage)
+	}
+	press(m, tea.Key{Code: tea.KeyRight})
+	if m.prTable.Cursor() != 2*perPage || m.prPages.Page != 2 {
+		t.Fatalf("right cursor %d page %d", m.prTable.Cursor(), m.prPages.Page)
+	}
+	press(m, tea.Key{Code: tea.KeyLeft})
+	if m.prTable.Cursor() != perPage || m.prPages.Page != 1 {
+		t.Fatalf("left cursor %d page %d", m.prTable.Cursor(), m.prPages.Page)
+	}
+	press(m, tea.Key{Code: 'G', Text: "G"})
+	press(m, tea.Key{Code: tea.KeyRight})
+	if m.prTable.Cursor() != 29 {
+		t.Fatalf("right on last page moved cursor to %d", m.prTable.Cursor())
+	}
+	if !strings.Contains(m.View().Content, m.pageIndicator()) {
+		t.Fatal("page indicator missing from list view")
+	}
+}
+
+func TestFullHelpToggleKeepsScreenBounded(t *testing.T) {
+	m := newTableModel(t, 40, 12, manyPRs(30))
+	shortHeight := m.prTable.Height()
+	press(m, tea.Key{Code: '?', Text: "?"})
+	if !m.help.ShowAll || m.prTable.Height() >= shortHeight {
+		t.Fatalf("full help did not take table rows: showAll %t height %d -> %d", m.help.ShowAll, shortHeight, m.prTable.Height())
+	}
+	for _, size := range [][2]int{{40, 12}, {40, 8}, {120, 24}} {
+		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		view := strings.Split(m.View().Content, "\n")
+		if len(view) > size[1] {
+			t.Fatalf("full help rendered %d lines at %dx%d", len(view), size[0], size[1])
+		}
+		for _, line := range m.helpLines(keyMap.listHelp) {
+			if ansi.StringWidth(line) > size[0] {
+				t.Fatalf("help line needs truncation at %dx%d: %q", size[0], size[1], ansi.Strip(line))
+			}
+		}
+		for _, line := range view {
+			if ansi.StringWidth(line) > size[0] {
+				t.Fatalf("line width %d at %dx%d: %q", ansi.StringWidth(line), size[0], size[1], line)
+			}
+		}
+	}
+	press(m, tea.Key{Code: '?', Text: "?"})
+	if m.help.ShowAll {
+		t.Fatal("second ? did not return to short help")
+	}
+}
+
+func TestEmptyScopeIgnoresTableKeys(t *testing.T) {
+	m := newTableModel(t, 80, 12, manyPRs(3))
+	m.applyRepository("acme/empty")
+	for _, k := range []tea.Key{{Code: 'G', Text: "G"}, {Code: tea.KeyPgDown}, {Code: tea.KeyRight}} {
+		press(m, k)
+	}
+	if m.prTable.Cursor() != 0 {
+		t.Fatalf("empty scope moved cursor to %d", m.prTable.Cursor())
+	}
+	if _, ok := m.selectedPR(); ok {
+		t.Fatal("empty scope exposed selected PR")
+	}
+}
+
+func TestFullHelpSurvivesPickerResizeAndCancel(t *testing.T) {
+	m := newTableModel(t, 80, 16, manyPRs(30))
+	press(m, tea.Key{Code: '?', Text: "?"})
+	press(m, tea.Key{Code: 'p', Text: "p"})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 14})
+	press(m, tea.Key{Code: tea.KeyEsc})
+	if lines := strings.Split(m.View().Content, "\n"); len(lines) > 14 {
+		t.Fatalf("list rendered %d lines at height 14 after picker resize", len(lines))
 	}
 }

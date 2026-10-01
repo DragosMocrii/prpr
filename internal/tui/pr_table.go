@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"charm.land/bubbles/v2/paginator"
 	"charm.land/bubbles/v2/table"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -84,7 +85,8 @@ func (m *model) rebuildPRTable(resetSelection bool) {
 		Cell:     lipgloss.NewStyle().Padding(0, 1),
 		Selected: lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("236")),
 	}
-	height := max(3, m.height-5)
+	// Header, repository, and URL lines above; status line and help below.
+	height := max(3, m.height-4-m.listHelpHeight())
 	m.prTable = table.New(
 		table.WithStyles(styles),
 		table.WithColumns(columns),
@@ -92,10 +94,45 @@ func (m *model) rebuildPRTable(resetSelection bool) {
 		table.WithWidth(width),
 		table.WithHeight(height),
 		table.WithFocused(true),
+		table.WithKeyMap(m.keys.Table),
 	)
 	if !resetSelection && len(rows) > 0 {
 		m.prTable.MoveDown(min(max(previous, 0), len(rows)-1))
 	}
+	m.syncPages()
+}
+
+// listHelpHeight counts help lines from the binding layout rather than the
+// current enabled state, which is stale while the picker or scope prompt is
+// shown.
+func (m *model) listHelpHeight() int {
+	keys := m.keys.listHelp()
+	if !m.help.ShowAll || !m.fullHelpFits(keys) {
+		return 1
+	}
+	rows := 1
+	for _, column := range keys.full {
+		rows = max(rows, len(column))
+	}
+	return rows
+}
+
+// syncPages derives the page indicator from the table's visible rows and
+// cursor. The table still owns scrolling; pages only report position.
+func (m *model) syncPages() {
+	m.prPages.PerPage = max(1, m.prTable.Height())
+	m.prPages.TotalPages = 1
+	m.prPages.SetTotalPages(len(m.visiblePRs))
+	m.prPages.Page = min(m.prTable.Cursor()/m.prPages.PerPage, m.prPages.TotalPages-1)
+}
+
+func (m *model) pageIndicator() string {
+	pages := m.prPages
+	if pages.TotalPages > 12 {
+		pages.Type = paginator.Arabic
+		pages.ArabicFormat = "page %d/%d"
+	}
+	return pages.View()
 }
 
 func (m *model) selectedPR() (*github.PullRequest, bool) {

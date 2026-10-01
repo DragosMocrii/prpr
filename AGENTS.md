@@ -9,7 +9,8 @@
 - `internal/preferences` stores per-account repository scope.
 - `internal/tui/model.go` owns app transitions and scope state.
 - `internal/tui/repository_picker.go` owns repository-picker input and requests.
-- `internal/tui/pr_table.go` owns pull-request table layout and links.
+- `internal/tui/pr_table.go` owns pull-request table layout, links, and the page indicator.
+- `internal/tui/keys.go` owns key bindings, their enabled state, and per-screen help.
 
 ## Development commands
 

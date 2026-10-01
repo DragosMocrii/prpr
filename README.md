@@ -56,9 +56,12 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 
 - `j` / Down: select the next pull request.
 - `k` / Up: select the previous pull request.
+- `f` / `b` / Page Down / Page Up / Space: move by a page; `d` / `u`: move by half a page; `g` / `G` / Home / End: jump to the first or last pull request.
+- Left / Right: jump to the previous or next page shown in the page indicator.
+- `?`: show or hide all key bindings.
 - `p`: find and select a repository to filter the authored open PR list; choose `All repositories` to clear the filter.
 - `c`: clear the repository filter and show all authored open PRs.
-- In the repository picker, type to search, Enter to apply, Esc to cancel, Ctrl+U to clear, and Ctrl+R to reload accessible repositories. Enter `owner/repo` to check a repository outside the browsed list.
+- In the repository picker, type to search (Left/Right move within the query), Enter to apply, Esc to cancel, Ctrl+U to clear, and Ctrl+R to reload accessible repositories. Enter `owner/repo` to check a repository outside the browsed list.
 - `r`: refresh using the currently active GitHub CLI account.
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
