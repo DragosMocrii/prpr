@@ -10,7 +10,7 @@
 - `internal/tui/model.go` owns app transitions and scope state.
 - `internal/tui/repository_picker.go` owns repository-picker input and requests.
 - `internal/tui/pr_pane.go` owns the two pull-request panes: focus, layout, per-pane selection, and the page indicator.
-- `internal/tui/pr_table.go` owns pull-request table columns and links.
+- `internal/tui/pr_table.go` owns pull-request table columns, statistics cells, and links.
 - `internal/tui/keys.go` owns key bindings, their enabled state, and per-screen help.
 
 ## Development commands
@@ -40,6 +40,8 @@ Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package 
 - Pull-request identity is the pane's visible-row index mapped through that pane's `visible` slice to its own source list (`PullRequests` or `ReviewRequests`). Do not identify rows by PR number alone.
 - Bubbles owns the pull-request table cursor and scrolling. Preserve ANSI/grapheme-aware width behavior and safe OSC 8 hyperlink targets.
 - Unknown mergeability is not a clean merge state, and mergeability says nothing about checks or review readiness.
+- Age is ready-for-review time (last `ReadyForReviewEvent`, else `createdAt`; zero for drafts), or for review requests the latest `ReviewRequestedEvent` naming the viewer with that ready time as fallback. Null review decisions and check rollups are unknown, never approved or passing.
+- Statistics columns drop in reverse priority (Size, Review, CI, Age) before squeezing the PR name below `minStatsNameWidth`.
 
 ## Tests and interactive changes
 

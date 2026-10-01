@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/DragosMocrii/prpr/internal/github"
@@ -70,7 +71,7 @@ func TestAllTableShowsRepositoryIdentityAndIndependentStatuses(t *testing.T) {
 		{Number: 3, Repository: "acme/c", Title: "unknown", Mergeable: "new-value"},
 	})
 	columns := m.panes[paneMine].table.Columns()
-	if len(columns) != 5 || columns[0].Title != "Repository" || columns[1].Title != "PR name" {
+	if len(columns) < 5 || columns[0].Title != "Repository" || columns[1].Title != "PR name" || columns[4].Title != "Merge" {
 		t.Fatalf("All table columns = %+v", columns)
 	}
 	rows := m.panes[paneMine].table.Rows()
@@ -79,7 +80,7 @@ func TestAllTableShowsRepositoryIdentityAndIndependentStatuses(t *testing.T) {
 	}
 	m.width = 79
 	m.rebuildPRTable(true)
-	if len(m.panes[paneMine].table.Columns()) != 4 || !strings.HasPrefix(m.panes[paneMine].table.Rows()[0][0], "acme/a — ") {
+	if m.panes[paneMine].table.Columns()[0].Title == "Repository" || !strings.HasPrefix(m.panes[paneMine].table.Rows()[0][0], "acme/a — ") {
 		t.Fatalf("narrow All table lost repository identity: cols %+v row %+v", m.panes[paneMine].table.Columns(), m.panes[paneMine].table.Rows()[0])
 	}
 }
@@ -244,5 +245,65 @@ func TestFullHelpSurvivesPickerResizeAndCancel(t *testing.T) {
 	press(m, tea.Key{Code: tea.KeyEsc})
 	if lines := strings.Split(m.View().Content, "\n"); len(lines) > 14 {
 		t.Fatalf("list rendered %d lines at height 14 after picker resize", len(lines))
+	}
+}
+
+func TestStatisticsColumnsDropInPriorityOrderAsWidthShrinks(t *testing.T) {
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	m := newTableModel(t, 140, 12, []github.PullRequest{
+		{Number: 1, Repository: "acme/a", Title: "stats", WaitingSince: now.Add(-3 * 24 * time.Hour), Checks: "FAILURE", ReviewDecision: "APPROVED", Approvals: 2, Additions: 1234, Deletions: 30},
+		{Number: 2, Repository: "acme/a", Title: "draft", Draft: true},
+	})
+	m.now = func() time.Time { return now }
+	stats := func() []string {
+		var titles []string
+		for _, column := range m.panes[paneMine].table.Columns()[5:] {
+			titles = append(titles, column.Title)
+		}
+		return titles
+	}
+	m.rebuildPRTable(false)
+	row := m.panes[paneMine].table.Rows()[0]
+	if got := strings.Join(stats(), ","); got != "Age,CI,Review,Size" {
+		t.Fatalf("wide statistics columns = %s", got)
+	}
+	if row[5] != "3d" || ansi.Strip(row[6]) != "✗" || ansi.Strip(row[7]) != "✓2" || row[8] != "+1.2k/-30" {
+		t.Fatalf("statistics cells = %q", row[5:])
+	}
+	if draft := m.panes[paneMine].table.Rows()[1]; draft[5] != "—" || draft[6] != "–" || draft[7] != "–" {
+		t.Fatalf("unknown statistics shown as known: %q", draft[5:])
+	}
+	previous := 4
+	for width := 139; width >= 80; width-- {
+		m.width = width
+		m.rebuildPRTable(false)
+		got := stats()
+		if len(got) > previous || strings.Join(got, ",") != strings.Join([]string{"Age", "CI", "Review", "Size"}[:len(got)], ",") {
+			t.Fatalf("width %d statistics columns = %v", width, got)
+		}
+		if name := m.panes[paneMine].table.Columns()[1].Width; len(got) > 0 && name < minStatsNameWidth {
+			t.Fatalf("width %d squeezed PR name to %d", width, name)
+		}
+		previous = len(got)
+	}
+}
+
+func TestAgeTextBoundaries(t *testing.T) {
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	day := 24 * time.Hour
+	for _, tc := range []struct {
+		ago  time.Duration
+		want string
+	}{
+		{-time.Minute, "<1h"}, {59 * time.Minute, "<1h"}, {time.Hour, "1h"}, {23 * time.Hour, "23h"},
+		{day, "1d"}, {13 * day, "13d"}, {14 * day, "2w"}, {62 * day, "8w"}, {63 * day, "2mo"},
+		{364 * day, "12mo"}, {365 * day, "1y"},
+	} {
+		if got := ageText(now.Add(-tc.ago), now); got != tc.want {
+			t.Errorf("ageText(%v ago) = %q, want %q", tc.ago, got, tc.want)
+		}
+	}
+	if got := ageText(time.Time{}, now); got != "—" {
+		t.Errorf("zero waiting time = %q", got)
 	}
 }

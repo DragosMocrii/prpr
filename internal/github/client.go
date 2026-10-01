@@ -20,6 +20,17 @@ type PullRequest struct {
 	Draft      bool
 	Mergeable  string
 	UpdatedAt  time.Time
+	// WaitingSince is when the pull request last became ready for review or,
+	// for a review request, when the viewer was last requested directly. It is
+	// zero for a draft with no direct request.
+	WaitingSince time.Time
+	// ReviewDecision and Checks are GitHub's raw states; empty means unknown
+	// or not applicable.
+	ReviewDecision string
+	Approvals      int
+	Additions      int
+	Deletions      int
+	Checks         string
 }
 
 type Snapshot struct {
@@ -39,19 +50,32 @@ type AuthError struct {
 func (e *AuthError) Error() string { return e.Err.Error() }
 func (e *AuthError) Unwrap() error { return e.Err }
 
-const pullRequestsQuery = `query($endCursor: String) {
-  viewer {
-    login
-    pullRequests(first: 100, after: $endCursor, states: [OPEN],
-                 orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes {
+// pullRequestFields are selected for both lists. Nested connections select no
+// pageInfo, so gh --paginate follows only the outer connection.
+const pullRequestFields = `
         number
         title
         url
         isDraft
         mergeable
         updatedAt
+        createdAt
+        additions
+        deletions
+        reviewDecision
         repository { nameWithOwner }
+        readyEvents: timelineItems(itemTypes: [READY_FOR_REVIEW_EVENT], last: 1) {
+          nodes { ... on ReadyForReviewEvent { createdAt } }
+        }
+        latestOpinionatedReviews(first: 20) { nodes { state } }
+        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`
+
+const pullRequestsQuery = `query($endCursor: String) {
+  viewer {
+    login
+    pullRequests(first: 100, after: $endCursor, states: [OPEN],
+                 orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes {` + pullRequestFields + `
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -64,20 +88,106 @@ const reviewRequestsQuery = `query($endCursor: String) {
   search(type: ISSUE, first: 100, after: $endCursor,
          query: "is:pr is:open review-requested:@me archived:false sort:updated-desc") {
     nodes {
-      ... on PullRequest {
-        number
-        title
-        url
-        isDraft
-        mergeable
-        updatedAt
+      ... on PullRequest {` + pullRequestFields + `
         author { login }
-        repository { nameWithOwner }
+        requestEvents: timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
+          nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { ... on User { login } } } }
+        }
       }
     }
     pageInfo { hasNextPage endCursor }
   }
 }`
+
+// pullRequestNode decodes pullRequestFields plus the review-only fields.
+type pullRequestNode struct {
+	Number         int       `json:"number"`
+	Title          string    `json:"title"`
+	URL            string    `json:"url"`
+	Draft          bool      `json:"isDraft"`
+	Mergeable      string    `json:"mergeable"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+	CreatedAt      time.Time `json:"createdAt"`
+	Additions      int       `json:"additions"`
+	Deletions      int       `json:"deletions"`
+	ReviewDecision string    `json:"reviewDecision"`
+	Repository     struct {
+		NameWithOwner string `json:"nameWithOwner"`
+	} `json:"repository"`
+	ReadyEvents struct {
+		Nodes []*struct {
+			CreatedAt time.Time `json:"createdAt"`
+		} `json:"nodes"`
+	} `json:"readyEvents"`
+	LatestOpinionatedReviews struct {
+		Nodes []*struct {
+			State string `json:"state"`
+		} `json:"nodes"`
+	} `json:"latestOpinionatedReviews"`
+	Commits struct {
+		Nodes []*struct {
+			Commit struct {
+				StatusCheckRollup *struct {
+					State string `json:"state"`
+				} `json:"statusCheckRollup"`
+			} `json:"commit"`
+		} `json:"nodes"`
+	} `json:"commits"`
+	Author *struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	RequestEvents struct {
+		Nodes []*struct {
+			CreatedAt         time.Time `json:"createdAt"`
+			RequestedReviewer *struct {
+				Login string `json:"login"`
+			} `json:"requestedReviewer"`
+		} `json:"nodes"`
+	} `json:"requestEvents"`
+}
+
+// pullRequest converts a node. A non-empty login selects the latest direct
+// review request of that login as the waiting time.
+func (node *pullRequestNode) pullRequest(login string) PullRequest {
+	pr := PullRequest{
+		Number:         node.Number,
+		Title:          node.Title,
+		URL:            node.URL,
+		Repository:     node.Repository.NameWithOwner,
+		Draft:          node.Draft,
+		Mergeable:      node.Mergeable,
+		UpdatedAt:      node.UpdatedAt,
+		ReviewDecision: node.ReviewDecision,
+		Additions:      node.Additions,
+		Deletions:      node.Deletions,
+	}
+	if node.Author != nil {
+		pr.Author = node.Author.Login
+	}
+	if !node.Draft {
+		pr.WaitingSince = node.CreatedAt
+		if events := node.ReadyEvents.Nodes; len(events) > 0 && events[len(events)-1] != nil {
+			pr.WaitingSince = events[len(events)-1].CreatedAt
+		}
+	}
+	if login != "" {
+		// Timeline events are chronological, so the last match is the latest request.
+		for _, event := range node.RequestEvents.Nodes {
+			if event != nil && event.RequestedReviewer != nil && strings.EqualFold(event.RequestedReviewer.Login, login) {
+				pr.WaitingSince = event.CreatedAt
+			}
+		}
+	}
+	for _, review := range node.LatestOpinionatedReviews.Nodes {
+		if review != nil && review.State == "APPROVED" {
+			pr.Approvals++
+		}
+	}
+	if commits := node.Commits.Nodes; len(commits) > 0 && commits[0] != nil && commits[0].Commit.StatusCheckRollup != nil {
+		pr.Checks = commits[0].Commit.StatusCheckRollup.State
+	}
+	return pr
+}
 
 func NewClient() (*Client, error) {
 	path, err := exec.LookPath("gh")
@@ -108,7 +218,7 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, commandError("GitHub review request query failed", err)
 	}
-	snapshot.ReviewRequests, err = decodeReviewPages(data)
+	snapshot.ReviewRequests, err = decodeReviewPages(data, snapshot.Login)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -238,17 +348,7 @@ func decodePages(data []byte) (Snapshot, error) {
 				Viewer *struct {
 					Login        string `json:"login"`
 					PullRequests *struct {
-						Nodes []*struct {
-							Number     int       `json:"number"`
-							Title      string    `json:"title"`
-							URL        string    `json:"url"`
-							Draft      bool      `json:"isDraft"`
-							Mergeable  string    `json:"mergeable"`
-							UpdatedAt  time.Time `json:"updatedAt"`
-							Repository struct {
-								NameWithOwner string `json:"nameWithOwner"`
-							} `json:"repository"`
-						} `json:"nodes"`
+						Nodes []*pullRequestNode `json:"nodes"`
 					} `json:"pullRequests"`
 				} `json:"viewer"`
 			} `json:"data"`
@@ -273,21 +373,13 @@ func decodePages(data []byte) (Snapshot, error) {
 			if node == nil {
 				continue
 			}
-			snapshot.PullRequests = append(snapshot.PullRequests, PullRequest{
-				Number:     node.Number,
-				Title:      node.Title,
-				URL:        node.URL,
-				Repository: node.Repository.NameWithOwner,
-				Draft:      node.Draft,
-				Mergeable:  node.Mergeable,
-				UpdatedAt:  node.UpdatedAt,
-			})
+			snapshot.PullRequests = append(snapshot.PullRequests, node.pullRequest(""))
 		}
 	}
 	return snapshot, nil
 }
 
-func decodeReviewPages(data []byte) ([]PullRequest, error) {
+func decodeReviewPages(data []byte, login string) ([]PullRequest, error) {
 	var pages []json.RawMessage
 	if err := json.Unmarshal(data, &pages); err != nil {
 		return nil, fmt.Errorf("decode GitHub review request response: %w", err)
@@ -301,20 +393,7 @@ func decodeReviewPages(data []byte) ([]PullRequest, error) {
 		var page struct {
 			Data struct {
 				Search *struct {
-					Nodes []*struct {
-						Number    int       `json:"number"`
-						Title     string    `json:"title"`
-						URL       string    `json:"url"`
-						Draft     bool      `json:"isDraft"`
-						Mergeable string    `json:"mergeable"`
-						UpdatedAt time.Time `json:"updatedAt"`
-						Author    *struct {
-							Login string `json:"login"`
-						} `json:"author"`
-						Repository struct {
-							NameWithOwner string `json:"nameWithOwner"`
-						} `json:"repository"`
-					} `json:"nodes"`
+					Nodes []*pullRequestNode `json:"nodes"`
 				} `json:"search"`
 			} `json:"data"`
 			Errors []json.RawMessage `json:"errors"`
@@ -333,20 +412,7 @@ func decodeReviewPages(data []byte) ([]PullRequest, error) {
 			if node == nil || node.URL == "" {
 				continue
 			}
-			author := ""
-			if node.Author != nil {
-				author = node.Author.Login
-			}
-			prs = append(prs, PullRequest{
-				Number:     node.Number,
-				Title:      node.Title,
-				URL:        node.URL,
-				Repository: node.Repository.NameWithOwner,
-				Author:     author,
-				Draft:      node.Draft,
-				Mergeable:  node.Mergeable,
-				UpdatedAt:  node.UpdatedAt,
-			})
+			prs = append(prs, node.pullRequest(login))
 		}
 	}
 	return prs, nil

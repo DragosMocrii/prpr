@@ -3,9 +3,11 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -47,17 +49,22 @@ func assertBounded(t *testing.T, m *model, width, height int) []string {
 	return lines
 }
 
+func columnIndex(columns []table.Column, title string) int {
+	return slices.IndexFunc(columns, func(column table.Column) bool { return column.Title == title })
+}
+
 func TestBothPanesRenderWithOwnRowsAndColumns(t *testing.T) {
 	m := newPaneModel(t, 100, 24, manyPRs(3), reviewPRs(2))
 	if len(m.panes[paneMine].visible) != 3 || len(m.panes[paneReview].visible) != 2 {
 		t.Fatalf("visible = %v / %v", m.panes[paneMine].visible, m.panes[paneReview].visible)
 	}
 	mineCols, reviewCols := m.panes[paneMine].table.Columns(), m.panes[paneReview].table.Columns()
-	if mineCols[len(mineCols)-1].Title != "Merge" || reviewCols[len(reviewCols)-1].Title != "Author" {
-		t.Fatalf("last columns = %q / %q", mineCols[len(mineCols)-1].Title, reviewCols[len(reviewCols)-1].Title)
+	author, number := columnIndex(reviewCols, "Author"), columnIndex(reviewCols, "Number")
+	if columnIndex(mineCols, "Merge") < 0 || columnIndex(mineCols, "Author") >= 0 || author < 0 || columnIndex(reviewCols, "Merge") >= 0 {
+		t.Fatalf("columns = %+v / %+v", mineCols, reviewCols)
 	}
 	row := m.panes[paneReview].table.Rows()[0]
-	if row[len(row)-1] != "bob" || !strings.Contains(row[len(row)-3], "\x1b]8;;https://github.com/acme/b/pull/100") {
+	if row[author] != "bob" || !strings.Contains(row[number], "\x1b]8;;https://github.com/acme/b/pull/100") {
 		t.Fatalf("review row = %q", row)
 	}
 	view := ansi.Strip(strings.Join(assertBounded(t, m, 100, 24), "\n"))
@@ -362,5 +369,12 @@ func TestMergeLegendOnlyWhenMyPRsIsDrawnWithRows(t *testing.T) {
 	m = newPaneModel(t, 100, 24, manyPRs(3), reviewPRs(2))
 	if view := ansi.Strip(strings.Join(assertBounded(t, m, 100, 24), "\n")); !strings.Contains(view, legend) {
 		t.Fatalf("legend missing in dual layout:\n%s", view)
+	}
+}
+
+func TestReviewPaneKeepsAgeAtStandardWidth(t *testing.T) {
+	m := newPaneModel(t, 80, 24, manyPRs(3), reviewPRs(2))
+	if columnIndex(m.panes[paneMine].table.Columns(), "Age") < 0 || columnIndex(m.panes[paneReview].table.Columns(), "Age") < 0 {
+		t.Fatalf("Age column missing at 80 columns: %+v / %+v", m.panes[paneMine].table.Columns(), m.panes[paneReview].table.Columns())
 	}
 }

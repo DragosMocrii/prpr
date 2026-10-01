@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	"charm.land/bubbles/v2/help"
@@ -47,6 +48,7 @@ type model struct {
 	scopeChoiceCursor   int
 	preferenceErr       error
 	err                 error
+	now                 func() time.Time
 }
 
 type fetchFinishedMsg struct {
@@ -73,6 +75,7 @@ func newModel(ctx context.Context, client *github.Client, preferences *preferenc
 		help:           help.New(),
 		spinner:        spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		darkBackground: true,
+		now:            time.Now,
 	}
 	m.panes = [2]prPane{newPRPane(), newPRPane()}
 	m.rebuildPRTable(true)

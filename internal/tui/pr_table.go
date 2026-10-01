@@ -5,11 +5,14 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"charm.land/bubbles/v2/table"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/DragosMocrii/prpr/internal/github"
 )
 
 // rebuildPRTable rebuilds both panes' tables for the current layout.
@@ -47,25 +50,33 @@ func (m *model) rebuildPane(id paneID, height int, resetSelection bool) {
 	if review {
 		lastTitle, lastWidth = "Author", min(16, max(8, width/6))
 	}
-	columns := make([]table.Column, 0, 5)
+	columns := make([]table.Column, 0, 5+len(statColumns))
 	if repositoryColumn {
 		columns = append(columns, table.Column{Title: "Repository", Width: repositoryWidth})
 	}
+	nameColumn := len(columns)
 	columns = append(columns,
 		table.Column{Title: "PR name"},
 		table.Column{Title: "Number", Width: maxNumberWidth},
 		table.Column{Title: "State", Width: 5},
 		table.Column{Title: lastTitle, Width: lastWidth},
 	)
-	// Each column has one cell of padding on both sides.
-	nameWidth := width - 2*len(columns) - repositoryWidth - maxNumberWidth - 5 - lastWidth
+	nameWidth := remainingWidth(width, columns)
+	// Statistics columns are added in priority order while the name keeps room.
+	stats := 0
+	for _, stat := range statColumns {
+		candidate := append(columns, table.Column{Title: stat.title, Width: stat.width})
+		if remainingWidth(width, candidate) < minStatsNameWidth {
+			break
+		}
+		columns = candidate
+		nameWidth = remainingWidth(width, columns)
+		stats++
+	}
 	pane.fits = nameWidth >= 8
 	nameWidth = max(8, nameWidth)
-	nameColumn := 0
-	if repositoryColumn {
-		nameColumn = 1
-	}
 	columns[nameColumn].Width = nameWidth
+	now := m.now()
 
 	rows := make([]table.Row, 0, len(pane.visible))
 	for _, index := range pane.visible {
@@ -90,6 +101,9 @@ func (m *model) rebuildPane(id paneID, height int, resetSelection bool) {
 			row = append(row, singleLine(pr.Repository))
 		}
 		row = append(row, name, prNumberLink(pr.Number, pr.URL), state, last)
+		for _, stat := range statColumns[:stats] {
+			row = append(row, stat.cell(pr, now))
+		}
 		rows = append(rows, row)
 	}
 	pane.table = table.New(
@@ -105,6 +119,108 @@ func (m *model) rebuildPane(id paneID, height int, resetSelection bool) {
 		moveCursor(&pane.table, previous)
 	}
 	m.syncPages(id)
+}
+
+// minStatsNameWidth is the PR name width that statistics columns may not
+// squeeze below.
+const minStatsNameWidth = 16
+
+type statColumn struct {
+	title string
+	width int
+	cell  func(pr *github.PullRequest, now time.Time) string
+}
+
+// statColumns are listed in the order they are dropped last to first as the
+// terminal narrows.
+var statColumns = []statColumn{
+	{"Age", 4, func(pr *github.PullRequest, now time.Time) string { return ageText(pr.WaitingSince, now) }},
+	{"CI", 2, func(pr *github.PullRequest, _ time.Time) string { return checksIcon(pr.Checks) }},
+	{"Review", 6, func(pr *github.PullRequest, _ time.Time) string { return reviewText(pr.ReviewDecision, pr.Approvals) }},
+	{"Size", 11, func(pr *github.PullRequest, _ time.Time) string { return sizeText(pr.Additions, pr.Deletions) }},
+}
+
+// remainingWidth is the width left for the zero-width name column; each
+// column has one cell of padding on both sides.
+func remainingWidth(width int, columns []table.Column) int {
+	for _, column := range columns {
+		width -= column.Width + 2
+	}
+	return width
+}
+
+// ageText formats how long a pull request has waited; zero means not waiting.
+func ageText(since, now time.Time) string {
+	if since.IsZero() {
+		return "—"
+	}
+	elapsed := now.Sub(since)
+	const day = 24 * time.Hour
+	switch {
+	case elapsed < time.Hour:
+		return "<1h"
+	case elapsed < day:
+		return strconv.Itoa(int(elapsed/time.Hour)) + "h"
+	case elapsed < 14*day:
+		return strconv.Itoa(int(elapsed/day)) + "d"
+	case elapsed < 63*day:
+		return strconv.Itoa(int(elapsed/(7*day))) + "w"
+	case elapsed < 365*day:
+		return strconv.Itoa(int(elapsed/(30*day))) + "mo"
+	default:
+		return strconv.Itoa(int(elapsed/(365*day))) + "y"
+	}
+}
+
+func checksIcon(state string) string {
+	switch state {
+	case "SUCCESS":
+		return coloredIcon("✓", "2")
+	case "FAILURE", "ERROR":
+		return coloredIcon("✗", "1")
+	case "PENDING", "EXPECTED":
+		return coloredIcon("●", "3")
+	default:
+		return "–"
+	}
+}
+
+// reviewText shows the review decision followed by the current approval count.
+func reviewText(decision string, approvals int) string {
+	var icon string
+	switch decision {
+	case "APPROVED":
+		icon = coloredIcon("✓", "2")
+	case "CHANGES_REQUESTED":
+		icon = coloredIcon("✗", "1")
+	case "REVIEW_REQUIRED":
+		icon = coloredIcon("●", "3")
+	default:
+		icon = "–"
+	}
+	if approvals > 0 {
+		icon += strconv.Itoa(approvals)
+	}
+	return icon
+}
+
+func sizeText(additions, deletions int) string {
+	return "+" + compactCount(additions) + "/-" + compactCount(deletions)
+}
+
+func compactCount(n int) string {
+	switch {
+	case n < 1000:
+		return strconv.Itoa(n)
+	case n < 10000:
+		return strconv.FormatFloat(float64(n)/1000, 'f', 1, 64) + "k"
+	default:
+		return strconv.Itoa(n/1000) + "k"
+	}
+}
+
+func coloredIcon(icon, color string) string {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(icon)
 }
 
 // listHelpHeight counts help lines from the binding layout rather than the
@@ -146,14 +262,12 @@ func safePullRequestURL(rawURL string) bool {
 }
 
 func mergeableIcon(status string) string {
-	var icon, color string
 	switch status {
 	case "MERGEABLE":
-		icon, color = "✓", "2"
+		return coloredIcon("✓", "2")
 	case "CONFLICTING":
-		icon, color = "✗", "1"
+		return coloredIcon("✗", "1")
 	default:
-		icon, color = "?", "3"
+		return coloredIcon("?", "3")
 	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(icon)
 }

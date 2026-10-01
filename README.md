@@ -69,6 +69,15 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 
 Repository filtering applies to both lists: the active account's authored open pull requests, and open pull requests requesting the account's review (`review-requested:@me`, including team requests). Both keep updated-descending order and draft status. The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no matching pull requests in either list remains selectable and shows empty scoped lists. Repository and All selections are saved separately for each GitHub account.
 
-The pull request table shows draft/open state and merge-conflict status (`MERGEABLE`, `CONFLICTING`, or unknown); mergeability does not represent checks or review readiness. The review list shows the PR author instead of merge status. On short terminals only the focused list is shown. PR numbers use OSC 8 links in supporting terminals. The selected pull request URL is also shown below the table for copying. A refresh replaces the visible account and both lists together; failed refreshes do not leave stale results displayed.
+The pull request table shows draft/open state and merge-conflict status (`MERGEABLE`, `CONFLICTING`, or unknown); mergeability does not represent checks or review readiness. The review list shows the PR author instead of merge status. 
+
+Both lists also show statistics columns, which narrow terminals drop in this order: Size, Review, CI, Age.
+
+- **Age**: how long the PR has waited. In **My PRs** it counts from when the PR was last marked ready for review, or from when it was opened if it was never a draft; drafts show `—`. In **Review requested** it counts from the latest review request naming you directly, and falls back to the ready-for-review time for team-only requests. Ages are computed when the lists load, refresh, resize, or change scope, so between refreshes they show the age as of the last update.
+- **CI**: the head commit's check rollup — passing, failing, pending, or `–` when there are no checks.
+- **Review**: the review decision (approved, changes requested, review required, or `–` when none applies) followed by the number of current approvals.
+- **Size**: lines added and removed.
+
+On short terminals only the focused list is shown. PR numbers use OSC 8 links in supporting terminals. The selected pull request URL is also shown below the table for copying. A refresh replaces the visible account and both lists together; failed refreshes do not leave stale results displayed.
 
 See [contributing](CONTRIBUTING.md), the [MIT license](LICENSE), and the [CI workflow](.github/workflows/ci.yml).

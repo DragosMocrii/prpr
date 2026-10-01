@@ -176,7 +176,7 @@ func TestDecodeReviewPagesPreservesOrderAndSkipsNonPullRequests(t *testing.T) {
 			{"number":3,"title":"Oldest","url":"https://github.com/acme/api/pull/3","isDraft":false,"mergeable":"CONFLICTING","updatedAt":"2026-05-01T12:00:00Z","author":{"login":"carol"},"repository":{"nameWithOwner":"acme/api"}}
 		],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}
 	]`)
-	prs, err := decodeReviewPages(data)
+	prs, err := decodeReviewPages(data, "octocat")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestDecodeReviewPagesPreservesOrderAndSkipsNonPullRequests(t *testing.T) {
 }
 
 func TestDecodeReviewPagesAcceptsEmptySearch(t *testing.T) {
-	prs, err := decodeReviewPages([]byte(`[{"data":{"search":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}]`))
+	prs, err := decodeReviewPages([]byte(`[{"data":{"search":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}]`), "octocat")
 	if err != nil || len(prs) != 0 {
 		t.Fatalf("empty search = %+v, %v", prs, err)
 	}
@@ -211,9 +211,68 @@ func TestDecodeReviewPagesRejectsInvalidOrPartialResponses(t *testing.T) {
 		"missing search": `[{"data":{}}]`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := decodeReviewPages([]byte(data)); err == nil {
+			if _, err := decodeReviewPages([]byte(data), "octocat"); err == nil {
 				t.Fatal("decode succeeded")
 			}
 		})
+	}
+}
+
+func TestDecodePagesStatistics(t *testing.T) {
+	data := []byte(`[{"data":{"viewer":{"login":"octocat","pullRequests":{"nodes":[
+		{"number":1,"url":"https://github.com/acme/api/pull/1","isDraft":false,"createdAt":"2026-06-01T00:00:00Z","readyEvents":{"nodes":[]},
+		 "reviewDecision":"APPROVED","latestOpinionatedReviews":{"nodes":[{"state":"APPROVED"},{"state":"COMMENTED"},{"state":"APPROVED"}]},
+		 "additions":120,"deletions":30,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE"}}}]}},
+		{"number":2,"url":"https://github.com/acme/api/pull/2","isDraft":false,"createdAt":"2026-06-01T00:00:00Z","readyEvents":{"nodes":[{"createdAt":"2026-06-03T00:00:00Z"}]},
+		 "reviewDecision":null,"latestOpinionatedReviews":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":null}}]}},
+		{"number":3,"url":"https://github.com/acme/api/pull/3","isDraft":true,"createdAt":"2026-06-01T00:00:00Z","readyEvents":{"nodes":[{"createdAt":"2026-06-03T00:00:00Z"}]},"commits":{"nodes":[]}}
+	]}}}}]`)
+	snapshot, err := decodePages(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prs := snapshot.PullRequests
+	if len(prs) != 3 {
+		t.Fatalf("got %d pull requests", len(prs))
+	}
+	never, ready, draft := prs[0], prs[1], prs[2]
+	if !never.WaitingSince.Equal(time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)) || never.ReviewDecision != "APPROVED" || never.Approvals != 2 ||
+		never.Additions != 120 || never.Deletions != 30 || never.Checks != "FAILURE" {
+		t.Errorf("never-draft PR = %+v", never)
+	}
+	if !ready.WaitingSince.Equal(time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)) || ready.ReviewDecision != "" || ready.Approvals != 0 || ready.Checks != "" {
+		t.Errorf("ready-after-draft PR = %+v", ready)
+	}
+	if !draft.WaitingSince.IsZero() || draft.Checks != "" {
+		t.Errorf("draft PR = %+v", draft)
+	}
+}
+
+func TestDecodeReviewPagesWaitsSinceViewerRequest(t *testing.T) {
+	data := []byte(`[{"data":{"search":{"nodes":[
+		{"number":1,"url":"https://github.com/acme/api/pull/1","isDraft":false,"createdAt":"2026-06-01T00:00:00Z","readyEvents":{"nodes":[]},
+		 "requestEvents":{"nodes":[
+			{"createdAt":"2026-06-02T00:00:00Z","requestedReviewer":{"login":"OctoCat"}},
+			{"createdAt":"2026-06-03T00:00:00Z","requestedReviewer":{"login":"bob"}},
+			{"createdAt":"2026-06-04T00:00:00Z","requestedReviewer":{"login":"octocat"}},
+			{"createdAt":"2026-06-05T00:00:00Z","requestedReviewer":{}}
+		 ]}},
+		{"number":2,"url":"https://github.com/acme/api/pull/2","isDraft":false,"createdAt":"2026-06-01T00:00:00Z","readyEvents":{"nodes":[{"createdAt":"2026-06-02T00:00:00Z"}]},
+		 "requestEvents":{"nodes":[{"createdAt":"2026-06-03T00:00:00Z","requestedReviewer":{}},{"createdAt":"2026-06-04T00:00:00Z","requestedReviewer":null}]}},
+		{"number":3,"url":"https://github.com/acme/api/pull/3","isDraft":true,"createdAt":"2026-06-01T00:00:00Z",
+		 "requestEvents":{"nodes":[{"createdAt":"2026-06-04T00:00:00Z","requestedReviewer":{"login":"octocat"}}]}}
+	]}}}]`)
+	prs, err := decodeReviewPages(data, "octocat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []time.Time{
+		time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC), // latest direct request, matched case-insensitively
+		time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC), // team-only request falls back to ready time
+		time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC), // a direct request on a draft still counts
+	} {
+		if !prs[i].WaitingSince.Equal(want) {
+			t.Errorf("review request %d waiting since %v, want %v", i, prs[i].WaitingSince, want)
+		}
 	}
 }
