@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build and publish, e.g. v0.1.0
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Validate tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            printf 'Tag %q is not a version like v1.2.3 or v1.2.3-rc.1\n' "$TAG" >&2
+            exit 1
+          fi
+
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.x'
+          check-latest: true
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Build archives
+        shell: bash
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          dist="${RUNNER_TEMP}/dist"
+          mkdir -p "$dist"
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            name="prpr_${TAG#v}_${goos}_${goarch}"
+            stage="${RUNNER_TEMP}/stage/${name}"
+            mkdir -p "$stage"
+            binary=prpr
+            [[ "$goos" == windows ]] && binary=prpr.exe
+            GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "-s -w -X main.version=${TAG}" \
+              -o "${stage}/${binary}" ./cmd/prpr
+            cp README.md LICENSE "$stage/"
+            if [[ "$goos" == windows ]]; then
+              (cd "${RUNNER_TEMP}/stage" && zip -qr "${dist}/${name}.zip" "$name")
+            else
+              tar -C "${RUNNER_TEMP}/stage" -czf "${dist}/${name}.tar.gz" "$name"
+            fi
+          done
+          (cd "$dist" && sha256sum -- * > checksums.txt)
+          ls -l "$dist"
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          dist="${RUNNER_TEMP}/dist"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$dist"/* --clobber
+          else
+            prerelease=()
+            [[ "$TAG" == *-* ]] && prerelease=(--prerelease)
+            gh release create "$TAG" "$dist"/* --verify-tag --generate-notes --title "$TAG" "${prerelease[@]}"
+          fi

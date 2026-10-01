@@ -57,3 +57,12 @@ func TestParseFlagsBots(t *testing.T) {
 		t.Fatalf("empty bots = %+v, %v", opts.bots, err)
 	}
 }
+
+func TestParseFlagsVersion(t *testing.T) {
+	if opts, err := parseFlags([]string{"--version"}, io.Discard); err != nil || !opts.version {
+		t.Fatalf("--version = %+v, %v", opts, err)
+	}
+	if opts, err := parseFlags(nil, io.Discard); err != nil || opts.version {
+		t.Fatalf("default = %+v, %v", opts, err)
+	}
+}

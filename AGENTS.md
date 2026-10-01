@@ -27,7 +27,7 @@ go vet ./...
 gofmt -l cmd internal
 ```
 
-Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package checks do not require GitHub credentials or a live network connection. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and verification details. When raising the minimum Go version, update `go.mod`, the README, this guide, and the CI Go version together.
+Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package checks do not require GitHub credentials or a live network connection. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and verification details. When raising the minimum Go version, update `go.mod`, the README, this guide, and the Go version in both CI and release workflows together. Release builds stamp the tag into `main.version` through `-ldflags`; keep that variable name.
 
 ## Contracts to preserve
 

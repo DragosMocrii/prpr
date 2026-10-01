@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"time"
 
 	"charm.land/bubbletea/v2"
@@ -33,6 +34,20 @@ type reportedError struct{ err error }
 func (e reportedError) Error() string { return e.err.Error() }
 func (e reportedError) Unwrap() error { return e.err }
 
+// version is set by release builds with -ldflags "-X main.version=v1.2.3".
+var version string
+
+// versionString falls back to the module version that go install records.
+func versionString() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}
+
 // minRefreshInterval keeps automatic refreshes from polling GitHub too often.
 const minRefreshInterval = 30 * time.Second
 
@@ -40,12 +55,14 @@ type options struct {
 	// refresh is the auto-refresh interval; zero turns it off.
 	refresh time.Duration
 	bots    []github.Bot
+	version bool
 }
 
 func parseFlags(args []string, output io.Writer) (options, error) {
 	flags := flag.NewFlagSet("prpr", flag.ContinueOnError)
 	flags.SetOutput(output)
 	refresh := flags.Duration("refresh", 5*time.Minute, "refresh both lists this long after each fetch, e.g. 90s or 10m; 0 turns it off")
+	showVersion := flags.Bool("version", false, "print the version and exit")
 	bots := flags.String("bots", github.DefaultBots, "review bots as comma-separated Name=login or Name=login:check entries; empty hides the Bots column")
 	if err := flags.Parse(args); err != nil {
 		return options{}, reportedError{err}
@@ -60,7 +77,7 @@ func parseFlags(args []string, output io.Writer) (options, error) {
 	if err != nil {
 		return options{}, fmt.Errorf("--bots: %w", err)
 	}
-	return options{refresh: *refresh, bots: parsed}, nil
+	return options{refresh: *refresh, bots: parsed, version: *showVersion}, nil
 }
 
 func run() error {
@@ -70,6 +87,10 @@ func run() error {
 	}
 	if err != nil {
 		return err
+	}
+	if opts.version {
+		fmt.Println("prpr", versionString())
+		return nil
 	}
 	client, err := github.NewClient(opts.bots)
 	if err != nil {

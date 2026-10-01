@@ -17,6 +17,18 @@ Complete the displayed device-code flow in a browser if GitHub CLI cannot open o
 
 ## Install
 
+Each [release](https://github.com/DragosMocrii/prpr/releases) has prebuilt archives for Linux, macOS, and Windows on amd64 and arm64, plus `checksums.txt`. Unpack the archive for your platform and put `prpr` (`prpr.exe` on Windows) on `PATH`. Run `uname -m` on macOS or Linux to choose: `arm64`/`aarch64` is arm64, and `x86_64` is amd64.
+
+The macOS binaries are not signed or notarized, so macOS blocks them on first run. After checking the archive against `checksums.txt`, clear the quarantine flag:
+
+```sh
+xattr -d com.apple.quarantine prpr
+```
+
+`prpr --version` prints the installed version.
+
+### Install with Go
+
 After this repository is public and these changes have been pushed, install the latest version with:
 
 ```sh
@@ -110,4 +122,4 @@ Both lists also show statistics columns, which narrow terminals drop in this ord
 
 On short terminals only the focused list is shown. PR numbers use OSC 8 links in supporting terminals. The selected pull request URL is also shown below the table for copying. A refresh replaces the visible account and both lists together; failed refreshes do not leave stale results displayed.
 
-See [contributing](CONTRIBUTING.md), the [MIT license](LICENSE), and the [CI workflow](.github/workflows/ci.yml).
+See [contributing](CONTRIBUTING.md), the [MIT license](LICENSE), the [CI workflow](.github/workflows/ci.yml), and the [release workflow](.github/workflows/release.yml).
