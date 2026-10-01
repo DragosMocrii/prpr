@@ -15,6 +15,8 @@ type keyMap struct {
 	Continue        key.Binding
 	PickRepository  key.Binding
 	AllRepositories key.Binding
+	NextPane        key.Binding
+	PrevPane        key.Binding
 	Refresh         key.Binding
 	Retry           key.Binding
 	Login           key.Binding
@@ -46,6 +48,8 @@ func defaultKeyMap() keyMap {
 		Continue:        key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "continue")),
 		PickRepository:  key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "change repo")),
 		AllRepositories: key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "all PRs")),
+		NextPane:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch list")),
+		PrevPane:        key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev list")),
 		Refresh:         key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		Retry:           key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
 		Login:           key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log in to GitHub")),
@@ -87,6 +91,8 @@ func (m *model) syncKeys() {
 	k.Continue.SetEnabled(scopeChoice)
 	k.PickRepository.SetEnabled(browsing)
 	k.AllRepositories.SetEnabled(browsing)
+	k.NextPane.SetEnabled(viewing)
+	k.PrevPane.SetEnabled(viewing)
 	k.Refresh.SetEnabled(idle && m.err == nil && m.picker == nil)
 	k.Retry.SetEnabled(idle && m.err != nil)
 	k.Login.SetEnabled(idle && m.err != nil)
@@ -142,11 +148,12 @@ func (k keyMap) errorHelp() helpKeys {
 func (k keyMap) listHelp() helpKeys {
 	t := k.Table
 	return helpKeys{
-		short: []key.Binding{t.LineUp, t.LineDown, k.PickRepository, k.AllRepositories, k.Refresh, k.Help, k.Quit},
+		short: []key.Binding{t.LineUp, t.LineDown, k.NextPane, k.PickRepository, k.AllRepositories, k.Refresh, k.Help, k.Quit},
 		full: [][]key.Binding{
 			{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom},
 			{t.PageUp, t.PageDown, t.HalfPageUp, t.HalfPageDown},
 			{k.Pages.PrevPage, k.Pages.NextPage},
+			{k.NextPane, k.PrevPane},
 			{k.PickRepository, k.AllRepositories, k.Refresh},
 			{k.Help, k.Quit},
 		},

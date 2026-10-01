@@ -134,3 +134,68 @@ func TestNarrowReviewPaneFitsWithNullAuthor(t *testing.T) {
 		t.Fatalf("narrow review view:\n%s", view)
 	}
 }
+
+func TestTabSwitchesFocusAndPanesKeepCursors(t *testing.T) {
+	m := newPaneModel(t, 100, 30, manyPRs(10), reviewPRs(10))
+	press(m, tea.Key{Code: 'j', Text: "j"})
+	press(m, tea.Key{Code: 'j', Text: "j"})
+	press(m, tea.Key{Code: tea.KeyTab})
+	if m.focus != paneReview {
+		t.Fatalf("tab focus = %d", m.focus)
+	}
+	press(m, tea.Key{Code: 'G', Text: "G"})
+	if selected, ok := m.selectedPR(); !ok || selected.Number != 109 {
+		t.Fatalf("review selection = %+v, %v", selected, ok)
+	}
+	if m.panes[paneMine].table.Cursor() != 2 {
+		t.Fatalf("G in review pane moved mine cursor to %d", m.panes[paneMine].table.Cursor())
+	}
+	if !strings.Contains(m.View().Content, "https://github.com/acme/b/pull/109") {
+		t.Fatal("URL line does not follow the focused pane")
+	}
+	press(m, tea.Key{Code: tea.KeyTab, Mod: tea.ModShift})
+	if m.focus != paneMine {
+		t.Fatalf("shift+tab focus = %d", m.focus)
+	}
+	if selected, ok := m.selectedPR(); !ok || selected.Number != 3 {
+		t.Fatalf("mine selection after switching back = %+v, %v", selected, ok)
+	}
+}
+
+func TestFocusedEmptyPaneIgnoresTableKeys(t *testing.T) {
+	m := newPaneModel(t, 80, 24, manyPRs(5), nil)
+	press(m, tea.Key{Code: tea.KeyTab})
+	for _, k := range []tea.Key{{Code: 'G', Text: "G"}, {Code: 'j', Text: "j"}, {Code: tea.KeyPgDown}, {Code: tea.KeyRight}} {
+		press(m, k)
+	}
+	if _, ok := m.selectedPR(); ok {
+		t.Fatal("empty review pane exposed a selection")
+	}
+	if m.panes[paneMine].table.Cursor() != 0 {
+		t.Fatalf("keys in empty review pane moved mine cursor to %d", m.panes[paneMine].table.Cursor())
+	}
+	if strings.Contains(m.View().Content, "https://github.com/acme/a/pull/1") {
+		t.Fatal("URL line shows the unfocused pane's PR")
+	}
+}
+
+func TestSinglePaneLayoutTabShowsOtherPaneAndKeepsCursor(t *testing.T) {
+	m := newPaneModel(t, 80, 10, manyPRs(30), reviewPRs(30))
+	press(m, tea.Key{Code: 'j', Text: "j"})
+	press(m, tea.Key{Code: tea.KeyTab})
+	view := ansi.Strip(strings.Join(assertBounded(t, m, 80, 10), "\n"))
+	if !strings.Contains(view, "Review requested (30)") || strings.Contains(view, "My PRs") {
+		t.Fatalf("single-pane view after tab:\n%s", view)
+	}
+	press(m, tea.Key{Code: tea.KeyTab})
+	if selected, ok := m.selectedPR(); !ok || selected.Number != 2 {
+		t.Fatalf("hidden pane lost its cursor: %+v, %v", selected, ok)
+	}
+}
+
+func TestHelpListsPaneSwitch(t *testing.T) {
+	m := newPaneModel(t, 120, 24, manyPRs(3), reviewPRs(3))
+	if !strings.Contains(ansi.Strip(strings.Join(m.helpLines(keyMap.listHelp), "\n")), "tab") {
+		t.Fatal("short help does not list tab")
+	}
+}

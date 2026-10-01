@@ -61,7 +61,11 @@ func (m *model) layoutPanes() paneLayout {
 		return 2 // title and empty line
 	}
 	var layout paneLayout
-	if avail < need(paneMine)+need(paneReview) {
+	// Trigger single-pane when focused pane is empty and other pane has rows,
+	// or when there's not enough space for both panes.
+	focusedEmpty := !filled(m.focus)
+	otherHasRows := filled(1 - m.focus)
+	if (focusedEmpty && otherHasRows) || avail < need(paneMine)+need(paneReview) {
 		layout.single = true
 		if filled(m.focus) {
 			layout.tables[m.focus] = max(minTableHeight, avail-1)
@@ -195,4 +199,15 @@ func (m *model) emptyPaneLine(id paneID) string {
 		text += " in " + singleLine(m.selectedRepository)
 	}
 	return "  " + text + "."
+}
+
+// setFocus moves key input to a pane. When only the focused pane fits on
+// screen, the tables are rebuilt so the newly shown pane gets the room.
+func (m *model) setFocus(id paneID) {
+	m.focus = id
+	if m.layoutPanes().single {
+		m.rebuildPRTable(false)
+		return
+	}
+	m.applyFocusStyles()
 }
