@@ -230,8 +230,9 @@ func TestRefreshKeepsRowsNavigableAndRestoresSelection(t *testing.T) {
 		t.Fatalf("selection after refresh = %+v, %v (refreshing %t)", selected, ok, m.refreshing())
 	}
 	press(m, tea.Key{Code: 'r', Text: "r"})
+	// The closed PR stays selected as a gone row.
 	updateSnapshot(m, "alice", prs[0], prs[2])
-	if selected, ok := m.selectedPR(); !ok || selected.Repository != "acme/a" || selected.Number != 1 {
-		t.Fatalf("selection after selected PR closed = %+v, %v", selected, ok)
+	if selected, ok := m.selectedPR(); !ok || selected.Repository != "acme/b" || selected.Number != 1 || m.panes[paneMine].table.Cursor() != 2 {
+		t.Fatalf("selection after selected PR closed = %+v, %v (cursor %d)", selected, ok, m.panes[paneMine].table.Cursor())
 	}
 }

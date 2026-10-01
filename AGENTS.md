@@ -11,6 +11,7 @@
 - `internal/tui/repository_picker.go` owns repository-picker input and requests.
 - `internal/tui/pr_pane.go` owns the two pull-request panes: focus, layout, per-pane selection, and the page indicator.
 - `internal/tui/quota.go` owns rate-limit polling and the status line.
+- `internal/tui/changes.go` owns change tracking between refreshes: row marks, changed cells, and gone pull requests.
 - `internal/tui/pr_table.go` owns pull-request table columns, statistics cells, and links.
 - `internal/tui/keys.go` owns key bindings, their enabled state, and per-screen help.
 
@@ -40,7 +41,8 @@ Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package 
 - Keep picker cancellation and request-ID checks so obsolete asynchronous results cannot change current state.
 - Every fetch start increments `refreshGeneration`; auto-refresh ticks from an older generation are ignored, so any refresh restarts the timer. A due tick never closes the picker or skips the scope prompt; it reschedules instead. Authentication failures are not retried automatically. The title countdown is display only: each schedule starts a new once-a-second tick chain, and ticks from an older chain are dropped.
 - Quota polling uses a GraphQL query that selects only `rateLimit`, which GitHub does not charge for. Do not use the REST `rate_limit` endpoint: its graphql resource does not track points spent by GraphQL queries. Polling runs as a single chain: each result schedules the next tick. It pauses during login or after an authentication failure and resumes after a successful fetch.
-- Pull-request identity is the pane's visible-row index mapped through that pane's `visible` slice to its own source list (`PullRequests` or `ReviewRequests`). Do not identify rows by PR number alone.
+- Pull-request identity is the pane's visible-row index mapped through that pane's `visible` slice to its own source list (`PullRequests` or `ReviewRequests`). Rows after the visible ones are gone rows, mapped through the pane's `gone` slice to its `changes.gone` list. Do not identify rows by PR number alone.
+- Change marks compare each successful fetch with the previous successful one, by repository and number, per pane. They pile up until the cursor leaves the row or `x` clears them; a failed fetch keeps the baseline, and an account switch resets it. Gone rows are the only results shown that are not current, and they must always be dimmed, struck through, and marked `−`. Age is never compared. Change state stays in memory.
 - Bubbles owns the pull-request table cursor and scrolling. Preserve ANSI/grapheme-aware width behavior and safe OSC 8 hyperlink targets. Cells end their colors with full resets, so row stripes and the selected-row background are re-applied after each reset when the table is drawn.
 - The Merge column is green only for a `mergeStateStatus` of `CLEAN`, `HAS_HOOKS`, or `UNSTABLE`. `mergeable` alone says nothing about required reviews or checks. Conflicts win over every other state, drafts come from `isDraft` (the `DRAFT` state is deprecated), and an unknown or missing state is never shown as mergeable.
 - Age is ready-for-review time (last `ReadyForReviewEvent`, else `createdAt`; zero for drafts), or for review requests the latest `ReviewRequestedEvent` naming the viewer with that ready time as fallback. Null review decisions and check rollups are unknown, never approved or passing.

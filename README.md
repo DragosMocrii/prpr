@@ -97,6 +97,7 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `c`: clear the repository filter and show all authored open PRs and review requests.
 - In the repository picker, type to search (Left/Right move within the query), Enter to apply, Esc to cancel, Ctrl+U to clear, and Ctrl+R to reload accessible repositories. Enter `owner/repo` to check a repository outside the browsed list.
 - `r`: refresh using the currently active GitHub CLI account, and restart the auto-refresh timer.
+- `x`: clear every change mark and drop gone rows (shown only while there are marks).
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
 
@@ -120,6 +121,17 @@ Both lists also show statistics columns, which narrow terminals drop in this ord
 
   The line under the table lists each bot's state for the selected pull request when it fits beside the URL. Findings a bot writes only in a summary comment are not counted, and only the 20 most recent review threads are read. The head commit is dated by when it was committed, not pushed, so a commit pushed long after it was made can leave an earlier bot review showing `✓` instead of `✓*`.
 
-On short terminals only the focused list is shown. PR numbers use OSC 8 links in supporting terminals. The selected pull request URL is also shown below the table for copying. A refresh replaces the visible account and both lists together; failed refreshes do not leave stale results displayed.
+### Change marks
+
+After each refresh, the column at the left of each list marks what changed since the previous successful refresh:
+
+- `+`: the pull request is new in this list.
+- `•`: a shown column changed; the changed cells are drawn in reverse video. Age is never compared.
+- `·`: GitHub reports new activity, such as a comment, but no shown column changed.
+- `−`: the pull request left the list (merged, closed, or the review request was withdrawn). It stays as a dimmed, struck-through row at the bottom of the list, and its link still opens it.
+
+Marks pile up across refreshes until you look: a row's mark clears when the cursor leaves it, and a gone row is removed the same way. `x` clears them all, and is the only way to clear a list's last remaining row. Each list's title counts its new, changed, and gone rows when that fits. A failed refresh does not reset the comparison, and switching GitHub accounts starts over. Changes are kept in memory only.
+
+On short terminals only the focused list is shown. PR numbers use OSC 8 links in supporting terminals. The selected pull request URL is also shown below the table for copying. A refresh replaces the visible account and both lists together; failed refreshes do not leave stale results displayed. Gone rows are the one exception: they are kept on purpose and always marked as gone.
 
 See [contributing](CONTRIBUTING.md), the [MIT license](LICENSE), the [CI workflow](.github/workflows/ci.yml), and the [release workflow](.github/workflows/release.yml).

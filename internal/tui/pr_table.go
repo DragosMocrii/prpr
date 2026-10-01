@@ -26,32 +26,69 @@ func (m *model) rebuildPRTable(resetSelection bool) {
 
 func (m *model) rebuildPane(id paneID, height int, resetSelection bool) {
 	pane := &m.panes[id]
-	source := m.source(id)
 	previous := 0
 	if !resetSelection {
 		previous = pane.table.Cursor()
 	}
+	layout := m.paneLayout(id)
+	pane.fits = layout.fits
+	pane.table = table.New(
+		table.WithStyles(tableStyles(id == m.focus, m.darkBackground)),
+		table.WithColumns(layout.columns),
+		table.WithRows(m.paneRows(id, layout)),
+		table.WithWidth(max(1, m.width)),
+		table.WithHeight(height),
+		table.WithFocused(id == m.focus),
+		table.WithKeyMap(m.keys.Table),
+	)
+	if !resetSelection && rowCount(pane) > 0 {
+		moveCursor(&pane.table, previous)
+	}
+	m.syncPages(id)
+}
+
+// redrawRows replaces a pane's rows in place after its marks or gone rows
+// change, keeping the table's cursor and scroll position.
+func (m *model) redrawRows(id paneID) {
+	pane := &m.panes[id]
+	layout := m.paneLayout(id)
+	pane.fits = layout.fits
+	pane.table.SetColumns(layout.columns)
+	pane.table.SetRows(m.paneRows(id, layout))
+	m.syncPages(id)
+}
+
+// tableLayout is a pane's columns for the current width and scope.
+type tableLayout struct {
+	columns          []table.Column
+	repositoryColumn bool
+	stats            []statColumn
+	fits             bool
+}
+
+func (m *model) paneLayout(id paneID) tableLayout {
+	pane := &m.panes[id]
 	review := id == paneReview
 	maxNumberWidth := 6
-	for _, index := range pane.visible {
-		if index < 0 || index >= len(source) {
-			continue
+	for row := range rowCount(pane) {
+		if pr, _, ok := m.paneRow(id, row); ok {
+			maxNumberWidth = max(maxNumberWidth, ansi.StringWidth(fmt.Sprintf("#%d", pr.Number)))
 		}
-		maxNumberWidth = max(maxNumberWidth, ansi.StringWidth(fmt.Sprintf("#%d", source[index].Number)))
 	}
 	width := max(1, m.width)
-	all := m.selectedRepository == ""
-	repositoryColumn := all && width >= 80
+	var layout tableLayout
+	layout.repositoryColumn = m.selectedRepository == "" && width >= 80
 	repositoryWidth := 0
-	if repositoryColumn {
+	if layout.repositoryColumn {
 		repositoryWidth = min(28, max(12, width/4))
 	}
 	lastTitle, lastWidth := "Merge", 5
 	if review {
 		lastTitle, lastWidth = "Author", min(16, max(8, width/6))
 	}
-	columns := make([]table.Column, 0, 5+len(statColumns))
-	if repositoryColumn {
+	columns := make([]table.Column, 0, 6+len(statColumns))
+	columns = append(columns, table.Column{Title: "", Width: 1})
+	if layout.repositoryColumn {
 		columns = append(columns, table.Column{Title: "Repository", Width: repositoryWidth})
 	}
 	nameColumn := len(columns)
@@ -63,7 +100,6 @@ func (m *model) rebuildPane(id paneID, height int, resetSelection bool) {
 	)
 	nameWidth := remainingWidth(width, columns)
 	// Statistics columns are added in priority order while the name keeps room.
-	var stats []statColumn
 	for _, stat := range statColumns {
 		if stat.bots && !m.bots {
 			continue
@@ -74,54 +110,95 @@ func (m *model) rebuildPane(id paneID, height int, resetSelection bool) {
 		}
 		columns = candidate
 		nameWidth = remainingWidth(width, columns)
-		stats = append(stats, stat)
+		layout.stats = append(layout.stats, stat)
 	}
-	pane.fits = nameWidth >= 8
-	nameWidth = max(8, nameWidth)
-	columns[nameColumn].Width = nameWidth
-	now := m.now()
+	layout.fits = nameWidth >= 8
+	columns[nameColumn].Width = max(8, nameWidth)
+	layout.columns = columns
+	return layout
+}
 
-	rows := make([]table.Row, 0, len(pane.visible))
-	for _, index := range pane.visible {
-		if index < 0 || index >= len(source) {
+// Change-mark styles. Each is turned back on after the resets inside a cell.
+const (
+	reverseOn  = "\x1b[7m"
+	reverseOff = "\x1b[27m"
+	goneOn     = "\x1b[2;9m"
+	goneOff    = "\x1b[22;29m"
+)
+
+func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
+	pane := &m.panes[id]
+	review := id == paneReview
+	all := m.selectedRepository == ""
+	now := m.now()
+	rows := make([]table.Row, 0, rowCount(pane))
+	for row := range rowCount(pane) {
+		pr, gone, ok := m.paneRow(id, row)
+		if !ok {
 			continue
 		}
-		pr := &source[index]
+		mark := m.changes[id].mark(pr)
+		changed := func(cell changedCells, text string) string {
+			if mark.kind == markChanged && mark.cells&cell != 0 {
+				return restyle(text, reverseOn, reverseOff)
+			}
+			return text
+		}
 		name := singleLine(pr.Title)
-		if all && !repositoryColumn {
+		if all && !layout.repositoryColumn {
 			name = singleLine(pr.Repository) + " — " + name
 		}
 		state := "open"
 		if pr.Draft {
 			state = "draft"
 		}
-		last := mergeIcon(pr.Draft, pr.Mergeable, pr.MergeState)
+		last, lastCell := mergeIcon(pr.Draft, pr.Mergeable, pr.MergeState), cellMerge
 		if review {
-			last = singleLine(pr.Author)
+			last, lastCell = singleLine(pr.Author), cellAuthor
 		}
-		row := make(table.Row, 0, len(columns))
-		if repositoryColumn {
-			row = append(row, singleLine(pr.Repository))
+		cells := make(table.Row, 0, len(layout.columns))
+		cells = append(cells, markText(mark.kind, gone))
+		if layout.repositoryColumn {
+			cells = append(cells, singleLine(pr.Repository))
 		}
-		row = append(row, name, prNumberLink(pr.Number, pr.URL), state, last)
-		for _, stat := range stats {
-			row = append(row, stat.cell(pr, now))
+		cells = append(cells, changed(cellName, name), prNumberLink(pr.Number, pr.URL),
+			changed(cellState, state), changed(lastCell, last))
+		for _, stat := range layout.stats {
+			cells = append(cells, changed(stat.cell, stat.text(pr, now)))
 		}
-		rows = append(rows, row)
+		if gone {
+			for i := 1; i < len(cells); i++ {
+				cells[i] = restyle(cells[i], goneOn, goneOff)
+			}
+		}
+		rows = append(rows, cells)
 	}
-	pane.table = table.New(
-		table.WithStyles(tableStyles(id == m.focus, m.darkBackground)),
-		table.WithColumns(columns),
-		table.WithRows(rows),
-		table.WithWidth(width),
-		table.WithHeight(height),
-		table.WithFocused(id == m.focus),
-		table.WithKeyMap(m.keys.Table),
-	)
-	if !resetSelection && len(rows) > 0 {
-		moveCursor(&pane.table, previous)
+	return rows
+}
+
+// markText is a row's change marker.
+func markText(kind markKind, gone bool) string {
+	switch {
+	case gone:
+		return lipgloss.NewStyle().Faint(true).Render("−")
+	case kind == markNew:
+		return coloredIcon("+", "2")
+	case kind == markChanged:
+		return coloredIcon("•", "3")
+	case kind == markActivity:
+		return lipgloss.NewStyle().Faint(true).Render("·")
+	default:
+		return " "
 	}
-	m.syncPages(id)
+}
+
+// restyle applies on to the whole of text, turning it back on after every
+// reset inside text.
+func restyle(text, on, off string) string {
+	for _, reset := range []string{"\x1b[m", "\x1b[0m"} {
+		text = strings.ReplaceAll(text, reset, reset+on)
+	}
+	return on + text + off
 }
 
 // minStatsNameWidth is the PR name width that statistics columns may not
@@ -131,7 +208,9 @@ const minStatsNameWidth = 16
 type statColumn struct {
 	title string
 	width int
-	cell  func(pr *github.PullRequest, now time.Time) string
+	text  func(pr *github.PullRequest, now time.Time) string
+	// cell is the change bit that highlights this column.
+	cell changedCells
 	// bots columns are shown only when review bots are configured.
 	bots bool
 }
@@ -139,11 +218,11 @@ type statColumn struct {
 // statColumns are listed in the order they are dropped last to first as the
 // terminal narrows.
 var statColumns = []statColumn{
-	{"Age", 4, func(pr *github.PullRequest, now time.Time) string { return ageText(pr.WaitingSince, now) }, false},
-	{"Bots", 4, func(pr *github.PullRequest, _ time.Time) string { return botsText(pr.Bots) }, true},
-	{"CI", 2, func(pr *github.PullRequest, _ time.Time) string { return checksIcon(pr.Checks) }, false},
-	{"Review", 6, func(pr *github.PullRequest, _ time.Time) string { return reviewText(pr.ReviewDecision, pr.Approvals) }, false},
-	{"Size", 11, func(pr *github.PullRequest, _ time.Time) string { return sizeText(pr.Additions, pr.Deletions) }, false},
+	{"Age", 4, func(pr *github.PullRequest, now time.Time) string { return ageText(pr.WaitingSince, now) }, 0, false},
+	{"Bots", 4, func(pr *github.PullRequest, _ time.Time) string { return botsText(pr.Bots) }, cellBots, true},
+	{"CI", 2, func(pr *github.PullRequest, _ time.Time) string { return checksIcon(pr.Checks) }, cellCI, false},
+	{"Review", 6, func(pr *github.PullRequest, _ time.Time) string { return reviewText(pr.ReviewDecision, pr.Approvals) }, cellReview, false},
+	{"Size", 11, func(pr *github.PullRequest, _ time.Time) string { return sizeText(pr.Additions, pr.Deletions) }, cellSize, false},
 }
 
 // remainingWidth is the width left for the zero-width name column; each

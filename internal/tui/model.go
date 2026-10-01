@@ -33,6 +33,7 @@ type model struct {
 	selectedRepository  string
 	filterLogin         string
 	panes               [2]prPane
+	changes             [2]paneChanges
 	focus               paneID
 	keys                keyMap
 	help                help.Model
@@ -229,8 +230,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 			m.snapshot = github.Snapshot{}
+			// Change tracking keeps its baseline, so the next success is
+			// compared with the last good lists.
 			for _, id := range paneIDs {
 				m.panes[id].visible = nil
+				m.panes[id].gone = nil
 			}
 			m.rebuildPRTable(true)
 			// Authentication failures need a login, not a retry.
@@ -254,25 +258,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.scopeChoiceCursor = 0
 				}
 			}
-			type selection struct {
-				repository string
-				number     int
-				ok         bool
-			}
-			var previous [2]selection
-			for _, id := range paneIDs {
-				if pr, ok := m.paneSelectedPR(id); ok {
-					previous[id] = selection{pr.Repository, pr.Number, true}
+			m.keepingSelection(func() {
+				m.snapshot = msg.snapshot
+				m.err = nil
+				for _, id := range paneIDs {
+					if accountChanged {
+						m.changes[id].reset(m.source(id))
+					} else {
+						m.changes[id].update(m.source(id))
+					}
 				}
-			}
-			m.snapshot = msg.snapshot
-			m.err = nil
-			m.rebuildVisiblePRs()
-			for _, id := range paneIDs {
-				if previous[id].ok {
-					m.selectPR(id, previous[id].repository, previous[id].number)
-				}
-			}
+				m.rebuildVisiblePRs()
+			})
 			if accountChanged {
 				focus := paneMine
 				if len(m.panes[paneMine].visible) == 0 && len(m.panes[paneReview].visible) > 0 {
@@ -333,6 +330,13 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, k.NextPane, k.PrevPane):
 		// Two panes: next and previous are the same move.
 		m.setFocus(1 - m.focus)
+	case key.Matches(msg, k.ClearMarks):
+		m.keepingSelection(func() {
+			for _, id := range paneIDs {
+				m.changes[id].clear()
+			}
+			m.rebuildVisiblePRs()
+		})
 	case key.Matches(msg, k.Help):
 		m.help.ShowAll = !m.help.ShowAll
 		m.rebuildPRTable(false)
@@ -348,18 +352,50 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.openRepositoryPicker()
 	case key.Matches(msg, k.Pages.PrevPage, k.Pages.NextPage):
 		pane := m.focused()
+		left := pane.table.Cursor()
 		page := pane.pages.Page
 		pane.pages, _ = pane.pages.Update(msg)
 		if pane.pages.Page != page {
 			moveCursor(&pane.table, pane.pages.Page*pane.pages.PerPage)
 		}
 		m.syncPages(m.focus)
+		m.leaveRow(m.focus, left)
 	default:
 		pane := m.focused()
+		left := pane.table.Cursor()
 		pane.table, _ = pane.table.Update(msg)
 		m.syncPages(m.focus)
+		m.leaveRow(m.focus, left)
 	}
 	return nil
+}
+
+// leaveRow clears the mark of the row the cursor just left, or drops it when
+// it is gone. A gone row above the cursor shifts the cursor up with the rows.
+func (m *model) leaveRow(id paneID, row int) {
+	pane := &m.panes[id]
+	if pane.table.Cursor() == row {
+		return
+	}
+	pr, gone, ok := m.paneRow(id, row)
+	if !ok {
+		return
+	}
+	if !gone {
+		if m.changes[id].see(pr) {
+			m.redrawRows(id)
+		}
+		return
+	}
+	m.changes[id].dismiss(pr)
+	m.rebuildGone(id)
+	target := pane.table.Cursor()
+	if row < target {
+		target--
+	}
+	m.redrawRows(id)
+	moveCursor(&pane.table, target)
+	m.syncPages(id)
 }
 
 func (m *model) updateRepositoryPicker(msg tea.KeyPressMsg) tea.Cmd {
@@ -407,12 +443,50 @@ func (m *model) rebuildVisiblePRs() {
 		pane := &m.panes[id]
 		pane.visible = pane.visible[:0]
 		for index, pr := range m.source(id) {
-			if m.selectedRepository == "" || strings.EqualFold(pr.Repository, m.selectedRepository) {
+			if m.inScope(&pr) {
 				pane.visible = append(pane.visible, index)
 			}
 		}
+		m.rebuildGone(id)
 	}
 	m.rebuildPRTable(true)
+}
+
+// keepingSelection runs rebuild, then reselects each pane's pull request if
+// it is still in the pane.
+func (m *model) keepingSelection(rebuild func()) {
+	type selection struct {
+		repository string
+		number     int
+		ok         bool
+	}
+	var previous [2]selection
+	for _, id := range paneIDs {
+		if pr, ok := m.paneSelectedPR(id); ok {
+			previous[id] = selection{pr.Repository, pr.Number, true}
+		}
+	}
+	rebuild()
+	for _, id := range paneIDs {
+		if previous[id].ok {
+			m.selectPR(id, previous[id].repository, previous[id].number)
+		}
+	}
+}
+
+func (m *model) inScope(pr *github.PullRequest) bool {
+	return m.selectedRepository == "" || strings.EqualFold(pr.Repository, m.selectedRepository)
+}
+
+// rebuildGone lists a pane's gone pull requests in the current scope.
+func (m *model) rebuildGone(id paneID) {
+	pane := &m.panes[id]
+	pane.gone = pane.gone[:0]
+	for index := range m.changes[id].gone {
+		if m.inScope(&m.changes[id].gone[index]) {
+			pane.gone = append(pane.gone, index)
+		}
+	}
 }
 
 func (m *model) applyRepository(repository string) {
@@ -516,7 +590,7 @@ func (m *model) panesFit() bool {
 		if layout.single && id != m.focus {
 			continue
 		}
-		if pane := &m.panes[id]; len(pane.visible) > 0 && !pane.fits {
+		if pane := &m.panes[id]; rowCount(pane) > 0 && !pane.fits {
 			return false
 		}
 	}
@@ -539,7 +613,7 @@ func (m *model) listLines() []string {
 			continue
 		}
 		lines = append(lines, m.paneTitle(id, layout.single))
-		if len(m.panes[id].visible) == 0 {
+		if rowCount(&m.panes[id]) == 0 {
 			lines = append(lines, m.emptyPaneLine(id))
 			continue
 		}
@@ -556,12 +630,12 @@ func (m *model) listLines() []string {
 	}
 	lines = append(lines, selected)
 	fixed, legend := "", ""
-	if pane := m.focused(); len(pane.visible) > 0 && pane.pages.TotalPages > 1 {
+	if pane := m.focused(); rowCount(pane) > 0 && pane.pages.TotalPages > 1 {
 		fixed = m.pageIndicator()
 	}
 	if m.preferenceErr != nil {
 		fixed = strings.TrimLeft(fixed+"  "+m.preferenceErr.Error(), " ")
-	} else if !(layout.single && m.focus != paneMine) && len(m.panes[paneMine].visible) > 0 {
+	} else if !(layout.single && m.focus != paneMine) && rowCount(&m.panes[paneMine]) > 0 {
 		legend = "✓ ready  ● blocked  ↓ behind  ✗ conflicts  ? unknown"
 	}
 	lines = append(lines, m.statusLine(fixed, legend))

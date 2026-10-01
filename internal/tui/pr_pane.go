@@ -22,8 +22,11 @@ var paneIDs = [...]paneID{paneMine, paneReview}
 
 // prPane is one pull-request list. visible holds indices into the pane's
 // source slice, so a row is identified by its visible index, never by number.
+// Rows after the visible ones are gone pull requests: gone holds indices into
+// the pane's changes.gone.
 type prPane struct {
 	visible []int
+	gone    []int
 	table   table.Model
 	pages   paginator.Model
 	fits    bool
@@ -33,6 +36,11 @@ func newPRPane() prPane {
 	pages := paginator.New()
 	pages.Type = paginator.Dots
 	return prPane{pages: pages}
+}
+
+// rowCount counts a pane's rows: visible pull requests, then gone ones.
+func rowCount(pane *prPane) int {
+	return len(pane.visible) + len(pane.gone)
 }
 
 // minTableHeight is a table header (title and border) plus one row. It is the
@@ -58,7 +66,7 @@ func (m *model) listChromeHeight() int {
 
 func (m *model) layoutPanes() paneLayout {
 	avail := m.height - m.listChromeHeight()
-	filled := func(id paneID) bool { return len(m.panes[id].visible) > 0 }
+	filled := func(id paneID) bool { return rowCount(&m.panes[id]) > 0 }
 	need := func(id paneID) int {
 		if filled(id) {
 			return 1 + minDualTableHeight
@@ -97,32 +105,46 @@ func (m *model) focused() *prPane {
 	return &m.panes[m.focus]
 }
 
-func (m *model) paneSelectedPR(id paneID) (*github.PullRequest, bool) {
+// paneRow maps a pane row to its pull request and reports whether that pull
+// request is gone.
+func (m *model) paneRow(id paneID, row int) (*github.PullRequest, bool, bool) {
 	pane := &m.panes[id]
-	source := m.source(id)
-	row := pane.table.Cursor()
-	if row < 0 || row >= len(pane.visible) {
-		return nil, false
+	if row < 0 {
+		return nil, false, false
 	}
-	index := pane.visible[row]
-	if index < 0 || index >= len(source) {
-		return nil, false
+	if row < len(pane.visible) {
+		source := m.source(id)
+		if index := pane.visible[row]; index >= 0 && index < len(source) {
+			return &source[index], false, true
+		}
+		return nil, false, false
 	}
-	return &source[index], true
+	row -= len(pane.visible)
+	gone := m.changes[id].gone
+	if row < len(pane.gone) {
+		if index := pane.gone[row]; index >= 0 && index < len(gone) {
+			return &gone[index], true, true
+		}
+	}
+	return nil, false, false
+}
+
+func (m *model) paneSelectedPR(id paneID) (*github.PullRequest, bool) {
+	pr, _, ok := m.paneRow(id, m.panes[id].table.Cursor())
+	return pr, ok
 }
 
 func (m *model) selectedPR() (*github.PullRequest, bool) {
 	return m.paneSelectedPR(m.focus)
 }
 
-// selectPR moves a pane's cursor to the visible row for repository and
-// number, if that pull request is still visible in the pane.
+// selectPR moves a pane's cursor to the row for repository and number, if
+// that pull request is still in the pane, as a visible or gone row.
 func (m *model) selectPR(id paneID, repository string, number int) {
 	pane := &m.panes[id]
-	source := m.source(id)
-	for row, index := range pane.visible {
-		pr := &source[index]
-		if pr.Number == number && strings.EqualFold(pr.Repository, repository) {
+	for row := range rowCount(pane) {
+		pr, _, ok := m.paneRow(id, row)
+		if ok && pr.Number == number && strings.EqualFold(pr.Repository, repository) {
 			moveCursor(&pane.table, row)
 			m.syncPages(id)
 			return
@@ -136,7 +158,7 @@ func (m *model) syncPages(id paneID) {
 	pane := &m.panes[id]
 	pane.pages.PerPage = max(1, pane.table.Height())
 	pane.pages.TotalPages = 1
-	pane.pages.SetTotalPages(len(pane.visible))
+	pane.pages.SetTotalPages(rowCount(pane))
 	pane.pages.Page = min(pane.table.Cursor()/pane.pages.PerPage, pane.pages.TotalPages-1)
 }
 
@@ -252,10 +274,42 @@ func (m *model) paneTitle(id paneID, single bool) string {
 	if single {
 		title += " · tab: other list"
 	}
+	// The summary is dropped rather than truncated so the title stays whole;
+	// the title's two-cell prefix and the separator count toward its width.
+	if summary := m.changeSummary(id); summary != "" && 2+lipgloss.Width(title)+3+lipgloss.Width(summary) <= m.width {
+		title += " · " + summary
+	}
 	if id != m.focus {
 		return "  " + lipgloss.NewStyle().Faint(true).Render(title)
 	}
 	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render("▸ " + title)
+}
+
+// changeSummary counts a pane's marked rows in the current scope.
+func (m *model) changeSummary(id paneID) string {
+	pane := &m.panes[id]
+	added, changed := 0, 0
+	for row := range len(pane.visible) {
+		if pr, _, ok := m.paneRow(id, row); ok {
+			switch m.changes[id].mark(pr).kind {
+			case markNew:
+				added++
+			case markChanged:
+				changed++
+			}
+		}
+	}
+	var parts []string
+	if added > 0 {
+		parts = append(parts, fmt.Sprintf("+%d new", added))
+	}
+	if changed > 0 {
+		parts = append(parts, fmt.Sprintf("%d changed", changed))
+	}
+	if gone := len(pane.gone); gone > 0 {
+		parts = append(parts, fmt.Sprintf("%d gone", gone))
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (m *model) emptyPaneLine(id paneID) string {
