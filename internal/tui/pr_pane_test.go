@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -197,5 +198,58 @@ func TestHelpListsPaneSwitch(t *testing.T) {
 	m := newPaneModel(t, 120, 24, manyPRs(3), reviewPRs(3))
 	if !strings.Contains(ansi.Strip(strings.Join(m.helpLines(keyMap.listHelp), "\n")), "tab") {
 		t.Fatal("short help does not list tab")
+	}
+}
+
+func TestRefreshRestoresEachPaneAndKeepsFocus(t *testing.T) {
+	shared := github.PullRequest{Number: 7, Repository: "acme/a", URL: "https://github.com/acme/a/pull/7"}
+	mine := []github.PullRequest{{Number: 1, Repository: "acme/a"}, shared}
+	review := []github.PullRequest{{Number: 2, Repository: "acme/b", Author: "bob"}, shared, {Number: 3, Repository: "acme/c", Author: "bob"}}
+	m := newPaneModel(t, 100, 30, mine, review)
+	press(m, tea.Key{Code: 'j', Text: "j"}) // mine: shared #7
+	press(m, tea.Key{Code: 'r', Text: "r"})
+	press(m, tea.Key{Code: tea.KeyTab})     // switching focus during a refresh is allowed
+	press(m, tea.Key{Code: 'G', Text: "G"}) // review: acme/c #3
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{
+		Login:          "alice",
+		PullRequests:   []github.PullRequest{shared, mine[0]},
+		ReviewRequests: []github.PullRequest{review[2], review[0], shared},
+	}})
+	if m.focus != paneReview || m.refreshing() {
+		t.Fatalf("focus %d refreshing %t after refresh", m.focus, m.refreshing())
+	}
+	if pr, ok := m.paneSelectedPR(paneReview); !ok || pr.Repository != "acme/c" || pr.Number != 3 {
+		t.Fatalf("review selection = %+v, %v", pr, ok)
+	}
+	if pr, ok := m.paneSelectedPR(paneMine); !ok || pr.Repository != "acme/a" || pr.Number != 7 {
+		t.Fatalf("mine selection = %+v, %v", pr, ok)
+	}
+}
+
+func TestFailedRefreshClearsBothPanes(t *testing.T) {
+	m := newPaneModel(t, 100, 24, manyPRs(2), reviewPRs(2))
+	m.startFetch()
+	if len(m.panes[paneReview].visible) != 2 {
+		t.Fatal("refresh hid review rows before finishing")
+	}
+	m.Update(fetchFinishedMsg{err: errors.New("offline")})
+	if len(m.panes[paneMine].visible) != 0 || len(m.panes[paneReview].visible) != 0 || len(m.snapshot.ReviewRequests) != 0 {
+		t.Fatalf("failed refresh kept rows: %v / %v", m.panes[paneMine].visible, m.panes[paneReview].visible)
+	}
+	if _, ok := m.selectedPR(); ok {
+		t.Fatal("failed refresh exposed a selection")
+	}
+}
+
+func TestFirstLoadFocusesReviewsWhenOwnListIsEmpty(t *testing.T) {
+	m := newPaneModel(t, 100, 24, nil, reviewPRs(2))
+	if m.focus != paneReview {
+		t.Fatalf("focus = %d, want review pane", m.focus)
+	}
+	press(m, tea.Key{Code: tea.KeyTab})
+	press(m, tea.Key{Code: 'r', Text: "r"})
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: reviewPRs(2)}})
+	if m.focus != paneMine {
+		t.Fatal("same-account refresh moved focus")
 	}
 }

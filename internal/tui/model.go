@@ -142,7 +142,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.rebuildPRTable(true)
 		} else {
-			if !strings.EqualFold(m.filterLogin, msg.snapshot.Login) {
+			accountChanged := !strings.EqualFold(m.filterLogin, msg.snapshot.Login)
+			if accountChanged {
 				if m.filterLogin != "" {
 					m.preferenceErr = nil
 				}
@@ -174,6 +175,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if previous[id].ok {
 					m.selectPR(id, previous[id].repository, previous[id].number)
 				}
+			}
+			if accountChanged {
+				focus := paneMine
+				if len(m.panes[paneMine].visible) == 0 && len(m.panes[paneReview].visible) > 0 {
+					focus = paneReview
+				}
+				m.setFocus(focus)
 			}
 		}
 	case loginFinishedMsg:

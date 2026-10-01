@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -60,7 +61,7 @@ func (m *model) openRepositoryPicker() tea.Cmd {
 	picker.input.KeyMap.Paste.SetEnabled(false)
 	picker.setDark(m.darkBackground)
 	picker.setWidth(m.width)
-	for _, pr := range m.snapshot.PullRequests {
+	for _, pr := range append(slices.Clone(m.snapshot.PullRequests), m.snapshot.ReviewRequests...) {
 		picker.repositories = append(picker.repositories, pr.Repository)
 	}
 	picker.repositories = sortedRepositoryNames(picker.repositories)

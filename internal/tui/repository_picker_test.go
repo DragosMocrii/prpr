@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -220,5 +221,13 @@ func TestPickerLookupBlocksTypingUntilFailure(t *testing.T) {
 	press(m, tea.Key{Code: 'x', Text: "x"})
 	if m.picker.query() != "public/otherx" {
 		t.Fatalf("input not editable after failed lookup: %q", m.picker.query())
+	}
+}
+
+func TestPickerOffersReviewRequestRepositories(t *testing.T) {
+	m := newPaneModel(t, 100, 24, []github.PullRequest{{Number: 1, Repository: "acme/a"}}, []github.PullRequest{{Number: 2, Repository: "other/z", Author: "bob"}})
+	openPicker(m)
+	if !slices.Contains(m.picker.repositories, "other/z") || !slices.Contains(m.picker.repositories, "acme/a") {
+		t.Fatalf("picker repositories = %v", m.picker.repositories)
 	}
 }
