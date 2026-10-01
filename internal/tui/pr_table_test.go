@@ -34,12 +34,12 @@ func TestTableFilterPreservesPRIdentityAndClickableNumber(t *testing.T) {
 		{Number: 2, Repository: "acme/a", URL: "https://github.com/acme/a/pull/2", Title: "second", Mergeable: "UNKNOWN"},
 	})
 	m.applyRepository("acme/a")
-	m.prTable.MoveDown(1)
+	m.panes[paneMine].table.MoveDown(1)
 	selected, ok := m.selectedPR()
 	if !ok || selected.Number != 2 || selected.Repository != "acme/a" || selected.URL != "https://github.com/acme/a/pull/2" {
 		t.Fatalf("selected PR = %+v, %v", selected, ok)
 	}
-	row := m.prTable.Rows()[1]
+	row := m.panes[paneMine].table.Rows()[1]
 	if !strings.Contains(row[1], "\x1b]8;;https://github.com/acme/a/pull/2\x07") || !strings.HasSuffix(row[1], "\x1b]8;;\x07") {
 		t.Fatalf("number hyperlink missing target/reset: %q", row[1])
 	}
@@ -69,18 +69,18 @@ func TestAllTableShowsRepositoryIdentityAndIndependentStatuses(t *testing.T) {
 		{Number: 2, Repository: "acme/b", Title: "conflicts", Mergeable: "CONFLICTING"},
 		{Number: 3, Repository: "acme/c", Title: "unknown", Mergeable: "new-value"},
 	})
-	columns := m.prTable.Columns()
+	columns := m.panes[paneMine].table.Columns()
 	if len(columns) != 5 || columns[0].Title != "Repository" || columns[1].Title != "PR name" {
 		t.Fatalf("All table columns = %+v", columns)
 	}
-	rows := m.prTable.Rows()
+	rows := m.panes[paneMine].table.Rows()
 	if rows[0][3] != "draft" || ansi.Strip(rows[0][4]) != "✓" || ansi.Strip(rows[1][4]) != "✗" || ansi.Strip(rows[2][4]) != "?" {
 		t.Fatalf("state/merge rows = %+v", rows)
 	}
 	m.width = 79
 	m.rebuildPRTable(true)
-	if len(m.prTable.Columns()) != 4 || !strings.HasPrefix(m.prTable.Rows()[0][0], "acme/a — ") {
-		t.Fatalf("narrow All table lost repository identity: cols %+v row %+v", m.prTable.Columns(), m.prTable.Rows()[0])
+	if len(m.panes[paneMine].table.Columns()) != 4 || !strings.HasPrefix(m.panes[paneMine].table.Rows()[0][0], "acme/a — ") {
+		t.Fatalf("narrow All table lost repository identity: cols %+v row %+v", m.panes[paneMine].table.Columns(), m.panes[paneMine].table.Rows()[0])
 	}
 }
 
@@ -90,7 +90,7 @@ func TestResizePreservesSelectedPRAndBoundsScreen(t *testing.T) {
 		prs[i] = github.PullRequest{Number: i + 1, Repository: "acme/a", URL: fmt.Sprintf("https://github.com/acme/a/pull/%d", i+1), Title: "長い🙂 title"}
 	}
 	m := newTableModel(t, 120, 24, prs)
-	m.prTable.MoveDown(8)
+	m.panes[paneMine].table.MoveDown(8)
 	wantURL := prs[8].URL
 	for _, size := range [][2]int{{40, 8}, {79, 12}, {80, 12}, {120, 24}} {
 		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
@@ -122,7 +122,7 @@ func TestLongUnicodeTitleIsSingleLineAndGraphemeSafe(t *testing.T) {
 	title := strings.Repeat("🙂長", 40)
 	m := newTableModel(t, 40, 8, []github.PullRequest{{Number: 1, Repository: "acme/a", Title: title}})
 	m.applyRepository("acme/a")
-	lines := strings.Split(m.prTable.View(), "\n")
+	lines := strings.Split(m.panes[paneMine].table.View(), "\n")
 	var nameCell string
 	for _, line := range lines {
 		if strings.Contains(ansi.Strip(line), "🙂長") {
@@ -140,7 +140,7 @@ func TestLongUnicodeTitleIsSingleLineAndGraphemeSafe(t *testing.T) {
 
 func TestDynamicColumnBudgetShowsResizePrompt(t *testing.T) {
 	m := newTableModel(t, 40, 12, []github.PullRequest{{Number: 999999999999999999, Repository: "acme/a", Title: "wide number"}})
-	if m.prTableFits {
+	if m.panes[paneMine].fits {
 		t.Fatal("table unexpectedly fit with no usable title width")
 	}
 	if !strings.Contains(m.View().Content, "Terminal too small") {
@@ -158,34 +158,34 @@ func manyPRs(n int) []github.PullRequest {
 
 func TestTableNavigationKeysAndPageIndicator(t *testing.T) {
 	m := newTableModel(t, 80, 12, manyPRs(30))
-	perPage := m.prTable.Height()
-	if perPage < 1 || m.prPages.TotalPages != (30+perPage-1)/perPage {
-		t.Fatalf("pages = %d with %d rows per page", m.prPages.TotalPages, perPage)
+	perPage := m.panes[paneMine].table.Height()
+	if perPage < 1 || m.panes[paneMine].pages.TotalPages != (30+perPage-1)/perPage {
+		t.Fatalf("pages = %d with %d rows per page", m.panes[paneMine].pages.TotalPages, perPage)
 	}
 	press(m, tea.Key{Code: 'G', Text: "G"})
-	if selected, ok := m.selectedPR(); !ok || selected.Number != 30 || m.prPages.Page != m.prPages.TotalPages-1 {
-		t.Fatalf("G selected %+v on page %d", selected, m.prPages.Page)
+	if selected, ok := m.selectedPR(); !ok || selected.Number != 30 || m.panes[paneMine].pages.Page != m.panes[paneMine].pages.TotalPages-1 {
+		t.Fatalf("G selected %+v on page %d", selected, m.panes[paneMine].pages.Page)
 	}
 	press(m, tea.Key{Code: 'g', Text: "g"})
-	if m.prTable.Cursor() != 0 || m.prPages.Page != 0 {
-		t.Fatalf("g cursor %d page %d", m.prTable.Cursor(), m.prPages.Page)
+	if m.panes[paneMine].table.Cursor() != 0 || m.panes[paneMine].pages.Page != 0 {
+		t.Fatalf("g cursor %d page %d", m.panes[paneMine].table.Cursor(), m.panes[paneMine].pages.Page)
 	}
 	press(m, tea.Key{Code: tea.KeyPgDown})
-	if m.prTable.Cursor() != perPage {
-		t.Fatalf("pgdown cursor = %d, want %d", m.prTable.Cursor(), perPage)
+	if m.panes[paneMine].table.Cursor() != perPage {
+		t.Fatalf("pgdown cursor = %d, want %d", m.panes[paneMine].table.Cursor(), perPage)
 	}
 	press(m, tea.Key{Code: tea.KeyRight})
-	if m.prTable.Cursor() != 2*perPage || m.prPages.Page != 2 {
-		t.Fatalf("right cursor %d page %d", m.prTable.Cursor(), m.prPages.Page)
+	if m.panes[paneMine].table.Cursor() != 2*perPage || m.panes[paneMine].pages.Page != 2 {
+		t.Fatalf("right cursor %d page %d", m.panes[paneMine].table.Cursor(), m.panes[paneMine].pages.Page)
 	}
 	press(m, tea.Key{Code: tea.KeyLeft})
-	if m.prTable.Cursor() != perPage || m.prPages.Page != 1 {
-		t.Fatalf("left cursor %d page %d", m.prTable.Cursor(), m.prPages.Page)
+	if m.panes[paneMine].table.Cursor() != perPage || m.panes[paneMine].pages.Page != 1 {
+		t.Fatalf("left cursor %d page %d", m.panes[paneMine].table.Cursor(), m.panes[paneMine].pages.Page)
 	}
 	press(m, tea.Key{Code: 'G', Text: "G"})
 	press(m, tea.Key{Code: tea.KeyRight})
-	if m.prTable.Cursor() != 29 {
-		t.Fatalf("right on last page moved cursor to %d", m.prTable.Cursor())
+	if m.panes[paneMine].table.Cursor() != 29 {
+		t.Fatalf("right on last page moved cursor to %d", m.panes[paneMine].table.Cursor())
 	}
 	if !strings.Contains(m.View().Content, m.pageIndicator()) {
 		t.Fatal("page indicator missing from list view")
@@ -194,10 +194,10 @@ func TestTableNavigationKeysAndPageIndicator(t *testing.T) {
 
 func TestFullHelpToggleKeepsScreenBounded(t *testing.T) {
 	m := newTableModel(t, 40, 12, manyPRs(30))
-	shortHeight := m.prTable.Height()
+	shortHeight := m.panes[paneMine].table.Height()
 	press(m, tea.Key{Code: '?', Text: "?"})
-	if !m.help.ShowAll || m.prTable.Height() >= shortHeight {
-		t.Fatalf("full help did not take table rows: showAll %t height %d -> %d", m.help.ShowAll, shortHeight, m.prTable.Height())
+	if !m.help.ShowAll || m.panes[paneMine].table.Height() >= shortHeight {
+		t.Fatalf("full help did not take table rows: showAll %t height %d -> %d", m.help.ShowAll, shortHeight, m.panes[paneMine].table.Height())
 	}
 	for _, size := range [][2]int{{40, 12}, {40, 8}, {120, 24}} {
 		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
@@ -228,8 +228,8 @@ func TestEmptyScopeIgnoresTableKeys(t *testing.T) {
 	for _, k := range []tea.Key{{Code: 'G', Text: "G"}, {Code: tea.KeyPgDown}, {Code: tea.KeyRight}} {
 		press(m, k)
 	}
-	if m.prTable.Cursor() != 0 {
-		t.Fatalf("empty scope moved cursor to %d", m.prTable.Cursor())
+	if m.panes[paneMine].table.Cursor() != 0 {
+		t.Fatalf("empty scope moved cursor to %d", m.panes[paneMine].table.Cursor())
 	}
 	if _, ok := m.selectedPR(); ok {
 		t.Fatal("empty scope exposed selected PR")

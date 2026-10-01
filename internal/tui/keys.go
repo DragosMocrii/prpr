@@ -79,7 +79,8 @@ func (m *model) syncKeys() {
 	browsing := ready && m.scopeChosen && m.snapshot.Login != ""
 	// Rows kept on screen during a refresh stay navigable.
 	viewing := !m.loginActive && m.err == nil && m.picker == nil && m.scopeChosen && m.snapshot.Login != ""
-	rows := viewing && len(m.visiblePRs) > 0
+	pane := m.focused()
+	rows := viewing && len(pane.visible) > 0
 
 	k.ChoiceUp.SetEnabled(scopeChoice)
 	k.ChoiceDown.SetEnabled(scopeChoice)
@@ -102,11 +103,13 @@ func (m *model) syncKeys() {
 	} {
 		binding.SetEnabled(rows)
 	}
-	m.prTable.KeyMap = k.Table
-	paged := rows && m.prPages.TotalPages > 1
+	paged := rows && pane.pages.TotalPages > 1
 	k.Pages.PrevPage.SetEnabled(paged)
 	k.Pages.NextPage.SetEnabled(paged)
-	m.prPages.KeyMap = k.Pages
+	for _, id := range paneIDs {
+		m.panes[id].table.KeyMap = k.Table
+		m.panes[id].pages.KeyMap = k.Pages
+	}
 
 	picking := m.picker != nil
 	editable := picking && !m.picker.lookup

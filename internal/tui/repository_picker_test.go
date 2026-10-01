@@ -52,8 +52,8 @@ func TestPickerSelectsRepositoryAndAllRepositories(t *testing.T) {
 		t.Fatalf("selected candidate = %q, want acme/b", got)
 	}
 	press(m, tea.Key{Code: tea.KeyEnter})
-	if m.picker != nil || m.selectedRepository != "acme/b" || len(m.visiblePRs) != 1 {
-		t.Fatalf("repository selection did not apply: picker %v filter %q visible %v", m.picker, m.selectedRepository, m.visiblePRs)
+	if m.picker != nil || m.selectedRepository != "acme/b" || len(m.panes[paneMine].visible) != 1 {
+		t.Fatalf("repository selection did not apply: picker %v filter %q visible %v", m.picker, m.selectedRepository, m.panes[paneMine].visible)
 	}
 	if got, found := m.preferences.Lookup("alice"); !found || got != "acme/b" {
 		t.Fatalf("known repository choice not persisted: %q, %v", got, found)
@@ -65,8 +65,8 @@ func TestPickerSelectsRepositoryAndAllRepositories(t *testing.T) {
 		t.Fatalf("no-match candidates = %+v, want All repositories", m.picker.candidates)
 	}
 	press(m, tea.Key{Code: tea.KeyEnter})
-	if m.selectedRepository != "" || len(m.visiblePRs) != 2 {
-		t.Fatalf("All repositories selection = %q with %v visible", m.selectedRepository, m.visiblePRs)
+	if m.selectedRepository != "" || len(m.panes[paneMine].visible) != 2 {
+		t.Fatalf("All repositories selection = %q with %v visible", m.selectedRepository, m.panes[paneMine].visible)
 	}
 	if got, found := m.preferences.Lookup("alice"); !found || got != "" {
 		t.Fatalf("All choice not persisted: %q, %v", got, found)
@@ -79,11 +79,11 @@ func TestPickerCancelPreservesFilterAndPRSelection(t *testing.T) {
 	m.rebuildVisiblePRs()
 	m.applyRepository("acme/a")
 	press(m, tea.Key{Code: tea.KeyDown})
-	previousCursor := m.prTable.Cursor()
+	previousCursor := m.panes[paneMine].table.Cursor()
 	openPicker(m)
 	press(m, tea.Key{Code: tea.KeyEsc})
-	if m.picker != nil || m.selectedRepository != "acme/a" || m.prTable.Cursor() != previousCursor || m.prTable.Cursor() != 1 {
-		t.Fatalf("cancel changed list state: picker %v filter %q cursor %d", m.picker, m.selectedRepository, m.prTable.Cursor())
+	if m.picker != nil || m.selectedRepository != "acme/a" || m.panes[paneMine].table.Cursor() != previousCursor || m.panes[paneMine].table.Cursor() != 1 {
+		t.Fatalf("cancel changed list state: picker %v filter %q cursor %d", m.picker, m.selectedRepository, m.panes[paneMine].table.Cursor())
 	}
 }
 
@@ -127,8 +127,8 @@ func TestPickerDirectLookupFailureThenCanonicalSuccess(t *testing.T) {
 	}
 	press(m, tea.Key{Code: tea.KeyEnter})
 	m.Update(repositoryLookupFinishedMsg{requestID: m.repositoryRequestID, repository: "Public/Other"})
-	if m.picker != nil || m.selectedRepository != "Public/Other" || len(m.visiblePRs) != 0 {
-		t.Fatalf("canonical lookup result not applied: picker %v filter %q visible %v", m.picker, m.selectedRepository, m.visiblePRs)
+	if m.picker != nil || m.selectedRepository != "Public/Other" || len(m.panes[paneMine].visible) != 0 {
+		t.Fatalf("canonical lookup result not applied: picker %v filter %q visible %v", m.picker, m.selectedRepository, m.panes[paneMine].visible)
 	}
 	if got, found := m.preferences.Lookup("alice"); !found || got != "Public/Other" {
 		t.Fatalf("canonical lookup choice not saved: %q, %v", got, found)

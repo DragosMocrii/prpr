@@ -9,9 +9,7 @@ import (
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/paginator"
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -33,10 +31,8 @@ type model struct {
 	snapshot            github.Snapshot
 	selectedRepository  string
 	filterLogin         string
-	visiblePRs          []int
-	prTable             table.Model
-	prTableFits         bool
-	prPages             paginator.Model
+	panes               [2]prPane
+	focus               paneID
 	keys                keyMap
 	help                help.Model
 	spinner             spinner.Model
@@ -76,10 +72,9 @@ func newModel(ctx context.Context, client *github.Client, preferences *preferenc
 		keys:           defaultKeyMap(),
 		help:           help.New(),
 		spinner:        spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		prPages:        paginator.New(),
 		darkBackground: true,
 	}
-	m.prPages.Type = paginator.Dots
+	m.panes = [2]prPane{newPRPane(), newPRPane()}
 	m.rebuildPRTable(true)
 	return m
 }
@@ -142,7 +137,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 			m.snapshot = github.Snapshot{}
-			m.visiblePRs = nil
+			for _, id := range paneIDs {
+				m.panes[id].visible = nil
+			}
 			m.rebuildPRTable(true)
 		} else {
 			if !strings.EqualFold(m.filterLogin, msg.snapshot.Login) {
@@ -159,17 +156,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.scopeChoiceCursor = 0
 				}
 			}
-			previous, hadSelection := m.selectedPR()
-			var repository string
-			var number int
-			if hadSelection {
-				repository, number = previous.Repository, previous.Number
+			type selection struct {
+				repository string
+				number     int
+				ok         bool
+			}
+			var previous [2]selection
+			for _, id := range paneIDs {
+				if pr, ok := m.paneSelectedPR(id); ok {
+					previous[id] = selection{pr.Repository, pr.Number, true}
+				}
 			}
 			m.snapshot = msg.snapshot
 			m.err = nil
 			m.rebuildVisiblePRs()
-			if hadSelection {
-				m.selectPR(repository, number)
+			for _, id := range paneIDs {
+				if previous[id].ok {
+					m.selectPR(id, previous[id].repository, previous[id].number)
+				}
 			}
 		}
 	case loginFinishedMsg:
@@ -231,15 +235,17 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return m.openRepositoryPicker()
 	case key.Matches(msg, k.Pages.PrevPage, k.Pages.NextPage):
-		page := m.prPages.Page
-		m.prPages, _ = m.prPages.Update(msg)
-		if m.prPages.Page != page {
-			m.prTable.SetCursor(m.prPages.Page * m.prPages.PerPage)
+		pane := m.focused()
+		page := pane.pages.Page
+		pane.pages, _ = pane.pages.Update(msg)
+		if pane.pages.Page != page {
+			pane.table.SetCursor(pane.pages.Page * pane.pages.PerPage)
 		}
-		m.syncPages()
+		m.syncPages(m.focus)
 	default:
-		m.prTable, _ = m.prTable.Update(msg)
-		m.syncPages()
+		pane := m.focused()
+		pane.table, _ = pane.table.Update(msg)
+		m.syncPages(m.focus)
 	}
 	return nil
 }
@@ -285,10 +291,13 @@ func (m *model) updateRepositoryPicker(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *model) rebuildVisiblePRs() {
-	m.visiblePRs = m.visiblePRs[:0]
-	for index, pr := range m.snapshot.PullRequests {
-		if m.selectedRepository == "" || strings.EqualFold(pr.Repository, m.selectedRepository) {
-			m.visiblePRs = append(m.visiblePRs, index)
+	for _, id := range paneIDs {
+		pane := &m.panes[id]
+		pane.visible = pane.visible[:0]
+		for index, pr := range m.source(id) {
+			if m.selectedRepository == "" || strings.EqualFold(pr.Repository, m.selectedRepository) {
+				pane.visible = append(pane.visible, index)
+			}
 		}
 	}
 	m.rebuildPRTable(true)
@@ -322,7 +331,7 @@ func (m *model) View() tea.View {
 		lines = m.repositoryPickerLines()
 	case !m.scopeChosen:
 		lines = m.scopeChoiceLines()
-	case len(m.visiblePRs) > 0 && !m.prTableFits:
+	case !m.panesFit():
 		lines = wrapWords("Terminal too small; resize or press Ctrl+C to quit.", m.width)
 	default:
 		lines = m.listLines()
@@ -384,33 +393,48 @@ func (m *model) errorLines() []string {
 		"Login command: gh auth login --hostname github.com --web")
 }
 
+// panesFit reports whether every drawn pane with rows has room for its columns.
+func (m *model) panesFit() bool {
+	layout := m.layoutPanes()
+	for _, id := range paneIDs {
+		if layout.single && id != m.focus {
+			continue
+		}
+		if pane := &m.panes[id]; len(pane.visible) > 0 && !pane.fits {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *model) listLines() []string {
-	lines := []string{m.titleLine(fmt.Sprintf("prpr — @%s — %d open PRs", m.snapshot.Login, len(m.visiblePRs)))}
-	if m.selectedRepository == "" {
-		lines = append(lines, "Repository: All repositories")
-	} else {
-		lines = append(lines, "Repository: "+singleLine(m.selectedRepository))
+	scope := "All repositories"
+	if m.selectedRepository != "" {
+		scope = singleLine(m.selectedRepository)
 	}
-	if len(m.visiblePRs) == 0 {
-		if m.selectedRepository == "" {
-			lines = append(lines, "No open pull requests.")
-		} else {
-			lines = append(lines, "No open pull requests in "+singleLine(m.selectedRepository)+".")
+	lines := []string{m.titleLine(fmt.Sprintf("prpr — @%s — %s", m.snapshot.Login, scope))}
+	layout := m.layoutPanes()
+	for _, id := range paneIDs {
+		if layout.single && id != m.focus {
+			continue
 		}
-		lines = append(lines, "")
-	} else {
-		selectedURL := ""
-		if pr, ok := m.selectedPR(); ok {
-			selectedURL = singleLine(pr.URL)
+		lines = append(lines, m.paneTitle(id, layout.single))
+		if len(m.panes[id].visible) == 0 {
+			lines = append(lines, m.emptyPaneLine(id))
+			continue
 		}
-		lines = append(lines, selectedURL)
-		lines = append(lines, strings.Split(m.prTable.View(), "\n")...)
+		lines = append(lines, strings.Split(m.panes[id].table.View(), "\n")...)
 	}
+	selectedURL := ""
+	if pr, ok := m.selectedPR(); ok {
+		selectedURL = singleLine(pr.URL)
+	}
+	lines = append(lines, selectedURL)
 	status := "✓ clean  ✗ conflicts  ? unknown"
 	if m.preferenceErr != nil {
 		status = m.preferenceErr.Error()
 	}
-	if len(m.visiblePRs) > 0 && m.prPages.TotalPages > 1 {
+	if pane := m.focused(); len(pane.visible) > 0 && pane.pages.TotalPages > 1 {
 		status = m.pageIndicator() + "  " + status
 	}
 	lines = append(lines, status)

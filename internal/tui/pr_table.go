@@ -7,64 +7,72 @@ import (
 	"strings"
 	"unicode"
 
-	"charm.land/bubbles/v2/paginator"
 	"charm.land/bubbles/v2/table"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-
-	"github.com/DragosMocrii/prpr/internal/github"
 )
 
+// rebuildPRTable rebuilds both panes' tables for the current layout.
 func (m *model) rebuildPRTable(resetSelection bool) {
+	layout := m.layoutPanes()
+	for _, id := range paneIDs {
+		// Hidden and empty panes keep a minimal table so cursors survive.
+		m.rebuildPane(id, max(minTableHeight, layout.tables[id]), resetSelection)
+	}
+}
+
+func (m *model) rebuildPane(id paneID, height int, resetSelection bool) {
+	pane := &m.panes[id]
+	source := m.source(id)
 	previous := 0
 	if !resetSelection {
-		previous = m.prTable.Cursor()
+		previous = pane.table.Cursor()
 	}
-	rows := make([]table.Row, 0, len(m.visiblePRs))
+	review := id == paneReview
 	maxNumberWidth := 6
-	for _, index := range m.visiblePRs {
-		if index < 0 || index >= len(m.snapshot.PullRequests) {
+	for _, index := range pane.visible {
+		if index < 0 || index >= len(source) {
 			continue
 		}
-		pr := &m.snapshot.PullRequests[index]
-		maxNumberWidth = max(maxNumberWidth, ansi.StringWidth(fmt.Sprintf("#%d", pr.Number)))
+		maxNumberWidth = max(maxNumberWidth, ansi.StringWidth(fmt.Sprintf("#%d", source[index].Number)))
 	}
-	width := m.width
-	if width < 1 {
-		width = 1
-	}
+	width := max(1, m.width)
 	all := m.selectedRepository == ""
 	repositoryColumn := all && width >= 80
 	repositoryWidth := 0
 	if repositoryColumn {
 		repositoryWidth = min(28, max(12, width/4))
 	}
+	lastTitle, lastWidth := "Merge", 5
+	if review {
+		lastTitle, lastWidth = "Author", min(16, max(8, width/6))
+	}
 	columns := make([]table.Column, 0, 5)
 	if repositoryColumn {
 		columns = append(columns, table.Column{Title: "Repository", Width: repositoryWidth})
 	}
-	columns = append(columns, table.Column{Title: "PR name"})
 	columns = append(columns,
+		table.Column{Title: "PR name"},
 		table.Column{Title: "Number", Width: maxNumberWidth},
 		table.Column{Title: "State", Width: 5},
-		table.Column{Title: "Merge", Width: 5},
+		table.Column{Title: lastTitle, Width: lastWidth},
 	)
-	nameWidth := width - 8 - maxNumberWidth - 5 - 5
-	if repositoryColumn {
-		nameWidth = width - 10 - repositoryWidth - maxNumberWidth - 5 - 5
-	}
-	m.prTableFits = nameWidth >= 8
+	// Each column has one cell of padding on both sides.
+	nameWidth := width - 2*len(columns) - repositoryWidth - maxNumberWidth - 5 - lastWidth
+	pane.fits = nameWidth >= 8
 	nameWidth = max(8, nameWidth)
+	nameColumn := 0
 	if repositoryColumn {
-		columns[1].Width = nameWidth
-	} else {
-		columns[0].Width = nameWidth
+		nameColumn = 1
 	}
-	for _, index := range m.visiblePRs {
-		if index < 0 || index >= len(m.snapshot.PullRequests) {
+	columns[nameColumn].Width = nameWidth
+
+	rows := make([]table.Row, 0, len(pane.visible))
+	for _, index := range pane.visible {
+		if index < 0 || index >= len(source) {
 			continue
 		}
-		pr := &m.snapshot.PullRequests[index]
+		pr := &source[index]
 		name := singleLine(pr.Title)
 		if all && !repositoryColumn {
 			name = singleLine(pr.Repository) + " — " + name
@@ -73,33 +81,30 @@ func (m *model) rebuildPRTable(resetSelection bool) {
 		if pr.Draft {
 			state = "draft"
 		}
+		last := mergeableIcon(pr.Mergeable)
+		if review {
+			last = singleLine(pr.Author)
+		}
 		row := make(table.Row, 0, len(columns))
 		if repositoryColumn {
 			row = append(row, singleLine(pr.Repository))
 		}
-		row = append(row, name, prNumberLink(pr.Number, pr.URL), state, mergeableIcon(pr.Mergeable))
+		row = append(row, name, prNumberLink(pr.Number, pr.URL), state, last)
 		rows = append(rows, row)
 	}
-	styles := table.Styles{
-		Header:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Padding(0, 1).Border(lipgloss.NormalBorder(), false, false, true, false),
-		Cell:     lipgloss.NewStyle().Padding(0, 1),
-		Selected: lipgloss.NewStyle().Bold(true).Background(lipgloss.Color("236")),
-	}
-	// Header, repository, and URL lines above; status line and help below.
-	height := max(3, m.height-4-m.listHelpHeight())
-	m.prTable = table.New(
-		table.WithStyles(styles),
+	pane.table = table.New(
+		table.WithStyles(tableStyles(id == m.focus)),
 		table.WithColumns(columns),
 		table.WithRows(rows),
 		table.WithWidth(width),
 		table.WithHeight(height),
-		table.WithFocused(true),
+		table.WithFocused(id == m.focus),
 		table.WithKeyMap(m.keys.Table),
 	)
 	if !resetSelection && len(rows) > 0 {
-		m.prTable.MoveDown(min(max(previous, 0), len(rows)-1))
+		pane.table.MoveDown(min(max(previous, 0), len(rows)-1))
 	}
-	m.syncPages()
+	m.syncPages(id)
 }
 
 // listHelpHeight counts help lines from the binding layout rather than the
@@ -115,49 +120,6 @@ func (m *model) listHelpHeight() int {
 		rows = max(rows, len(column))
 	}
 	return rows
-}
-
-// syncPages derives the page indicator from the table's visible rows and
-// cursor. The table still owns scrolling; pages only report position.
-func (m *model) syncPages() {
-	m.prPages.PerPage = max(1, m.prTable.Height())
-	m.prPages.TotalPages = 1
-	m.prPages.SetTotalPages(len(m.visiblePRs))
-	m.prPages.Page = min(m.prTable.Cursor()/m.prPages.PerPage, m.prPages.TotalPages-1)
-}
-
-func (m *model) pageIndicator() string {
-	pages := m.prPages
-	if pages.TotalPages > 12 {
-		pages.Type = paginator.Arabic
-		pages.ArabicFormat = "page %d/%d"
-	}
-	return pages.View()
-}
-
-func (m *model) selectedPR() (*github.PullRequest, bool) {
-	index := m.prTable.Cursor()
-	if index < 0 || index >= len(m.visiblePRs) {
-		return nil, false
-	}
-	prIndex := m.visiblePRs[index]
-	if prIndex < 0 || prIndex >= len(m.snapshot.PullRequests) {
-		return nil, false
-	}
-	return &m.snapshot.PullRequests[prIndex], true
-}
-
-// selectPR moves the table cursor to the visible row for repository and
-// number, if that pull request is still visible.
-func (m *model) selectPR(repository string, number int) {
-	for row, index := range m.visiblePRs {
-		pr := &m.snapshot.PullRequests[index]
-		if pr.Number == number && strings.EqualFold(pr.Repository, repository) {
-			m.prTable.SetCursor(row)
-			m.syncPages()
-			return
-		}
-	}
 }
 
 func prNumberLink(number int, rawURL string) string {

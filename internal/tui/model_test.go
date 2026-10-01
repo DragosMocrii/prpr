@@ -37,7 +37,7 @@ func TestFreshAccountPromptsAndPickerCancellationDoesNotChoose(t *testing.T) {
 	store := testPreferences(t)
 	m := testModel(store, 80, 24)
 	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/repo"})
-	if m.scopeChosen || len(m.visiblePRs) != 1 || !strings.Contains(strings.Join(m.scopeChoiceLines(), "\n"), "Pick a repository") {
+	if m.scopeChosen || len(m.panes[paneMine].visible) != 1 || !strings.Contains(strings.Join(m.scopeChoiceLines(), "\n"), "Pick a repository") {
 		t.Fatalf("fresh account did not show the uncommitted choice: %+v", m)
 	}
 	press(m, tea.Key{Code: tea.KeyEnter})
@@ -75,8 +75,8 @@ func TestExplicitAllPersistsAndSuppressesPromptAfterReopen(t *testing.T) {
 	}
 	next := testModel(reopened, 80, 24)
 	updateSnapshot(next, "Alice", github.PullRequest{Number: 2, Repository: "acme/repo"})
-	if !next.scopeChosen || len(next.visiblePRs) != 1 {
-		t.Fatalf("reopened account still prompted or lost rows: chosen %t visible %v", next.scopeChosen, next.visiblePRs)
+	if !next.scopeChosen || len(next.panes[paneMine].visible) != 1 {
+		t.Fatalf("reopened account still prompted or lost rows: chosen %t visible %v", next.scopeChosen, next.panes[paneMine].visible)
 	}
 }
 
@@ -87,8 +87,8 @@ func TestAccountSwitchRestoresSavedScopeOrPrompts(t *testing.T) {
 	}
 	m := testModel(store, 80, 24)
 	updateSnapshot(m, "Alice", github.PullRequest{Number: 1, Repository: "acme/a"}, github.PullRequest{Number: 2, Repository: "other/b"})
-	if !m.scopeChosen || m.selectedRepository != "acme/a" || len(m.visiblePRs) != 1 {
-		t.Fatalf("saved Alice scope not restored: chosen %t repo %q visible %v", m.scopeChosen, m.selectedRepository, m.visiblePRs)
+	if !m.scopeChosen || m.selectedRepository != "acme/a" || len(m.panes[paneMine].visible) != 1 {
+		t.Fatalf("saved Alice scope not restored: chosen %t repo %q visible %v", m.scopeChosen, m.selectedRepository, m.panes[paneMine].visible)
 	}
 	m.preferenceErr = errors.New("Selection not saved: disk error")
 	updateSnapshot(m, "bob", github.PullRequest{Number: 3, Repository: "other/b"})
@@ -100,8 +100,8 @@ func TestAccountSwitchRestoresSavedScopeOrPrompts(t *testing.T) {
 		t.Fatalf("Bob's explicit All choice was not saved: %q, %v", got, found)
 	}
 	updateSnapshot(m, "ALICE", github.PullRequest{Number: 4, Repository: "acme/a"})
-	if !m.scopeChosen || m.selectedRepository != "acme/a" || m.preferenceErr != nil || len(m.visiblePRs) != 1 {
-		t.Fatalf("switching back did not restore Alice state: chosen %t repo %q warning %v visible %v", m.scopeChosen, m.selectedRepository, m.preferenceErr, m.visiblePRs)
+	if !m.scopeChosen || m.selectedRepository != "acme/a" || m.preferenceErr != nil || len(m.panes[paneMine].visible) != 1 {
+		t.Fatalf("switching back did not restore Alice state: chosen %t repo %q warning %v visible %v", m.scopeChosen, m.selectedRepository, m.preferenceErr, m.panes[paneMine].visible)
 	}
 }
 
@@ -114,8 +114,8 @@ func TestSameAccountRefreshRetainsChosenEmptyScope(t *testing.T) {
 	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/empty"})
 	m.preferenceErr = errors.New("Selection not saved: transient")
 	updateSnapshot(m, "alice", github.PullRequest{Number: 2, Repository: "acme/other"})
-	if !m.scopeChosen || m.selectedRepository != "acme/empty" || len(m.visiblePRs) != 0 || m.preferenceErr == nil {
-		t.Fatalf("same-account refresh changed choice: chosen %t repo %q visible %v warning %v", m.scopeChosen, m.selectedRepository, m.visiblePRs, m.preferenceErr)
+	if !m.scopeChosen || m.selectedRepository != "acme/empty" || len(m.panes[paneMine].visible) != 0 || m.preferenceErr == nil {
+		t.Fatalf("same-account refresh changed choice: chosen %t repo %q visible %v warning %v", m.scopeChosen, m.selectedRepository, m.panes[paneMine].visible, m.preferenceErr)
 	}
 }
 
@@ -127,8 +127,8 @@ func TestClearFilterPersistsAll(t *testing.T) {
 	m := testModel(store, 80, 24)
 	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/repo"})
 	press(m, tea.Key{Code: 'c', Text: "c"})
-	if !m.scopeChosen || m.selectedRepository != "" || len(m.visiblePRs) != 1 {
-		t.Fatalf("clear filter state = chosen %t repo %q visible %v", m.scopeChosen, m.selectedRepository, m.visiblePRs)
+	if !m.scopeChosen || m.selectedRepository != "" || len(m.panes[paneMine].visible) != 1 {
+		t.Fatalf("clear filter state = chosen %t repo %q visible %v", m.scopeChosen, m.selectedRepository, m.panes[paneMine].visible)
 	}
 	if got, found := store.Lookup("alice"); !found || got != "" {
 		t.Fatalf("clear filter was not persisted: %q, %v", got, found)
@@ -147,7 +147,7 @@ func TestPreferenceSaveFailureKeepsSessionChoiceUsable(t *testing.T) {
 	m := testModel(store, 80, 24)
 	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/repo"})
 	m.chooseRepository("acme/repo")
-	if !m.scopeChosen || m.selectedRepository != "acme/repo" || len(m.visiblePRs) != 1 || m.err != nil {
+	if !m.scopeChosen || m.selectedRepository != "acme/repo" || len(m.panes[paneMine].visible) != 1 || m.err != nil {
 		t.Fatalf("failed save made session selection unusable: %+v", m)
 	}
 	if m.preferenceErr == nil || !strings.Contains(strings.Join(m.listLines(), "\n"), "Selection not saved:") {
@@ -166,8 +166,8 @@ func TestFailedRefreshDoesNotExposeStaleRows(t *testing.T) {
 	m := testModel(store, 80, 24)
 	updateSnapshot(m, "alice", github.PullRequest{Number: 7, Repository: "acme/a"})
 	m.startFetch()
-	if !m.loading || !m.refreshing() || len(m.visiblePRs) != 1 {
-		t.Fatalf("refresh did not keep rows under an indicator: loading %t refreshing %t visible %v", m.loading, m.refreshing(), m.visiblePRs)
+	if !m.loading || !m.refreshing() || len(m.panes[paneMine].visible) != 1 {
+		t.Fatalf("refresh did not keep rows under an indicator: loading %t refreshing %t visible %v", m.loading, m.refreshing(), m.panes[paneMine].visible)
 	}
 	m.Update(fetchFinishedMsg{err: errors.New("offline")})
 	if len(m.snapshot.PullRequests) != 0 || m.snapshot.Login != "" || m.loading || m.err == nil {
@@ -221,8 +221,8 @@ func TestRefreshKeepsRowsNavigableAndRestoresSelection(t *testing.T) {
 	press(m, tea.Key{Code: 'p', Text: "p"})
 	press(m, tea.Key{Code: 'c', Text: "c"})
 	press(m, tea.Key{Code: 'r', Text: "r"})
-	if m.prTable.Cursor() != 1 || m.picker != nil {
-		t.Fatalf("refresh keys: cursor %d picker %v", m.prTable.Cursor(), m.picker)
+	if m.panes[paneMine].table.Cursor() != 1 || m.picker != nil {
+		t.Fatalf("refresh keys: cursor %d picker %v", m.panes[paneMine].table.Cursor(), m.picker)
 	}
 	// The selected acme/b #1 moves to the top; selection follows it, not the row index.
 	updateSnapshot(m, "alice", prs[1], prs[0], prs[2])
