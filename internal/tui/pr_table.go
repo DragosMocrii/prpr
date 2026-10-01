@@ -11,7 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"prpr/internal/github"
+	"github.com/DragosMocrii/prpr/internal/github"
 )
 
 func (m *model) rebuildPRTable(resetSelection bool) {

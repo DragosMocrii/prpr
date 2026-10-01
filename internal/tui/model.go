@@ -11,8 +11,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"prpr/internal/github"
-	"prpr/internal/preferences"
+	"github.com/DragosMocrii/prpr/internal/github"
+	"github.com/DragosMocrii/prpr/internal/preferences"
 )
 
 const (

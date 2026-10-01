@@ -10,8 +10,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"prpr/internal/github"
-	"prpr/internal/preferences"
+	"github.com/DragosMocrii/prpr/internal/github"
+	"github.com/DragosMocrii/prpr/internal/preferences"
 )
 
 func testPreferences(t *testing.T) *preferences.Store {

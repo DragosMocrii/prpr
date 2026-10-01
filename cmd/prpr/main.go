@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 
 	"charm.land/bubbletea/v2"
-	"prpr/internal/github"
-	"prpr/internal/preferences"
-	"prpr/internal/tui"
+	"github.com/DragosMocrii/prpr/internal/github"
+	"github.com/DragosMocrii/prpr/internal/preferences"
+	"github.com/DragosMocrii/prpr/internal/tui"
 )
 
 func main() {

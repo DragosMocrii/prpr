@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"prpr/internal/github"
+	"github.com/DragosMocrii/prpr/internal/github"
 )
 
 type repositoryCandidateKind uint8

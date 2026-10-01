@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"prpr/internal/github"
+	"github.com/DragosMocrii/prpr/internal/github"
 )
 
 type Store struct {

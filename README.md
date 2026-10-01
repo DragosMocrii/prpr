@@ -4,7 +4,7 @@
 
 ## Requirements
 
-- Go 1.26 or later, or the configured devcontainer Go feature.
+- Go 1.26 or later.
 - GitHub CLI (`gh`) on `PATH`, authenticated to `github.com`.
 
 The app uses GitHub CLI's existing credentials and does not store tokens itself. GitHub CLI manages credential storage and may use its own plaintext fallback when no operating-system credential store is available. To connect or change accounts, use `l` from the app's authentication/error screen, or run:
@@ -13,22 +13,44 @@ The app uses GitHub CLI's existing credentials and does not store tokens itself.
 gh auth login --hostname github.com --web
 ```
 
-Complete the displayed device-code flow in a browser if GitHub CLI cannot open one. The devcontainer intentionally disables automatic browser launch.
+Complete the displayed device-code flow in a browser if GitHub CLI cannot open one.
 
-## Run
+## Install
 
-From the repository root:
+After this repository is public and these changes have been pushed, install the latest version with:
 
 ```sh
+go install github.com/DragosMocrii/prpr/cmd/prpr@latest
+```
+
+Ensure Go's bin directory is on `PATH`, then run:
+
+```sh
+prpr
+```
+
+Until then, install from a source checkout using the instructions below.
+
+## Run from source
+
+```sh
+git clone https://github.com/DragosMocrii/prpr.git
+cd prpr
 go run ./cmd/prpr
 ```
 
-Build a binary or install it into Go's bin directory with:
+Build a binary or install the checkout into Go's bin directory with:
 
 ```sh
 go build -o /tmp/prpr ./cmd/prpr
 go install ./cmd/prpr
 ```
+
+## Configuration
+
+Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository choice per GitHub account; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice.
+
+If startup reports invalid preferences, back up, repair, or remove only the reported `prpr/preferences.json` file before retrying. Do not remove GitHub CLI credentials to repair app preferences.
 
 ## Controls
 
@@ -41,6 +63,8 @@ go install ./cmd/prpr
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
 
-Repository filtering affects only the active account's authored open pull requests and preserves their updated-descending order and draft status. The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no authored open PRs remains selectable and shows an empty scoped list. Repository and All selections are saved separately for each GitHub account in the user configuration directory.
+Repository filtering affects only the active account's authored open pull requests and preserves their updated-descending order and draft status. The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no authored open PRs remains selectable and shows an empty scoped list. Repository and All selections are saved separately for each GitHub account.
 
 The pull request table shows draft/open state and merge-conflict status (`MERGEABLE`, `CONFLICTING`, or unknown); mergeability does not represent checks or review readiness. PR numbers use OSC 8 links in supporting terminals. The selected pull request URL is also shown below the table for copying. A refresh replaces the visible account and list together; failed refreshes do not leave stale results displayed.
+
+See [contributing](CONTRIBUTING.md), the [MIT license](LICENSE), and the [CI workflow](.github/workflows/ci.yml).

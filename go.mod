@@ -1,4 +1,4 @@
-module prpr
+module github.com/DragosMocrii/prpr
 
 go 1.26.0
 

@@ -1,0 +1,19 @@
+# Local build and test outputs
+/prpr
+/prpr.exe
+/bin/
+/dist/
+/coverage.out
+/coverage.html
+*.test
+*.test.exe
+
+# Machine-local environment; examples remain publishable
+.env
+.env.*
+!.env.example
+devcontainer.env
+!devcontainer.env.example
+
+# OS metadata
+.DS_Store

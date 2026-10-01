@@ -10,8 +10,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"prpr/internal/github"
-	"prpr/internal/preferences"
+	"github.com/DragosMocrii/prpr/internal/github"
+	"github.com/DragosMocrii/prpr/internal/preferences"
 )
 
 func newTableModel(t *testing.T, width, height int, prs []github.PullRequest) *model {
