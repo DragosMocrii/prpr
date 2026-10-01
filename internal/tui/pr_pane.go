@@ -155,7 +155,7 @@ func (m *model) pageIndicator() string {
 func (m *model) applyFocusStyles() {
 	for _, id := range paneIDs {
 		pane := &m.panes[id]
-		pane.table.SetStyles(tableStyles(id == m.focus))
+		pane.table.SetStyles(tableStyles(id == m.focus, m.darkBackground))
 		if id == m.focus {
 			pane.table.Focus()
 		} else {
@@ -164,16 +164,83 @@ func (m *model) applyFocusStyles() {
 	}
 }
 
-func tableStyles(focused bool) table.Styles {
+// Row backgrounds in 256-color indices: stripes are fainter than the
+// selected row on both dark and light terminals.
+const (
+	darkStripe    = 235
+	darkSelected  = 238
+	lightStripe   = 254
+	lightSelected = 252
+)
+
+// tableHeaderLen counts the table's header lines: titles and border.
+const tableHeaderLen = 2
+
+func tableStyles(focused, dark bool) table.Styles {
 	selected := lipgloss.NewStyle()
 	if focused {
-		selected = selected.Bold(true).Background(lipgloss.Color("236"))
+		color := lightSelected
+		if dark {
+			color = darkSelected
+		}
+		selected = selected.Bold(true).Background(lipgloss.ANSIColor(color))
 	}
 	return table.Styles{
 		Header:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Padding(0, 1).Border(lipgloss.NormalBorder(), false, false, true, false),
 		Cell:     lipgloss.NewStyle().Padding(0, 1),
 		Selected: selected,
 	}
+}
+
+// tableLines renders a pane's table with every other row striped. Cells end
+// their colors with full resets, so each row's background, the selected
+// row's included, is turned back on after every reset to span the row.
+func (m *model) tableLines(id paneID) []string {
+	pane := &m.panes[id]
+	lines := strings.Split(pane.table.View(), "\n")
+	stripe := lightStripe
+	if m.darkBackground {
+		stripe = darkStripe
+	}
+	for i := tableHeaderLen; i < len(lines) && i-tableHeaderLen < len(pane.table.Rows()); i++ {
+		if background := leadingBackground(lines[i]); background != "" {
+			lines[i] = keepBackground(lines[i], background)
+		} else if (i-tableHeaderLen)%2 == 1 {
+			lines[i] = keepBackground(lines[i], fmt.Sprintf("\x1b[48;5;%dm", stripe))
+		}
+	}
+	return lines
+}
+
+// leadingBackground returns the line's opening SGR sequence when it sets a
+// background, as the selected row's style does.
+func leadingBackground(line string) string {
+	if !strings.HasPrefix(line, "\x1b[") {
+		return ""
+	}
+	end := strings.IndexByte(line, 'm')
+	if end < 0 {
+		return ""
+	}
+	for _, param := range strings.Split(line[2:end], ";") {
+		if param == "48" {
+			return line[:end+1]
+		}
+	}
+	return ""
+}
+
+// keepBackground applies sgr to the whole line, restoring it after every
+// reset inside the line.
+func keepBackground(line, sgr string) string {
+	for _, reset := range []string{"\x1b[m", "\x1b[0m", "\x1b[49m"} {
+		line = strings.ReplaceAll(line, reset, reset+sgr)
+	}
+	line = strings.TrimSuffix(strings.TrimPrefix(line, sgr), sgr)
+	if !strings.HasSuffix(line, "\x1b[m") {
+		line += "\x1b[m"
+	}
+	return sgr + line
 }
 
 func (m *model) paneTitle(id paneID, single bool) string {

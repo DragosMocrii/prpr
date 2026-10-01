@@ -110,7 +110,7 @@ func (m *model) rebuildPane(id paneID, height int, resetSelection bool) {
 		rows = append(rows, row)
 	}
 	pane.table = table.New(
-		table.WithStyles(tableStyles(id == m.focus)),
+		table.WithStyles(tableStyles(id == m.focus, m.darkBackground)),
 		table.WithColumns(columns),
 		table.WithRows(rows),
 		table.WithWidth(width),

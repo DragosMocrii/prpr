@@ -193,6 +193,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BackgroundColorMsg:
 		m.darkBackground = msg.IsDark()
 		m.help.Styles = help.DefaultStyles(m.darkBackground)
+		m.applyFocusStyles()
 		if m.picker != nil {
 			m.picker.setDark(m.darkBackground)
 		}
@@ -542,7 +543,7 @@ func (m *model) listLines() []string {
 			lines = append(lines, m.emptyPaneLine(id))
 			continue
 		}
-		lines = append(lines, strings.Split(m.panes[id].table.View(), "\n")...)
+		lines = append(lines, m.tableLines(id)...)
 	}
 	selected := ""
 	if pr, ok := m.selectedPR(); ok {
