@@ -7,8 +7,13 @@ import (
 	"strings"
 	"unicode"
 
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/paginator"
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/DragosMocrii/prpr/internal/github"
@@ -31,6 +36,11 @@ type model struct {
 	visiblePRs          []int
 	prTable             table.Model
 	prTableFits         bool
+	prPages             paginator.Model
+	keys                keyMap
+	help                help.Model
+	spinner             spinner.Model
+	darkBackground      bool
 	picker              *repositoryPicker
 	repositoryRequestID uint64
 	width               int
@@ -52,13 +62,30 @@ type loginFinishedMsg struct{ err error }
 
 func New(ctx context.Context, client *github.Client, preferences *preferences.Store) tea.Model {
 	appCtx, cancel := context.WithCancel(ctx)
-	m := &model{ctx: appCtx, client: client, preferences: preferences, cancel: cancel}
+	m := newModel(appCtx, client, preferences)
+	m.cancel = cancel
+	return m
+}
+
+func newModel(ctx context.Context, client *github.Client, preferences *preferences.Store) *model {
+	m := &model{
+		ctx:            ctx,
+		client:         client,
+		preferences:    preferences,
+		cancel:         func() {},
+		keys:           defaultKeyMap(),
+		help:           help.New(),
+		spinner:        spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		prPages:        paginator.New(),
+		darkBackground: true,
+	}
+	m.prPages.Type = paginator.Dots
 	m.rebuildPRTable(true)
 	return m
 }
 
 func (m *model) Init() tea.Cmd {
-	return m.startFetch()
+	return tea.Batch(tea.RequestBackgroundColor, m.startFetch())
 }
 
 func (m *model) startFetch() tea.Cmd {
@@ -69,24 +96,45 @@ func (m *model) startFetch() tea.Cmd {
 	m.snapshot = github.Snapshot{}
 	m.visiblePRs = nil
 	m.rebuildPRTable(true)
-	return func() tea.Msg {
-		snapshot, err := m.client.Fetch(m.ctx)
+	client, ctx := m.client, m.ctx
+	return tea.Batch(func() tea.Msg {
+		snapshot, err := client.Fetch(ctx)
 		return fetchFinishedMsg{snapshot: snapshot, err: err}
-	}
+	}, m.spinner.Tick)
+}
+
+// spinning reports whether a visible request is in flight. Spinner ticks
+// that arrive otherwise are dropped, which ends the tick loop.
+func (m *model) spinning() bool {
+	return (m.loading && !m.loginActive) || (m.picker != nil && m.picker.busy)
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.help.SetWidth(msg.Width)
 		m.rebuildPRTable(false)
 		if m.picker != nil {
+			m.picker.setWidth(m.width)
 			m.picker.clamp(m.pickerViewportHeight())
+		}
+	case tea.BackgroundColorMsg:
+		m.darkBackground = msg.IsDark()
+		m.help.Styles = help.DefaultStyles(m.darkBackground)
+		if m.picker != nil {
+			m.picker.setDark(m.darkBackground)
+		}
+	case spinner.TickMsg:
+		if m.spinning() {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
 		}
 	case repositoryListFinishedMsg:
 		m.handleRepositoryListFinished(msg)
 	case repositoryLookupFinishedMsg:
-		m.handleRepositoryLookupFinished(msg)
+		return m, m.handleRepositoryLookupFinished(msg)
 	case fetchFinishedMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -122,83 +170,79 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.startFetch()
 	case tea.PasteMsg:
-		if m.picker != nil && !m.picker.lookup {
-			m.picker.appendInput(msg.Content)
-			m.picker.clamp(m.pickerViewportHeight())
+		if m.picker != nil {
+			return m, m.picker.paste(msg.Content, m.pickerViewportHeight())
 		}
 	case tea.KeyPressMsg:
-		if msg.String() == "ctrl+c" {
-			m.closeRepositoryPicker()
-			m.cancel()
-			return m, tea.Quit
-		}
-		if m.picker != nil {
-			return m, m.updateRepositoryPicker(msg)
-		}
-		switch msg.String() {
-		case "q":
-			m.cancel()
-			return m, tea.Quit
-		case "r":
-			if !m.loading && !m.loginActive {
-				return m, m.startFetch()
-			}
-		case "l":
-			if m.err != nil && !m.loading && !m.loginActive {
-				m.loading = true
-				m.loginActive = true
-				return m, tea.ExecProcess(m.client.LoginCommand(m.ctx), func(err error) tea.Msg {
-					return loginFinishedMsg{err: err}
-				})
-			}
-		case "p":
-			if m.scopeChosen && !m.loading && !m.loginActive && m.err == nil && m.snapshot.Login != "" {
-				return m, m.openRepositoryPicker()
-			}
-		case "c":
-			if m.scopeChosen && !m.loading && !m.loginActive && m.err == nil && m.snapshot.Login != "" {
-				m.chooseRepository("")
-			}
-		case "up", "k", "down", "j":
-			if !m.loading && !m.loginActive && m.err == nil {
-				if m.scopeChosen {
-					if len(m.visiblePRs) > 0 {
-						m.prTable, _ = m.prTable.Update(msg)
-					}
-				} else if msg.String() == "up" || msg.String() == "k" {
-					m.scopeChoiceCursor = 0
-				} else {
-					m.scopeChoiceCursor = 1
-				}
-			}
-		case "enter":
-			if !m.scopeChosen && !m.loading && !m.loginActive && m.err == nil && m.snapshot.Login != "" {
-				if m.scopeChoiceCursor == 1 {
-					m.chooseRepository("")
-				} else {
-					return m, m.openRepositoryPicker()
-				}
-			}
-		}
+		return m, m.handleKey(msg)
 	}
 	return m, nil
 }
 
-func (m *model) updateRepositoryPicker(msg tea.KeyPressMsg) tea.Cmd {
-	p := m.picker
-	switch msg.String() {
-	case "esc":
+func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
+	m.syncKeys()
+	k := m.keys
+	if key.Matches(msg, k.ForceQuit) {
 		m.closeRepositoryPicker()
-		return nil
-	case "ctrl+r":
-		if !p.busy {
-			return m.startRepositoryList()
-		}
-		return nil
-	case "enter":
-		if p.busy {
+		m.cancel()
+		return tea.Quit
+	}
+	if m.picker != nil {
+		return m.updateRepositoryPicker(msg)
+	}
+	switch {
+	case key.Matches(msg, k.Quit):
+		m.cancel()
+		return tea.Quit
+	case key.Matches(msg, k.Refresh, k.Retry):
+		return m.startFetch()
+	case key.Matches(msg, k.Login):
+		m.loading = true
+		m.loginActive = true
+		return tea.ExecProcess(m.client.LoginCommand(m.ctx), func(err error) tea.Msg {
+			return loginFinishedMsg{err: err}
+		})
+	case key.Matches(msg, k.PickRepository):
+		return m.openRepositoryPicker()
+	case key.Matches(msg, k.AllRepositories):
+		m.chooseRepository("")
+	case key.Matches(msg, k.Help):
+		m.help.ShowAll = !m.help.ShowAll
+		m.rebuildPRTable(false)
+	case key.Matches(msg, k.ChoiceUp):
+		m.scopeChoiceCursor = 0
+	case key.Matches(msg, k.ChoiceDown):
+		m.scopeChoiceCursor = 1
+	case key.Matches(msg, k.Continue):
+		if m.scopeChoiceCursor == 1 {
+			m.chooseRepository("")
 			return nil
 		}
+		return m.openRepositoryPicker()
+	case key.Matches(msg, k.Pages.PrevPage, k.Pages.NextPage):
+		page := m.prPages.Page
+		m.prPages, _ = m.prPages.Update(msg)
+		if m.prPages.Page != page {
+			m.prTable.SetCursor(m.prPages.Page * m.prPages.PerPage)
+		}
+		m.syncPages()
+	default:
+		m.prTable, _ = m.prTable.Update(msg)
+		m.syncPages()
+	}
+	return nil
+}
+
+func (m *model) updateRepositoryPicker(msg tea.KeyPressMsg) tea.Cmd {
+	p := m.picker
+	k := m.keys.Picker
+	switch {
+	case key.Matches(msg, k.Cancel):
+		m.closeRepositoryPicker()
+		return nil
+	case key.Matches(msg, k.Retry):
+		return m.startRepositoryList()
+	case key.Matches(msg, k.Apply):
 		candidate := p.selectedCandidate()
 		switch candidate.kind {
 		case allRepositoriesCandidate:
@@ -211,23 +255,22 @@ func (m *model) updateRepositoryPicker(msg tea.KeyPressMsg) tea.Cmd {
 			return m.startRepositoryLookup(candidate.repository)
 		}
 		return nil
-	case "up":
-		if !p.lookup {
-			p.move(-1, m.pickerViewportHeight())
-		}
+	case key.Matches(msg, k.Up):
+		p.move(-1, m.pickerViewportHeight())
 		return nil
-	case "down":
-		if !p.lookup {
-			p.move(1, m.pickerViewportHeight())
-		}
+	case key.Matches(msg, k.Down):
+		p.move(1, m.pickerViewportHeight())
 		return nil
-	}
-	if p.lookup {
+	case key.Matches(msg, k.Clear):
+		p.setQuery("")
+		p.clamp(m.pickerViewportHeight())
 		return nil
 	}
-	p.handleTextKey(msg)
-	p.clamp(m.pickerViewportHeight())
-	return nil
+	// Picker keys that are disabled right now must not fall through to text input.
+	if bound(msg, k.Apply, k.Retry, k.Up, k.Down, k.Clear) {
+		return nil
+	}
+	return p.updateInput(msg, m.pickerViewportHeight())
 }
 
 func (m *model) rebuildVisiblePRs() {
@@ -261,7 +304,7 @@ func (m *model) View() tea.View {
 	case m.width < minimumWidth || m.height < minimumHeight:
 		lines = wrapWords("Terminal too small; resize or press Ctrl+C to quit.", m.width)
 	case m.loading && !m.loginActive:
-		lines = []string{"Loading open pull requests..."}
+		lines = []string{m.spinner.View() + " Loading open pull requests..."}
 	case m.err != nil:
 		lines = m.errorLines()
 	case m.picker != nil:
@@ -280,6 +323,28 @@ func (m *model) View() tea.View {
 	return view
 }
 
+// helpLines renders the help for a screen. Full help is used only when it is
+// toggled on and the screen has a full view.
+func (m *model) helpLines(screen func(keyMap) helpKeys) []string {
+	m.syncKeys()
+	keys := screen(m.keys)
+	m.help.SetWidth(m.width)
+	if m.help.ShowAll && keys.full != nil && m.fullHelpFits(keys) {
+		// help.Model can overflow its width when no ellipsis fits, so pass
+		// only the leading columns that fit.
+		full := m.help.FullHelpView(keys.full[:1])
+		for n := 2; n <= len(keys.full); n++ {
+			view := m.help.FullHelpView(keys.full[:n])
+			if lipgloss.Width(view) > m.width {
+				break
+			}
+			full = view
+		}
+		return strings.Split(full, "\n")
+	}
+	return []string{m.help.ShortHelpView(keys.short)}
+}
+
 func (m *model) scopeChoiceLines() []string {
 	pick, all := "  Pick a repository", "  Show all my PRs"
 	if m.scopeChoiceCursor == 0 {
@@ -287,13 +352,12 @@ func (m *model) scopeChoiceLines() []string {
 	} else {
 		all = "> Show all my PRs"
 	}
-	return []string{
+	return append([]string{
 		fmt.Sprintf("prpr — @%s", m.snapshot.Login),
 		"What would you like to watch?",
 		pick,
 		all,
-		"↑/↓ or j/k: Select    Enter: Continue    q: Quit",
-	}
+	}, m.helpLines(keyMap.scopeChoiceHelp)...)
 }
 
 func (m *model) errorLines() []string {
@@ -302,11 +366,8 @@ func (m *model) errorLines() []string {
 	if errors.As(m.err, &authErr) {
 		message = m.err.Error()
 	}
-	return []string{
-		message,
-		"l: Log in to GitHub    r: Retry    q: Quit",
-		"Login command: gh auth login --hostname github.com --web",
-	}
+	return append(append([]string{message}, m.helpLines(keyMap.errorHelp)...),
+		"Login command: gh auth login --hostname github.com --web")
 }
 
 func (m *model) listLines() []string {
@@ -335,8 +396,11 @@ func (m *model) listLines() []string {
 	if m.preferenceErr != nil {
 		status = m.preferenceErr.Error()
 	}
-	lines = append(lines, status, "↑/k: Up    ↓/j: Down    p: Change repo    c: All PRs    r: Refresh    q: Quit")
-	return lines
+	if len(m.visiblePRs) > 0 && m.prPages.TotalPages > 1 {
+		status = m.pageIndicator() + "  " + status
+	}
+	lines = append(lines, status)
+	return append(lines, m.helpLines(keyMap.listHelp)...)
 }
 
 func singleLine(value string) string {

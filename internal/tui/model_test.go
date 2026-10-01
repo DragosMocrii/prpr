@@ -23,13 +23,19 @@ func testPreferences(t *testing.T) *preferences.Store {
 	return store
 }
 
+func testModel(store *preferences.Store, width, height int) *model {
+	m := newModel(context.Background(), nil, store)
+	m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	return m
+}
+
 func updateSnapshot(m *model, login string, prs ...github.PullRequest) {
 	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: login, PullRequests: prs}})
 }
 
 func TestFreshAccountPromptsAndPickerCancellationDoesNotChoose(t *testing.T) {
 	store := testPreferences(t)
-	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 24}
+	m := testModel(store, 80, 24)
 	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/repo"})
 	if m.scopeChosen || len(m.visiblePRs) != 1 || !strings.Contains(strings.Join(m.scopeChoiceLines(), "\n"), "Pick a repository") {
 		t.Fatalf("fresh account did not show the uncommitted choice: %+v", m)
@@ -53,7 +59,7 @@ func TestExplicitAllPersistsAndSuppressesPromptAfterReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 24}
+	m := testModel(store, 80, 24)
 	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/repo"})
 	press(m, tea.Key{Code: 'j', Text: "j"})
 	press(m, tea.Key{Code: tea.KeyEnter})
@@ -67,7 +73,7 @@ func TestExplicitAllPersistsAndSuppressesPromptAfterReopen(t *testing.T) {
 	if got, found := reopened.Lookup("ALICE"); !found || got != "" {
 		t.Fatalf("saved explicit All = %q, %v", got, found)
 	}
-	next := &model{ctx: context.Background(), preferences: reopened, width: 80, height: 24}
+	next := testModel(reopened, 80, 24)
 	updateSnapshot(next, "Alice", github.PullRequest{Number: 2, Repository: "acme/repo"})
 	if !next.scopeChosen || len(next.visiblePRs) != 1 {
 		t.Fatalf("reopened account still prompted or lost rows: chosen %t visible %v", next.scopeChosen, next.visiblePRs)
@@ -79,7 +85,7 @@ func TestAccountSwitchRestoresSavedScopeOrPrompts(t *testing.T) {
 	if err := store.Save("alice", "acme/a"); err != nil {
 		t.Fatal(err)
 	}
-	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 24}
+	m := testModel(store, 80, 24)
 	updateSnapshot(m, "Alice", github.PullRequest{Number: 1, Repository: "acme/a"}, github.PullRequest{Number: 2, Repository: "other/b"})
 	if !m.scopeChosen || m.selectedRepository != "acme/a" || len(m.visiblePRs) != 1 {
 		t.Fatalf("saved Alice scope not restored: chosen %t repo %q visible %v", m.scopeChosen, m.selectedRepository, m.visiblePRs)
@@ -104,7 +110,7 @@ func TestSameAccountRefreshRetainsChosenEmptyScope(t *testing.T) {
 	if err := store.Save("alice", "acme/empty"); err != nil {
 		t.Fatal(err)
 	}
-	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 24}
+	m := testModel(store, 80, 24)
 	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/empty"})
 	m.preferenceErr = errors.New("Selection not saved: transient")
 	updateSnapshot(m, "alice", github.PullRequest{Number: 2, Repository: "acme/other"})
@@ -118,7 +124,7 @@ func TestClearFilterPersistsAll(t *testing.T) {
 	if err := store.Save("alice", "acme/repo"); err != nil {
 		t.Fatal(err)
 	}
-	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 24}
+	m := testModel(store, 80, 24)
 	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/repo"})
 	press(m, tea.Key{Code: 'c', Text: "c"})
 	if !m.scopeChosen || m.selectedRepository != "" || len(m.visiblePRs) != 1 {
@@ -138,7 +144,7 @@ func TestPreferenceSaveFailureKeepsSessionChoiceUsable(t *testing.T) {
 	if err := os.Mkdir(path, 0700); err != nil {
 		t.Fatal(err)
 	}
-	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 24}
+	m := testModel(store, 80, 24)
 	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/repo"})
 	m.chooseRepository("acme/repo")
 	if !m.scopeChosen || m.selectedRepository != "acme/repo" || len(m.visiblePRs) != 1 || m.err != nil {
@@ -157,7 +163,8 @@ func TestFailedRefreshDoesNotExposeStaleRows(t *testing.T) {
 	if err := store.Save("alice", ""); err != nil {
 		t.Fatal(err)
 	}
-	m := &model{ctx: context.Background(), preferences: store, snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{{Number: 7}}}, width: 80, height: 24}
+	m := testModel(store, 80, 24)
+	m.snapshot = github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{{Number: 7}}}
 	m.filterLogin, m.scopeChosen = "alice", true
 	m.startFetch()
 	if len(m.snapshot.PullRequests) != 0 || !m.loading {
@@ -169,5 +176,28 @@ func TestFailedRefreshDoesNotExposeStaleRows(t *testing.T) {
 	}
 	if got, found := store.Lookup("alice"); !found || got != "" {
 		t.Fatalf("failed refresh changed saved choice: %q, %v", got, found)
+	}
+}
+
+func TestSpinnerTicksOnlyWhileRequestsAreInFlight(t *testing.T) {
+	m := testModel(testPreferences(t), 80, 24)
+	m.startFetch()
+	if _, cmd := m.Update(m.spinner.Tick()); cmd == nil {
+		t.Fatal("spinner stopped while loading")
+	}
+	updateSnapshot(m, "alice")
+	if _, cmd := m.Update(m.spinner.Tick()); cmd != nil {
+		t.Fatal("spinner kept ticking after loading finished")
+	}
+}
+
+func TestDisabledKeysDoNothing(t *testing.T) {
+	m := testModel(testPreferences(t), 80, 24)
+	updateSnapshot(m, "alice", github.PullRequest{Number: 1, Repository: "acme/repo"})
+	for _, text := range []string{"p", "c", "l", "?"} {
+		press(m, tea.Key{Code: rune(text[0]), Text: text})
+	}
+	if m.scopeChosen || m.picker != nil || m.loading || m.help.ShowAll {
+		t.Fatalf("scope choice accepted list keys: chosen %t picker %v loading %t help %t", m.scopeChosen, m.picker, m.loading, m.help.ShowAll)
 	}
 }

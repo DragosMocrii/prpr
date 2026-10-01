@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -27,7 +28,7 @@ type repositoryCandidate struct {
 }
 
 type repositoryPicker struct {
-	query        string
+	input        textinput.Model
 	repositories []string
 	candidates   []repositoryCandidate
 	cursor       int
@@ -52,14 +53,31 @@ type repositoryLookupFinishedMsg struct {
 
 func (m *model) openRepositoryPicker() tea.Cmd {
 	m.repositoryRequestID++
-	picker := &repositoryPicker{}
+	picker := &repositoryPicker{input: textinput.New()}
+	picker.input.Prompt = "Find: "
+	picker.input.Placeholder = "owner/repo"
+	// Terminal paste arrives as tea.PasteMsg; skip the clipboard helper.
+	picker.input.KeyMap.Paste.SetEnabled(false)
+	picker.setDark(m.darkBackground)
+	picker.setWidth(m.width)
 	for _, pr := range m.snapshot.PullRequests {
 		picker.repositories = append(picker.repositories, pr.Repository)
 	}
 	picker.repositories = sortedRepositoryNames(picker.repositories)
 	m.picker = picker
 	picker.rebuildCandidates()
-	return m.startRepositoryList()
+	return tea.Batch(picker.input.Focus(), m.startRepositoryList())
+}
+
+func (p *repositoryPicker) setDark(dark bool) {
+	styles := textinput.DefaultStyles(dark)
+	styles.Cursor.Blink = false
+	p.input.SetStyles(styles)
+}
+
+func (p *repositoryPicker) setWidth(width int) {
+	// Leave a column for the cursor cell after the prompt and text.
+	p.input.SetWidth(max(1, width-ansi.StringWidth(p.input.Prompt)-1))
 }
 
 func (m *model) startRepositoryList() tea.Cmd {
@@ -75,10 +93,10 @@ func (m *model) startRepositoryList() tea.Cmd {
 	m.repositoryRequestID++
 	requestID := m.repositoryRequestID
 	client := m.client
-	return func() tea.Msg {
+	return tea.Batch(func() tea.Msg {
 		repositories, err := client.ListRepositories(ctx)
 		return repositoryListFinishedMsg{requestID: requestID, repositories: repositories, err: err}
-	}
+	}, m.spinner.Tick)
 }
 
 func (m *model) startRepositoryLookup(repository string) tea.Cmd {
@@ -90,14 +108,15 @@ func (m *model) startRepositoryLookup(repository string) tea.Cmd {
 	m.picker.cancel = cancel
 	m.picker.busy = true
 	m.picker.lookup = true
+	m.picker.input.Blur()
 	m.picker.diagnostic = ""
 	m.repositoryRequestID++
 	requestID := m.repositoryRequestID
 	client := m.client
-	return func() tea.Msg {
+	return tea.Batch(func() tea.Msg {
 		canonical, err := client.ResolveRepository(ctx, repository)
 		return repositoryLookupFinishedMsg{requestID: requestID, repository: canonical, err: err}
-	}
+	}, m.spinner.Tick)
 }
 
 func (p *repositoryPicker) cancelCurrent() {
@@ -132,19 +151,20 @@ func (m *model) handleRepositoryListFinished(msg repositoryListFinishedMsg) {
 	m.picker.clamp(m.pickerViewportHeight())
 }
 
-func (m *model) handleRepositoryLookupFinished(msg repositoryLookupFinishedMsg) {
+func (m *model) handleRepositoryLookupFinished(msg repositoryLookupFinishedMsg) tea.Cmd {
 	if m.picker == nil || msg.requestID != m.repositoryRequestID {
-		return
+		return nil
 	}
 	m.picker.cancelCurrent()
 	m.picker.busy = false
 	m.picker.lookup = false
 	if msg.err != nil {
 		m.picker.diagnostic = msg.err.Error()
-		return
+		return m.picker.input.Focus()
 	}
 	m.closeRepositoryPicker()
 	m.chooseRepository(msg.repository)
+	return nil
 }
 
 func sortedRepositoryNames(names []string) []string {
@@ -169,7 +189,7 @@ func sortedRepositoryNames(names []string) []string {
 
 func (p *repositoryPicker) rebuildCandidates() {
 	p.candidates = []repositoryCandidate{{kind: allRepositoriesCandidate, label: "All repositories"}}
-	trimmed := strings.TrimSpace(p.query)
+	trimmed := strings.TrimSpace(p.query())
 	matching := 0
 	exact := false
 	for _, name := range p.repositories {
@@ -200,31 +220,38 @@ func (p *repositoryPicker) rebuildCandidates() {
 	p.offset = 0
 }
 
-func (p *repositoryPicker) appendInput(value string) {
-	for _, r := range value {
-		if !unicode.IsControl(r) {
-			p.query += string(r)
-		}
-	}
+func (p *repositoryPicker) query() string {
+	return p.input.Value()
+}
+
+func (p *repositoryPicker) setQuery(value string) {
+	p.input.SetValue(value)
 	p.rebuildCandidates()
 }
 
-func (p *repositoryPicker) backspace() {
-	if p.query == "" {
-		return
+// updateInput forwards a key to the query input and rebuilds the candidates
+// only when the query text changed, so cursor movement keeps the selection.
+func (p *repositoryPicker) updateInput(msg tea.Msg, visible int) tea.Cmd {
+	before := p.query()
+	var cmd tea.Cmd
+	p.input, cmd = p.input.Update(msg)
+	if p.query() != before {
+		p.rebuildCandidates()
 	}
-	_, size := lastRune(p.query)
-	p.query = p.query[:len(p.query)-size]
-	p.rebuildCandidates()
+	p.clamp(visible)
+	return cmd
 }
 
-func lastRune(value string) (rune, int) {
-	for index, r := range value {
-		if index+len(string(r)) == len(value) {
-			return r, len(string(r))
+// paste discards control characters instead of letting the input turn
+// newlines into spaces inside a repository name.
+func (p *repositoryPicker) paste(content string, visible int) tea.Cmd {
+	content = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
 		}
-	}
-	return 0, 0
+		return r
+	}, content)
+	return p.updateInput(tea.PasteMsg{Content: content}, visible)
 }
 
 func (p *repositoryPicker) move(delta, visible int) {
@@ -274,19 +301,9 @@ func (m *model) pickerViewportHeight() int {
 
 func (m *model) repositoryPickerLines() []string {
 	p := m.picker
-	prefix := "Find: "
-	available := m.width - ansi.StringWidth(prefix)
-	query := p.query
-	if available < 0 {
-		available = 0
-	}
-	if ansi.StringWidth(query) > available && available > 0 {
-		query = ansi.TruncateLeft(query, ansi.StringWidth(query)-available+1, "…")
-	}
-	query = ansi.Truncate(query, available, "…")
 	visible := m.pickerViewportHeight()
 	p.clamp(visible)
-	lines := []string{"Select repository", prefix + query}
+	lines := []string{"Select repository", p.input.View()}
 	end := p.offset + visible
 	if end > len(p.candidates) {
 		end = len(p.candidates)
@@ -301,36 +318,18 @@ func (m *model) repositoryPickerLines() []string {
 	status := "Repositories you can access; enter owner/repo for others."
 	switch {
 	case p.busy && p.lookup:
-		status = "Checking repository..."
+		status = m.spinner.View() + " Checking repository..."
 	case p.busy:
-		status = "Loading repositories..."
+		status = m.spinner.View() + " Loading repositories..."
 	case p.diagnostic != "":
 		status = singleLine(p.diagnostic)
-	case strings.TrimSpace(p.query) != "" && len(p.candidates) == 1:
+	case strings.TrimSpace(p.query()) != "" && len(p.candidates) == 1:
 		status = "No matching repositories. Enter owner/repo to check another repository."
 	}
-	lines = append(lines, status, "↑/↓: Select    Enter: Apply    Esc: Cancel    Ctrl+U: Clear    Ctrl+R: Retry    Ctrl+C: Quit")
-	return lines
+	lines = append(lines, status)
+	return append(lines, m.helpLines(keyMap.pickerHelp)...)
 }
 
 func (p *repositoryPicker) selectedCandidate() repositoryCandidate {
 	return p.candidates[p.cursor]
-}
-
-func (p *repositoryPicker) handleTextKey(msg tea.KeyPressMsg) bool {
-	switch msg.String() {
-	case "backspace":
-		p.backspace()
-		return true
-	case "ctrl+u":
-		p.query = ""
-		p.rebuildCandidates()
-		return true
-	}
-	text := msg.Key().Text
-	if text == "" {
-		return false
-	}
-	p.appendInput(text)
-	return true
 }

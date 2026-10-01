@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -21,7 +20,7 @@ func pickerModel(t *testing.T) *model {
 	if err := store.Save("alice", ""); err != nil {
 		t.Fatal(err)
 	}
-	m := &model{ctx: context.Background(), preferences: store, width: 80, height: 12}
+	m := testModel(store, 80, 12)
 	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{
 		{Number: 1, Repository: "acme/a", URL: "https://example.test/a/1"},
 		{Number: 2, Repository: "acme/b", URL: "https://example.test/b/2"},
@@ -48,8 +47,7 @@ func TestPickerSelectsRepositoryAndAllRepositories(t *testing.T) {
 	m := pickerModel(t)
 	openPicker(m)
 	finishDiscovery(m, []string{"acme/a", "acme/b", "acme/empty"}, nil)
-	m.picker.query = "acme/b"
-	m.picker.rebuildCandidates()
+	m.picker.setQuery("acme/b")
 	if got := m.picker.selectedCandidate().repository; got != "acme/b" {
 		t.Fatalf("selected candidate = %q, want acme/b", got)
 	}
@@ -62,8 +60,7 @@ func TestPickerSelectsRepositoryAndAllRepositories(t *testing.T) {
 	}
 	openPicker(m)
 	finishDiscovery(m, []string{"acme/a", "acme/b"}, nil)
-	m.picker.query = "no-match"
-	m.picker.rebuildCandidates()
+	m.picker.setQuery("no-match")
 	if len(m.picker.candidates) != 1 || m.picker.selectedCandidate().kind != allRepositoriesCandidate {
 		t.Fatalf("no-match candidates = %+v, want All repositories", m.picker.candidates)
 	}
@@ -96,20 +93,20 @@ func TestPickerTextInputDoesNotInvokeMainKeys(t *testing.T) {
 	for _, text := range []string{"q", "j", "r"} {
 		press(m, tea.Key{Code: rune(text[0]), Text: text})
 	}
-	if m.picker.query != "qjr" || m.loading || m.snapshot.Login != "alice" {
-		t.Fatalf("picker input changed main state or lost text: query %q loading %t", m.picker.query, m.loading)
+	if m.picker.query() != "qjr" || m.loading || m.snapshot.Login != "alice" {
+		t.Fatalf("picker input changed main state or lost text: query %q loading %t", m.picker.query(), m.loading)
 	}
 	press(m, tea.Key{Code: tea.KeyBackspace})
-	if m.picker.query != "qj" {
-		t.Fatalf("backspace query = %q, want qj", m.picker.query)
+	if m.picker.query() != "qj" {
+		t.Fatalf("backspace query = %q, want qj", m.picker.query())
 	}
 	m.Update(tea.PasteMsg{Content: "\nowner/repo\x1b"})
-	if m.picker.query != "qjowner/repo" {
-		t.Fatalf("paste query = %q, want control characters discarded", m.picker.query)
+	if m.picker.query() != "qjowner/repo" {
+		t.Fatalf("paste query = %q, want control characters discarded", m.picker.query())
 	}
 	press(m, tea.Key{Code: 'u', Mod: tea.ModCtrl})
-	if m.picker.query != "" || m.picker == nil {
-		t.Fatalf("Ctrl+U state: picker %v query %q", m.picker, m.picker.query)
+	if m.picker.query() != "" || m.picker == nil {
+		t.Fatalf("Ctrl+U state: picker %v query %q", m.picker, m.picker.query())
 	}
 }
 
@@ -118,8 +115,7 @@ func TestPickerDirectLookupFailureThenCanonicalSuccess(t *testing.T) {
 	m.applyRepository("acme/b")
 	openPicker(m)
 	finishDiscovery(m, nil, errors.New("listing denied"))
-	m.picker.query = "public/other"
-	m.picker.rebuildCandidates()
+	m.picker.setQuery("public/other")
 	press(m, tea.Key{Code: tea.KeyEnter})
 	failedID := m.repositoryRequestID
 	m.Update(repositoryLookupFinishedMsg{requestID: failedID, err: errors.New("GitHub repository lookup failed: not found")})
@@ -151,8 +147,7 @@ func TestPickerIgnoresLateResultsAfterCloseAndReopen(t *testing.T) {
 		t.Fatalf("stale discovery populated reopened picker: %v", m.picker.repositories)
 	}
 	currentID := m.repositoryRequestID
-	m.picker.query = "public/other"
-	m.picker.rebuildCandidates()
+	m.picker.setQuery("public/other")
 	press(m, tea.Key{Code: tea.KeyEnter})
 	lookupID := m.repositoryRequestID
 	press(m, tea.Key{Code: tea.KeyEsc})
@@ -183,5 +178,47 @@ func TestPickerNavigationAndResizeStayInBounds(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	if m.picker.cursor >= len(m.picker.candidates) || m.picker.offset < 0 {
 		t.Fatalf("large resize left invalid selection: %+v", m.picker)
+	}
+}
+
+func TestPickerCursorMovementKeepsCandidateSelection(t *testing.T) {
+	m := pickerModel(t)
+	openPicker(m)
+	finishDiscovery(m, []string{"acme/a", "acme/b"}, nil)
+	m.picker.setQuery("acme")
+	press(m, tea.Key{Code: tea.KeyDown})
+	want := m.picker.selectedCandidate()
+	press(m, tea.Key{Code: tea.KeyLeft})
+	press(m, tea.Key{Code: tea.KeyLeft})
+	press(m, tea.Key{Code: '/', Text: "/"})
+	if m.picker.query() != "ac/me" {
+		t.Fatalf("mid-query insert = %q, want ac/me", m.picker.query())
+	}
+	m.picker.setQuery("acme")
+	press(m, tea.Key{Code: tea.KeyDown})
+	press(m, tea.Key{Code: tea.KeyHome})
+	if got := m.picker.selectedCandidate(); got != want {
+		t.Fatalf("cursor movement changed selection: %+v, want %+v", got, want)
+	}
+}
+
+func TestPickerLookupBlocksTypingUntilFailure(t *testing.T) {
+	m := pickerModel(t)
+	openPicker(m)
+	finishDiscovery(m, nil, nil)
+	m.picker.setQuery("public/other")
+	press(m, tea.Key{Code: tea.KeyEnter})
+	if !m.picker.lookup {
+		t.Fatal("lookup did not start")
+	}
+	press(m, tea.Key{Code: 'x', Text: "x"})
+	m.Update(tea.PasteMsg{Content: "y"})
+	if m.picker.query() != "public/other" {
+		t.Fatalf("input changed during lookup: %q", m.picker.query())
+	}
+	m.Update(repositoryLookupFinishedMsg{requestID: m.repositoryRequestID, err: errors.New("not found")})
+	press(m, tea.Key{Code: 'x', Text: "x"})
+	if m.picker.query() != "public/otherx" {
+		t.Fatalf("input not editable after failed lookup: %q", m.picker.query())
 	}
 }
