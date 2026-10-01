@@ -19,8 +19,8 @@ func TestParseFlagsRefreshInterval(t *testing.T) {
 		{[]string{"-refresh", "1h"}, time.Hour},
 	} {
 		got, err := parseFlags(tc.args, io.Discard)
-		if err != nil || got != tc.want {
-			t.Errorf("parseFlags(%q) = %v, %v; want %v", tc.args, got, err, tc.want)
+		if err != nil || got.refresh != tc.want {
+			t.Errorf("parseFlags(%q) = %v, %v; want %v", tc.args, got.refresh, err, tc.want)
 		}
 	}
 }
@@ -32,6 +32,7 @@ func TestParseFlagsRejectsInvalidRefresh(t *testing.T) {
 		{"--refresh", "soon"},
 		{"--refresh", "5"},
 		{"extra"},
+		{"--bots", "Claude"},
 	} {
 		if _, err := parseFlags(args, io.Discard); err == nil {
 			t.Errorf("parseFlags(%q) succeeded", args)
@@ -39,5 +40,20 @@ func TestParseFlagsRejectsInvalidRefresh(t *testing.T) {
 	}
 	if _, err := parseFlags([]string{"-h"}, io.Discard); !errors.Is(err, flag.ErrHelp) {
 		t.Errorf("-h error = %v, want flag.ErrHelp", err)
+	}
+}
+
+func TestParseFlagsBots(t *testing.T) {
+	opts, err := parseFlags(nil, io.Discard)
+	if err != nil || len(opts.bots) != 3 {
+		t.Fatalf("default bots = %+v, %v", opts.bots, err)
+	}
+	opts, err = parseFlags([]string{"--bots", "Rabbit=coderabbitai"}, io.Discard)
+	if err != nil || len(opts.bots) != 1 || opts.bots[0].Name != "Rabbit" {
+		t.Fatalf("custom bots = %+v, %v", opts.bots, err)
+	}
+	opts, err = parseFlags([]string{"--bots="}, io.Discard)
+	if err != nil || opts.bots != nil {
+		t.Fatalf("empty bots = %+v, %v", opts.bots, err)
 	}
 }

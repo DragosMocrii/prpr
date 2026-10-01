@@ -57,6 +57,8 @@ type model struct {
 	quotaKnown        bool
 	quotaStale        bool
 	quotaPaused       bool
+	// bots shows the Bots column and the selected PR's bot breakdown.
+	bots bool
 }
 
 type fetchFinishedMsg struct {
@@ -75,6 +77,7 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m := newModel(appCtx, client, preferences)
 	m.cancel = cancel
 	m.refreshInterval = refreshInterval
+	m.bots = len(client.Bots()) > 0
 	return m
 }
 
@@ -494,11 +497,16 @@ func (m *model) listLines() []string {
 		}
 		lines = append(lines, strings.Split(m.panes[id].table.View(), "\n")...)
 	}
-	selectedURL := ""
+	selected := ""
 	if pr, ok := m.selectedPR(); ok {
-		selectedURL = singleLine(pr.URL)
+		selected = singleLine(pr.URL)
+		// The breakdown is dropped rather than truncated so the URL stays whole.
+		if breakdown := botBreakdown(pr.Bots); m.bots && breakdown != "" &&
+			lipgloss.Width(selected)+2+lipgloss.Width(breakdown) <= m.width {
+			selected += "  " + breakdown
+		}
 	}
-	lines = append(lines, selectedURL)
+	lines = append(lines, selected)
 	fixed, legend := "", ""
 	if pane := m.focused(); len(pane.visible) > 0 && pane.pages.TotalPages > 1 {
 		fixed = m.pageIndicator()

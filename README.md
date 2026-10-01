@@ -59,6 +59,16 @@ The title shows the active interval. A manual refresh restarts the timer. Auto-r
 
 The status line shows the remaining GitHub GraphQL quota and its reset time (for example `API 4,981/5,000 · resets 06:14`), read every 10 seconds from GitHub's rate-limit endpoint, which does not count against the quota. The quota is shared by everything using your GitHub account. It turns yellow below 20% and red below 5%, is marked `?` when the latest read failed. On narrow terminals the merge legend is dropped first, then the reset time, then the quota shortens to bare numbers and finally hides.
 
+The **Bots** column reports automated review bots. By default it covers GitHub Copilot code review, OpenAI Codex, and Claude; `--bots` replaces that list with comma-separated `Name=login` entries, each optionally followed by `:check`, a substring of the bot's check-run names. An empty value hides the column and skips the extra GitHub fields:
+
+```sh
+prpr --bots 'Copilot=copilot-pull-request-reviewer:copilot-pull-request-reviewer,Codex=chatgpt-codex-connector,Claude=claude:Claude Code Review'
+prpr --bots 'Rabbit=coderabbitai'
+prpr --bots ''
+```
+
+Bot reporting costs more GraphQL quota, mostly to read review threads: each page of up to 100 pull requests costs about 28 points, so a refresh with one page per list uses about 56 points instead of about 7.
+
 Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository choice per GitHub account; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice.
 
 If startup reports invalid preferences, back up, repair, or remove only the reported `prpr/preferences.json` file before retrying. Do not remove GitHub CLI credentials to repair app preferences.
@@ -82,12 +92,21 @@ Repository filtering applies to both lists: the active account's authored open p
 
 The pull request table shows draft/open state and merge-conflict status (`MERGEABLE`, `CONFLICTING`, or unknown); mergeability does not represent checks or review readiness. The review list shows the PR author instead of merge status. 
 
-Both lists also show statistics columns, which narrow terminals drop in this order: Size, Review, CI, Age.
+Both lists also show statistics columns, which narrow terminals drop in this order: Size, Review, CI, Bots, Age.
 
 - **Age**: how long the PR has waited. In **My PRs** it counts from when the PR was last marked ready for review, or from when it was opened if it was never a draft; drafts show `—`. In **Review requested** it counts from the latest review request naming you directly, and falls back to the ready-for-review time for team-only requests. Ages are computed when the lists load, refresh, resize, or change scope, so between refreshes they show the age as of the last update.
 - **CI**: the head commit's check rollup — passing, failing, pending, or `–` when there are no checks.
 - **Review**: the review decision (approved, changes requested, review required, or `–` when none applies) followed by the number of current approvals.
 - **Size**: lines added and removed.
+- **Bots**: the most pressing state among the configured review bots. The same rule applies to every bot; severity is not read.
+  - `✗n`: n review threads the bots started are unresolved and not outdated.
+  - `!`: a bot's check run failed on the head commit, for example when Copilot is out of quota.
+  - `◌`: a bot's check run is queued or running on the head commit.
+  - `✓*`: no open threads, but a bot last acted before the head commit.
+  - `✓`: no open threads, and the bots acted since the head commit with a review, a comment or comment edit, or a reaction other than 👀 on the pull request.
+  - `–`: no bot has acted on the pull request.
+
+  The line under the table lists each bot's state for the selected pull request when it fits beside the URL. Findings a bot writes only in a summary comment are not counted, and only the 20 most recent review threads are read. The head commit is dated by when it was committed, not pushed, so a commit pushed long after it was made can leave an earlier bot review showing `✓` instead of `✓*`.
 
 On short terminals only the focused list is shown. PR numbers use OSC 8 links in supporting terminals. The selected pull request URL is also shown below the table for copying. A refresh replaces the visible account and both lists together; failed refreshes do not leave stale results displayed.
 

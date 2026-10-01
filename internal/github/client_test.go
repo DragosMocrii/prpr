@@ -17,7 +17,7 @@ func TestDecodePagesPreservesAllRowsAndOrder(t *testing.T) {
 		],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}
 	]`)
 
-	snapshot, err := decodePages(data)
+	snapshot, err := decodePages(data, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestDecodePagesPreservesAllRowsAndOrder(t *testing.T) {
 }
 
 func TestDecodePagesAcceptsEmptyConnection(t *testing.T) {
-	snapshot, err := decodePages([]byte(`[{"data":{"viewer":{"login":"octocat","pullRequests":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}}]`))
+	snapshot, err := decodePages([]byte(`[{"data":{"viewer":{"login":"octocat","pullRequests":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}}]`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestDecodePagesRejectsInvalidOrPartialResponses(t *testing.T) {
 	}
 	for name, input := range cases {
 		t.Run(name, func(t *testing.T) {
-			snapshot, err := decodePages([]byte(input))
+			snapshot, err := decodePages([]byte(input), nil)
 			if err == nil {
 				t.Fatalf("decodePages() = %+v, want error", snapshot)
 			}
@@ -176,7 +176,7 @@ func TestDecodeReviewPagesPreservesOrderAndSkipsNonPullRequests(t *testing.T) {
 			{"number":3,"title":"Oldest","url":"https://github.com/acme/api/pull/3","isDraft":false,"mergeable":"CONFLICTING","updatedAt":"2026-05-01T12:00:00Z","author":{"login":"carol"},"repository":{"nameWithOwner":"acme/api"}}
 		],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}
 	]`)
-	prs, err := decodeReviewPages(data, "octocat")
+	prs, err := decodeReviewPages(data, "octocat", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestDecodeReviewPagesPreservesOrderAndSkipsNonPullRequests(t *testing.T) {
 }
 
 func TestDecodeReviewPagesAcceptsEmptySearch(t *testing.T) {
-	prs, err := decodeReviewPages([]byte(`[{"data":{"search":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}]`), "octocat")
+	prs, err := decodeReviewPages([]byte(`[{"data":{"search":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}]`), "octocat", nil)
 	if err != nil || len(prs) != 0 {
 		t.Fatalf("empty search = %+v, %v", prs, err)
 	}
@@ -211,7 +211,7 @@ func TestDecodeReviewPagesRejectsInvalidOrPartialResponses(t *testing.T) {
 		"missing search": `[{"data":{}}]`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := decodeReviewPages([]byte(data), "octocat"); err == nil {
+			if _, err := decodeReviewPages([]byte(data), "octocat", nil); err == nil {
 				t.Fatal("decode succeeded")
 			}
 		})
@@ -227,7 +227,7 @@ func TestDecodePagesStatistics(t *testing.T) {
 		 "reviewDecision":null,"latestOpinionatedReviews":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":null}}]}},
 		{"number":3,"url":"https://github.com/acme/api/pull/3","isDraft":true,"createdAt":"2026-06-01T00:00:00Z","readyEvents":{"nodes":[{"createdAt":"2026-06-03T00:00:00Z"}]},"commits":{"nodes":[]}}
 	]}}}}]`)
-	snapshot, err := decodePages(data)
+	snapshot, err := decodePages(data, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestDecodeReviewPagesWaitsSinceViewerRequest(t *testing.T) {
 		{"number":3,"url":"https://github.com/acme/api/pull/3","isDraft":true,"createdAt":"2026-06-01T00:00:00Z",
 		 "requestEvents":{"nodes":[{"createdAt":"2026-06-04T00:00:00Z","requestedReviewer":{"login":"octocat"}}]}}
 	]}}}]`)
-	prs, err := decodeReviewPages(data, "octocat")
+	prs, err := decodeReviewPages(data, "octocat", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

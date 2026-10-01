@@ -63,15 +63,18 @@ func (m *model) rebuildPane(id paneID, height int, resetSelection bool) {
 	)
 	nameWidth := remainingWidth(width, columns)
 	// Statistics columns are added in priority order while the name keeps room.
-	stats := 0
+	var stats []statColumn
 	for _, stat := range statColumns {
+		if stat.bots && !m.bots {
+			continue
+		}
 		candidate := append(columns, table.Column{Title: stat.title, Width: stat.width})
 		if remainingWidth(width, candidate) < minStatsNameWidth {
 			break
 		}
 		columns = candidate
 		nameWidth = remainingWidth(width, columns)
-		stats++
+		stats = append(stats, stat)
 	}
 	pane.fits = nameWidth >= 8
 	nameWidth = max(8, nameWidth)
@@ -101,7 +104,7 @@ func (m *model) rebuildPane(id paneID, height int, resetSelection bool) {
 			row = append(row, singleLine(pr.Repository))
 		}
 		row = append(row, name, prNumberLink(pr.Number, pr.URL), state, last)
-		for _, stat := range statColumns[:stats] {
+		for _, stat := range stats {
 			row = append(row, stat.cell(pr, now))
 		}
 		rows = append(rows, row)
@@ -129,15 +132,18 @@ type statColumn struct {
 	title string
 	width int
 	cell  func(pr *github.PullRequest, now time.Time) string
+	// bots columns are shown only when review bots are configured.
+	bots bool
 }
 
 // statColumns are listed in the order they are dropped last to first as the
 // terminal narrows.
 var statColumns = []statColumn{
-	{"Age", 4, func(pr *github.PullRequest, now time.Time) string { return ageText(pr.WaitingSince, now) }},
-	{"CI", 2, func(pr *github.PullRequest, _ time.Time) string { return checksIcon(pr.Checks) }},
-	{"Review", 6, func(pr *github.PullRequest, _ time.Time) string { return reviewText(pr.ReviewDecision, pr.Approvals) }},
-	{"Size", 11, func(pr *github.PullRequest, _ time.Time) string { return sizeText(pr.Additions, pr.Deletions) }},
+	{"Age", 4, func(pr *github.PullRequest, now time.Time) string { return ageText(pr.WaitingSince, now) }, false},
+	{"Bots", 4, func(pr *github.PullRequest, _ time.Time) string { return botsText(pr.Bots) }, true},
+	{"CI", 2, func(pr *github.PullRequest, _ time.Time) string { return checksIcon(pr.Checks) }, false},
+	{"Review", 6, func(pr *github.PullRequest, _ time.Time) string { return reviewText(pr.ReviewDecision, pr.Approvals) }, false},
+	{"Size", 11, func(pr *github.PullRequest, _ time.Time) string { return sizeText(pr.Additions, pr.Deletions) }, false},
 }
 
 // remainingWidth is the width left for the zero-width name column; each
@@ -202,6 +208,45 @@ func reviewText(decision string, approvals int) string {
 		icon += strconv.Itoa(approvals)
 	}
 	return icon
+}
+
+// botsText shows the most attention-worthy bot state; concerns are summed
+// across bots.
+func botsText(reviews []github.BotReview) string {
+	worst := github.BotReview{}
+	concerns := 0
+	for _, review := range reviews {
+		worst.State = max(worst.State, review.State)
+		concerns += review.Concerns
+	}
+	worst.Concerns = concerns
+	return botStateText(worst)
+}
+
+func botStateText(review github.BotReview) string {
+	switch review.State {
+	case github.BotConcerns:
+		return coloredIcon("✗"+strconv.Itoa(review.Concerns), "1")
+	case github.BotFailed:
+		return coloredIcon("!", "1")
+	case github.BotRunning:
+		return coloredIcon("◌", "3")
+	case github.BotStale:
+		return coloredIcon("✓", "2") + "*"
+	case github.BotPassed:
+		return coloredIcon("✓", "2")
+	default:
+		return "–"
+	}
+}
+
+// botBreakdown lists each configured bot's state for the selected PR.
+func botBreakdown(reviews []github.BotReview) string {
+	parts := make([]string, len(reviews))
+	for i, review := range reviews {
+		parts[i] = singleLine(review.Name) + " " + botStateText(review)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func sizeText(additions, deletions int) string {

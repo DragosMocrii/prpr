@@ -5,7 +5,7 @@
 `prpr` monitors open pull requests authored by the active GitHub CLI account, including drafts, across repositories visible to that account, and open pull requests that request the account's review (`review-requested:@me`).
 
 - `cmd/prpr/main.go` wires configuration, the GitHub client, and the Bubble Tea program.
-- `internal/github` invokes `gh` and decodes GitHub API responses.
+- `internal/github` invokes `gh` and decodes GitHub API responses; `bots.go` parses the bot list and derives each bot's review state.
 - `internal/preferences` stores per-account repository scope.
 - `internal/tui/model.go` owns app transitions and scope state.
 - `internal/tui/repository_picker.go` owns repository-picker input and requests.
@@ -44,7 +44,8 @@ Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package 
 - Bubbles owns the pull-request table cursor and scrolling. Preserve ANSI/grapheme-aware width behavior and safe OSC 8 hyperlink targets.
 - Unknown mergeability is not a clean merge state, and mergeability says nothing about checks or review readiness.
 - Age is ready-for-review time (last `ReadyForReviewEvent`, else `createdAt`; zero for drafts), or for review requests the latest `ReviewRequestedEvent` naming the viewer with that ready time as fallback. Null review decisions and check rollups are unknown, never approved or passing.
-- Statistics columns drop in reverse priority (Size, Review, CI, Age) before squeezing the PR name below `minStatsNameWidth`.
+- Statistics columns drop in reverse priority (Size, Review, CI, Bots, Age) before squeezing the PR name below `minStatsNameWidth`.
+- Every configured bot is judged by one rule, with no bot-specific text parsing: unresolved, non-outdated threads it started are concerns; then a matching head-commit check run that is unfinished or failed; then whether its latest review, comment, or non-👀 reaction is at or after the head commit date. With no bots configured, queries select none of the bot fields.
 
 ## Tests and interactive changes
 

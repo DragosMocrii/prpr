@@ -31,6 +31,8 @@ type PullRequest struct {
 	Additions      int
 	Deletions      int
 	Checks         string
+	// Bots follows the client's configured bots; nil when none are configured.
+	Bots []BotReview
 }
 
 type Snapshot struct {
@@ -41,6 +43,7 @@ type Snapshot struct {
 
 type Client struct {
 	path string
+	bots []Bot
 }
 
 type AuthError struct {
@@ -52,7 +55,12 @@ func (e *AuthError) Unwrap() error { return e.Err }
 
 // pullRequestFields are selected for both lists. Nested connections select no
 // pageInfo, so gh --paginate follows only the outer connection.
-const pullRequestFields = `
+func pullRequestFields(bots bool) string {
+	extra, head := "", "\n            statusCheckRollup { state }"
+	if bots {
+		extra, head = botFields, headCheckFields
+	}
+	return `
         number
         title
         url
@@ -68,27 +76,32 @@ const pullRequestFields = `
           nodes { ... on ReadyForReviewEvent { createdAt } }
         }
         latestOpinionatedReviews(first: 20) { nodes { state } }
-        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`
+        commits(last: 1) { nodes { commit {` + head + `
+        } } }` + extra
+}
 
-const pullRequestsQuery = `query($endCursor: String) {
+func pullRequestsQuery(bots bool) string {
+	return `query($endCursor: String) {
   viewer {
     login
     pullRequests(first: 100, after: $endCursor, states: [OPEN],
                  orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes {` + pullRequestFields + `
+      nodes {` + pullRequestFields(bots) + `
       }
       pageInfo { hasNextPage endCursor }
     }
   }
 }`
+}
 
 // reviewRequestsQuery lists open pull requests that request a review from the
 // viewer directly or through one of the viewer's teams.
-const reviewRequestsQuery = `query($endCursor: String) {
+func reviewRequestsQuery(bots bool) string {
+	return `query($endCursor: String) {
   search(type: ISSUE, first: 100, after: $endCursor,
          query: "is:pr is:open review-requested:@me archived:false sort:updated-desc") {
     nodes {
-      ... on PullRequest {` + pullRequestFields + `
+      ... on PullRequest {` + pullRequestFields(bots) + `
         author { login }
         requestEvents: timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
           nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { ... on User { login } } } }
@@ -98,6 +111,7 @@ const reviewRequestsQuery = `query($endCursor: String) {
     pageInfo { hasNextPage endCursor }
   }
 }`
+}
 
 // pullRequestNode decodes pullRequestFields plus the review-only fields.
 type pullRequestNode struct {
@@ -127,8 +141,12 @@ type pullRequestNode struct {
 	Commits struct {
 		Nodes []*struct {
 			Commit struct {
+				CommittedDate     time.Time `json:"committedDate"`
 				StatusCheckRollup *struct {
-					State string `json:"state"`
+					State    string `json:"state"`
+					Contexts struct {
+						Nodes []*checkRun `json:"nodes"`
+					} `json:"contexts"`
 				} `json:"statusCheckRollup"`
 			} `json:"commit"`
 		} `json:"nodes"`
@@ -144,11 +162,12 @@ type pullRequestNode struct {
 			} `json:"requestedReviewer"`
 		} `json:"nodes"`
 	} `json:"requestEvents"`
+	botNodes
 }
 
 // pullRequest converts a node. A non-empty login selects the latest direct
 // review request of that login as the waiting time.
-func (node *pullRequestNode) pullRequest(login string) PullRequest {
+func (node *pullRequestNode) pullRequest(login string, bots []Bot) PullRequest {
 	pr := PullRequest{
 		Number:         node.Number,
 		Title:          node.Title,
@@ -183,19 +202,35 @@ func (node *pullRequestNode) pullRequest(login string) PullRequest {
 			pr.Approvals++
 		}
 	}
-	if commits := node.Commits.Nodes; len(commits) > 0 && commits[0] != nil && commits[0].Commit.StatusCheckRollup != nil {
-		pr.Checks = commits[0].Commit.StatusCheckRollup.State
+	var headDate time.Time
+	var checks []*checkRun
+	if commits := node.Commits.Nodes; len(commits) > 0 && commits[0] != nil {
+		headDate = commits[0].Commit.CommittedDate
+		if rollup := commits[0].Commit.StatusCheckRollup; rollup != nil {
+			pr.Checks = rollup.State
+			checks = rollup.Contexts.Nodes
+		}
+	}
+	if len(bots) > 0 {
+		pr.Bots = make([]BotReview, len(bots))
+		for i, bot := range bots {
+			pr.Bots[i] = botReview(bot, &node.botNodes, headDate, checks)
+		}
 	}
 	return pr
 }
 
-func NewClient() (*Client, error) {
+// NewClient finds gh. Pull requests report on the given review bots.
+func NewClient(bots []Bot) (*Client, error) {
 	path, err := exec.LookPath("gh")
 	if err != nil {
 		return nil, err
 	}
-	return &Client{path: path}, nil
+	return &Client{path: path, bots: bots}, nil
 }
+
+// Bots returns the configured review bots.
+func (c *Client) Bots() []Bot { return c.bots }
 
 func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	auth := exec.CommandContext(ctx, c.path, "auth", "status", "--active", "--hostname", "github.com")
@@ -203,22 +238,22 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, &AuthError{Err: commandError("GitHub authentication check failed", err)}
 	}
 
-	api := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+pullRequestsQuery)
+	api := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+pullRequestsQuery(len(c.bots) > 0))
 	data, err := api.Output()
 	if err != nil {
 		return Snapshot{}, commandError("GitHub pull request query failed", err)
 	}
-	snapshot, err := decodePages(data)
+	snapshot, err := decodePages(data, c.bots)
 	if err != nil {
 		return Snapshot{}, err
 	}
 
-	review := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+reviewRequestsQuery)
+	review := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+reviewRequestsQuery(len(c.bots) > 0))
 	data, err = review.Output()
 	if err != nil {
 		return Snapshot{}, commandError("GitHub review request query failed", err)
 	}
-	snapshot.ReviewRequests, err = decodeReviewPages(data, snapshot.Login)
+	snapshot.ReviewRequests, err = decodeReviewPages(data, snapshot.Login, c.bots)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -332,7 +367,7 @@ func commandError(message string, err error) error {
 	return fmt.Errorf("%s: %w", message, err)
 }
 
-func decodePages(data []byte) (Snapshot, error) {
+func decodePages(data []byte, bots []Bot) (Snapshot, error) {
 	var pages []json.RawMessage
 	if err := json.Unmarshal(data, &pages); err != nil {
 		return Snapshot{}, fmt.Errorf("decode GitHub pull request response: %w", err)
@@ -373,13 +408,13 @@ func decodePages(data []byte) (Snapshot, error) {
 			if node == nil {
 				continue
 			}
-			snapshot.PullRequests = append(snapshot.PullRequests, node.pullRequest(""))
+			snapshot.PullRequests = append(snapshot.PullRequests, node.pullRequest("", bots))
 		}
 	}
 	return snapshot, nil
 }
 
-func decodeReviewPages(data []byte, login string) ([]PullRequest, error) {
+func decodeReviewPages(data []byte, login string, bots []Bot) ([]PullRequest, error) {
 	var pages []json.RawMessage
 	if err := json.Unmarshal(data, &pages); err != nil {
 		return nil, fmt.Errorf("decode GitHub review request response: %w", err)
@@ -412,7 +447,7 @@ func decodeReviewPages(data []byte, login string) ([]PullRequest, error) {
 			if node == nil || node.URL == "" {
 				continue
 			}
-			prs = append(prs, node.pullRequest(login))
+			prs = append(prs, node.pullRequest(login, bots))
 		}
 	}
 	return prs, nil
