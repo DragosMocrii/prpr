@@ -49,7 +49,7 @@ Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package 
 - Bubbles owns the pull-request table cursor and scrolling. Preserve ANSI/grapheme-aware width behavior and safe OSC 8 hyperlink targets. Cells end their colors with full resets, so row stripes and the selected-row background are re-applied after each reset when the table is drawn.
 - The Merge column is green only for a `mergeStateStatus` of `CLEAN`, `HAS_HOOKS`, or `UNSTABLE`. `mergeable` alone says nothing about required reviews or checks. Conflicts win over every other state, drafts come from `isDraft` (the `DRAFT` state is deprecated), and an unknown or missing state is never shown as mergeable.
 - Age is ready-for-review time (last `ReadyForReviewEvent`, else `createdAt`; zero for drafts), or for review requests the latest `ReviewRequestedEvent` naming the viewer with that ready time as fallback. Null review decisions and check rollups are unknown, never approved or passing.
-- Statistics columns drop in reverse priority (Size, Review, CI, Bots, Age) before squeezing the PR name below `minStatsNameWidth`.
+- Statistics columns drop in reverse priority (Size, Comments, Review, CI, Bots, Age) before squeezing the PR name below `minStatsNameWidth`.
 - Every configured bot is judged by one rule, with no bot-specific text parsing: unresolved, non-outdated threads it started are concerns; then a matching head-commit check run that is unfinished or failed; then whether its latest review, comment, or non-👀 reaction is at or after the head commit date. With no bots configured, queries select none of the bot fields.
 
 ## Tests and interactive changes

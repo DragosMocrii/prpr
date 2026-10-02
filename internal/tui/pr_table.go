@@ -236,6 +236,7 @@ var statColumns = []statColumn{
 	{"Bots", 4, func(pr *github.PullRequest, _ time.Time) string { return botsText(pr.Bots) }, cellBots, true, true},
 	{"CI", 2, func(pr *github.PullRequest, _ time.Time) string { return checksIcon(pr.Checks) }, cellCI, false, true},
 	{"Review", 6, func(pr *github.PullRequest, _ time.Time) string { return reviewText(pr.ReviewDecision, pr.Approvals) }, cellReview, false, true},
+	{"Comments", 8, func(pr *github.PullRequest, _ time.Time) string { return strconv.Itoa(pr.Comments) }, cellComments, false, true},
 	{"Size", 11, func(pr *github.PullRequest, _ time.Time) string { return sizeText(pr.Additions, pr.Deletions) }, cellSize, false, false},
 }
 

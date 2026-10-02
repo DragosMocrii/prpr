@@ -55,7 +55,7 @@ func TestPreviewShowsRowsUntilTheFullFetchReplacesThem(t *testing.T) {
 	if !strings.Contains(view, "Loading details") || !strings.Contains(view, full.URL) {
 		t.Fatalf("preview not shown:\n%s", view)
 	}
-	for _, title := range []string{"Merge", "Age", "CI", "Review"} {
+	for _, title := range []string{"Merge", "Age", "CI", "Review", "Comments"} {
 		if cell := ansi.Strip(cellOf(t, m, paneMine, 0, title)); cell != "…" {
 			t.Errorf("preview %s cell = %q, want …", title, cell)
 		}

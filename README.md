@@ -106,11 +106,12 @@ Repository filtering applies to both lists: the active account's authored open p
 
 The pull request table shows draft/open state and whether GitHub would allow a merge now, branch protection included: `✓` ready (optional checks may still be failing), `●` blocked by required reviews or checks, `↓` behind the base branch, `✗` conflicts, `–` draft, and `?` not yet computed. The review list shows the PR author instead of merge status. 
 
-Both lists also show statistics columns, which narrow terminals drop in this order: Size, Review, CI, Bots, Age.
+Both lists also show statistics columns, which narrow terminals drop in this order: Size, Comments, Review, CI, Bots, Age.
 
 - **Age**: how long the PR has waited. In **My PRs** it counts from when the PR was last marked ready for review, or from when it was opened if it was never a draft; drafts show `—`. In **Review requested** it counts from the latest review request naming you directly, and falls back to the ready-for-review time when that request is not found. Ages are computed when the lists load, refresh, resize, or change scope, so between refreshes they show the age as of the last update.
 - **CI**: the head commit's check rollup — passing, failing, pending, or `–` when there are no checks.
 - **Review**: the review decision (approved, changes requested, review required, or `–` when none applies) followed by the number of current approvals.
+- **Comments**: the number of conversation comments, bots included. Code review comments are not counted.
 - **Size**: lines added and removed.
 - **Bots**: the most pressing state among the configured review bots. The same rule applies to every bot; severity is not read.
   - `✗n`: n review threads the bots started are unresolved and not outdated.
@@ -128,7 +129,7 @@ After each refresh, the column at the left of each list marks what changed since
 
 - `+`: the pull request is new in this list.
 - `•`: a shown column changed; the changed cells are drawn in reverse video. Age is never compared.
-- `·`: GitHub reports new activity, such as a comment, but no shown column changed.
+- `·`: GitHub reports new activity, such as a code review comment, but no shown column changed.
 - `−`: the pull request left the list (merged, closed, or the review request was withdrawn). It stays as a dimmed, struck-through row at the bottom of the list, and its link still opens it.
 
 Marks pile up across refreshes until you look: a row's mark clears when the cursor leaves it, and a gone row is removed the same way. `x` clears them all, and is the only way to clear a list's last remaining row. Each list's title counts its new, changed, and gone rows when that fits. A failed refresh does not reset the comparison, and switching GitHub accounts starts over. Changes are kept in memory only.
@@ -143,7 +144,7 @@ Mouse mode is off at start, so the terminal handles the mouse as usual. Press `m
 
 While mouse mode is on, the terminal passes the mouse to prpr, so selecting text and clicking links need a modifier key: Shift in most terminals, Option in iTerm2. The key varies by terminal. Other screens, such as the repository picker, leave the mouse to the terminal. Press `m` again to turn it off.
 
-When prpr starts, or after an error, it first shows both lists from a quick query while the full query runs: the Merge, Age, Bots, CI, and Review columns show `…` until the details arrive, and the corner shows "Loading details". Conflicts already show `✗`. The scope prompt and the rows can be used meanwhile. Refreshes keep the full rows on screen instead.
+When prpr starts, or after an error, it first shows both lists from a quick query while the full query runs: the Merge, Age, Bots, CI, Review, and Comments columns show `…` until the details arrive, and the corner shows "Loading details". Conflicts already show `✗`. The scope prompt and the rows can be used meanwhile. Refreshes keep the full rows on screen instead.
 
 On short terminals only the focused list is shown. PR numbers use OSC 8 links in supporting terminals. The selected pull request URL is also shown below the table for copying. A refresh replaces the visible account and both lists together; failed refreshes do not leave stale results displayed. Gone rows are the one exception: they are kept on purpose and always marked as gone.
 

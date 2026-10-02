@@ -31,6 +31,7 @@ const (
 	cellBots
 	cellCI
 	cellReview
+	cellComments
 	cellSize
 )
 
@@ -128,6 +129,9 @@ func cellChanges(old, pr *github.PullRequest) changedCells {
 	}
 	if old.ReviewDecision != pr.ReviewDecision || old.Approvals != pr.Approvals {
 		cells |= cellReview
+	}
+	if old.Comments != pr.Comments {
+		cells |= cellComments
 	}
 	if old.Additions != pr.Additions || old.Deletions != pr.Deletions {
 		cells |= cellSize

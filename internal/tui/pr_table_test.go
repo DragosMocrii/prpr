@@ -279,7 +279,7 @@ func TestFullHelpSurvivesPickerResizeAndCancel(t *testing.T) {
 func TestStatisticsColumnsDropInPriorityOrderAsWidthShrinks(t *testing.T) {
 	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
 	m := newTableModel(t, 140, 12, []github.PullRequest{
-		{Number: 1, Repository: "acme/a", Title: "stats", WaitingSince: now.Add(-3 * 24 * time.Hour), Checks: "FAILURE", ReviewDecision: "APPROVED", Approvals: 2, Additions: 1234, Deletions: 30},
+		{Number: 1, Repository: "acme/a", Title: "stats", WaitingSince: now.Add(-3 * 24 * time.Hour), Checks: "FAILURE", ReviewDecision: "APPROVED", Approvals: 2, Comments: 7, Additions: 1234, Deletions: 30},
 		{Number: 2, Repository: "acme/a", Title: "draft", Draft: true},
 	})
 	m.now = func() time.Time { return now }
@@ -292,21 +292,21 @@ func TestStatisticsColumnsDropInPriorityOrderAsWidthShrinks(t *testing.T) {
 	}
 	m.rebuildPRTable(false)
 	row := m.panes[paneMine].table.Rows()[0]
-	if got := strings.Join(stats(), ","); got != "Age,CI,Review,Size" {
+	if got := strings.Join(stats(), ","); got != "Age,CI,Review,Comments,Size" {
 		t.Fatalf("wide statistics columns = %s", got)
 	}
-	if row[6] != "3d" || ansi.Strip(row[7]) != "✗" || ansi.Strip(row[8]) != "✓2" || row[9] != "+1.2k/-30" {
+	if row[6] != "3d" || ansi.Strip(row[7]) != "✗" || ansi.Strip(row[8]) != "✓2" || row[9] != "7" || row[10] != "+1.2k/-30" {
 		t.Fatalf("statistics cells = %q", row[6:])
 	}
 	if draft := m.panes[paneMine].table.Rows()[1]; draft[6] != "—" || draft[7] != "–" || draft[8] != "–" {
 		t.Fatalf("unknown statistics shown as known: %q", draft[6:])
 	}
-	previous := 4
+	previous := 5
 	for width := 139; width >= 80; width-- {
 		m.width = width
 		m.rebuildPRTable(false)
 		got := stats()
-		if len(got) > previous || strings.Join(got, ",") != strings.Join([]string{"Age", "CI", "Review", "Size"}[:len(got)], ",") {
+		if len(got) > previous || strings.Join(got, ",") != strings.Join([]string{"Age", "CI", "Review", "Comments", "Size"}[:len(got)], ",") {
 			t.Fatalf("width %d statistics columns = %v", width, got)
 		}
 		if name := m.panes[paneMine].table.Columns()[3].Width; len(got) > 0 && name < minStatsNameWidth {

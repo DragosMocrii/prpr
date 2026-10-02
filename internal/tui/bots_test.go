@@ -53,7 +53,7 @@ func TestBotsColumnShowsWorstStateAcrossBots(t *testing.T) {
 
 func TestBotsColumnDropsBeforeAgeButAfterOtherStatistics(t *testing.T) {
 	m := newBotsModel(t, 140)
-	want := []string{"Age", "Bots", "CI", "Review", "Size"}
+	want := []string{"Age", "Bots", "CI", "Review", "Comments", "Size"}
 	previous := len(want)
 	// Below 80 columns the Repository column folds into the name and frees room.
 	for width := 140; width >= 80; width-- {

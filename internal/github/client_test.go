@@ -226,7 +226,7 @@ func TestDecodePagesStatistics(t *testing.T) {
 	data := []byte(`[{"data":{"viewer":{"login":"octocat","pullRequests":{"nodes":[
 		{"number":1,"url":"https://github.com/acme/api/pull/1","isDraft":false,"createdAt":"2026-06-01T00:00:00Z","readyEvents":{"nodes":[]},
 		 "reviewDecision":"APPROVED","latestOpinionatedReviews":{"nodes":[{"state":"APPROVED"},{"state":"COMMENTED"},{"state":"APPROVED"}]},
-		 "additions":120,"deletions":30,"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE"}}}]}},
+		 "additions":120,"deletions":30,"commentCount":{"totalCount":4},"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"FAILURE"}}}]}},
 		{"number":2,"url":"https://github.com/acme/api/pull/2","isDraft":false,"createdAt":"2026-06-01T00:00:00Z","readyEvents":{"nodes":[{"createdAt":"2026-06-03T00:00:00Z"}]},
 		 "reviewDecision":null,"latestOpinionatedReviews":null,"commits":{"nodes":[{"commit":{"statusCheckRollup":null}}]}},
 		{"number":3,"url":"https://github.com/acme/api/pull/3","isDraft":true,"createdAt":"2026-06-01T00:00:00Z","readyEvents":{"nodes":[{"createdAt":"2026-06-03T00:00:00Z"}]},"commits":{"nodes":[]}}
@@ -241,7 +241,7 @@ func TestDecodePagesStatistics(t *testing.T) {
 	}
 	never, ready, draft := prs[0], prs[1], prs[2]
 	if !never.WaitingSince.Equal(time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)) || never.ReviewDecision != "APPROVED" || never.Approvals != 2 ||
-		never.Additions != 120 || never.Deletions != 30 || never.Checks != "FAILURE" {
+		never.Additions != 120 || never.Deletions != 30 || never.Comments != 4 || never.Checks != "FAILURE" {
 		t.Errorf("never-draft PR = %+v", never)
 	}
 	if !ready.WaitingSince.Equal(time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)) || ready.ReviewDecision != "" || ready.Approvals != 0 || ready.Checks != "" {

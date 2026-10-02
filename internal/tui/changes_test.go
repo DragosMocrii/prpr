@@ -60,7 +60,7 @@ func TestRefreshMarksNewChangedActivityAndGoneRows(t *testing.T) {
 	}
 
 	ci := two
-	ci.Checks = "SUCCESS"
+	ci.Checks, ci.Comments = "SUCCESS", 3
 	ci.UpdatedAt = changeTime.Add(time.Minute)
 	activity := three
 	activity.UpdatedAt = changeTime.Add(time.Minute)
@@ -71,8 +71,10 @@ func TestRefreshMarksNewChangedActivityAndGoneRows(t *testing.T) {
 	if got := markers(m, paneMine); got != " •·+−" {
 		t.Fatalf("markers = %q, want unchanged, changed, activity, new, gone", got)
 	}
-	if cell := cellOf(t, m, paneMine, 1, "CI"); !strings.Contains(cell, reverseOn) {
-		t.Errorf("changed CI cell not highlighted: %q", cell)
+	for _, title := range []string{"CI", "Comments"} {
+		if cell := cellOf(t, m, paneMine, 1, title); !strings.Contains(cell, reverseOn) {
+			t.Errorf("changed %s cell not highlighted: %q", title, cell)
+		}
 	}
 	for _, title := range []string{"PR name", "Merge", "Review", "Size"} {
 		if cell := cellOf(t, m, paneMine, 1, title); strings.Contains(cell, reverseOn) {

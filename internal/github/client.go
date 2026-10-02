@@ -36,6 +36,8 @@ type PullRequest struct {
 	Additions      int
 	Deletions      int
 	Checks         string
+	// Comments counts conversation comments, not code review comments.
+	Comments int
 	// Bots follows the client's configured bots; nil when none are configured.
 	Bots []BotReview
 }
@@ -85,6 +87,7 @@ func pullRequestFields(bots bool) string {
         additions
         deletions
         reviewDecision
+        commentCount: comments { totalCount }
         repository { nameWithOwner }
         readyEvents: timelineItems(itemTypes: [READY_FOR_REVIEW_EVENT], last: 1) {
           nodes { ... on ReadyForReviewEvent { createdAt } }
@@ -188,7 +191,10 @@ type pullRequestNode struct {
 	Additions      int       `json:"additions"`
 	Deletions      int       `json:"deletions"`
 	ReviewDecision string    `json:"reviewDecision"`
-	Repository     struct {
+	CommentCount   struct {
+		TotalCount int `json:"totalCount"`
+	} `json:"commentCount"`
+	Repository struct {
 		NameWithOwner string `json:"nameWithOwner"`
 	} `json:"repository"`
 	ReadyEvents struct {
@@ -244,6 +250,7 @@ func (node *pullRequestNode) pullRequest(login string, bots []Bot) PullRequest {
 		ReviewDecision: node.ReviewDecision,
 		Additions:      node.Additions,
 		Deletions:      node.Deletions,
+		Comments:       node.CommentCount.TotalCount,
 	}
 	if node.Author != nil {
 		pr.Author = node.Author.Login
