@@ -24,12 +24,6 @@ type prAlert struct {
 	kinds []string
 }
 
-// mergeKnown reports whether GitHub has computed the merge state, so its
-// readiness can be compared.
-func mergeKnown(pr *github.PullRequest) bool {
-	return !unknownMergeState(pr)
-}
-
 func checksFailing(state string) bool {
 	return state == "FAILURE" || state == "ERROR"
 }
@@ -38,8 +32,8 @@ func checksFailing(state string) bool {
 // the baseline is replaced. Only authored pull requests listed in both
 // fetches alert; a review row alerts when it arrives or stops waiting on
 // others, but never when it starts waiting. readiness is each
-// authored pull request's last known merge readiness: an unknown state keeps
-// it, so a state that GitHub recomputes does not alert again. alerts updates
+// authored pull request's last known readiness by the rules: an unknown
+// result keeps it, so a state that GitHub recomputes does not alert again. alerts updates
 // it whether or not notifications are on.
 func (m *model) alerts() []prAlert {
 	var found []prAlert
@@ -53,8 +47,8 @@ func (m *model) alerts() []prAlert {
 		pr := &m.snapshot.PullRequests[i]
 		key := keyOf(pr)
 		wasReady, known := m.readiness[key]
-		if mergeKnown(pr) {
-			readiness[key] = mergeReady(pr.Draft, pr.Mergeable, pr.MergeState)
+		if result := m.readyResult(pr); result.Known {
+			readiness[key] = result.Ready
 		} else if known {
 			readiness[key] = wasReady
 		}
@@ -104,8 +98,8 @@ func (m *model) alerts() []prAlert {
 func (m *model) resetReadiness() {
 	m.readiness = make(map[prKey]bool)
 	for i := range m.snapshot.PullRequests {
-		if pr := &m.snapshot.PullRequests[i]; mergeKnown(pr) {
-			m.readiness[keyOf(pr)] = mergeReady(pr.Draft, pr.Mergeable, pr.MergeState)
+		if result := m.readyResult(&m.snapshot.PullRequests[i]); result.Known {
+			m.readiness[keyOf(&m.snapshot.PullRequests[i])] = result.Ready
 		}
 	}
 }

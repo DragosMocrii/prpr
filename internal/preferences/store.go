@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/DragosMocrii/prpr/internal/github"
+	"github.com/DragosMocrii/prpr/internal/readiness"
 )
 
 // Scope is an account's saved choice of what both lists show: one
@@ -55,6 +56,12 @@ type Store struct {
 	pinned string
 	// icons is the saved icon set name, or "" for none saved.
 	icons string
+	// rules are the saved ready-to-merge rules, or the defaults. Saved
+	// rules that cannot be read are kept as rulesRaw, written back
+	// unchanged until rules are saved, with rulesErr saying why.
+	rules    readiness.Rules
+	rulesRaw json.RawMessage
+	rulesErr error
 }
 
 // appKey holds settings that belong to the app rather than to an account.
@@ -62,13 +69,18 @@ type Store struct {
 const appKey = "app"
 
 type appJSON struct {
-	Account string `json:"account,omitempty"`
-	Icons   string `json:"icons,omitempty"`
+	Account string          `json:"account,omitempty"`
+	Icons   string          `json:"icons,omitempty"`
+	Ready   json.RawMessage `json:"ready,omitempty"`
+}
+
+func (a appJSON) empty() bool {
+	return a.Account == "" && a.Icons == "" && len(a.Ready) == 0
 }
 
 // app is the app settings as saved.
 func (s *Store) app() appJSON {
-	return appJSON{Account: s.pinned, Icons: s.icons}
+	return appJSON{Account: s.pinned, Icons: s.icons, Ready: s.rulesRaw}
 }
 
 // accountJSON is an account's value when it has watchlists or a watchlist
@@ -82,7 +94,7 @@ type accountJSON struct {
 }
 
 func Open(path string) (*Store, error) {
-	store := &Store{path: path, accounts: make(map[string]account)}
+	store := &Store{path: path, accounts: make(map[string]account), rules: readiness.DefaultRules()}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return store, nil
@@ -107,6 +119,15 @@ func Open(path string) (*Store, error) {
 				return nil, fmt.Errorf("decode preferences %q: %q has an unknown icon set %q", path, appKey, app.Icons)
 			}
 			store.pinned, store.icons = app.Account, app.Icons
+			// Rules that cannot be read leave the defaults in use and the
+			// rest of the preferences readable.
+			if len(app.Ready) != 0 {
+				store.rulesRaw = app.Ready
+				if err := json.Unmarshal(app.Ready, &store.rules); err != nil {
+					store.rules = readiness.DefaultRules()
+					store.rulesErr = fmt.Errorf("ready-to-merge rules in %q not read, using the defaults: %w", path, err)
+				}
+			}
 			continue
 		}
 		decoded, err := decodeAccount(value)
@@ -260,6 +281,28 @@ func (s *Store) SaveIcons(name string) error {
 	return nil
 }
 
+// Rules returns the ready-to-merge rules: the saved ones, or the defaults.
+func (s *Store) Rules() readiness.Rules { return s.rules.Clone() }
+
+// RulesErr says why saved rules could not be read; nil when they were.
+func (s *Store) RulesErr() error { return s.rulesErr }
+
+// SaveRules saves the ready-to-merge rules, replacing any that could not be
+// read.
+func (s *Store) SaveRules(rules readiness.Rules) error {
+	data, err := json.Marshal(rules)
+	if err != nil {
+		return fmt.Errorf("encode preferences %q: %w", s.path, err)
+	}
+	app := s.app()
+	app.Ready = data
+	if err := s.writeAll(s.accounts, app); err != nil {
+		return err
+	}
+	s.rules, s.rulesRaw, s.rulesErr = rules.Clone(), data, nil
+	return nil
+}
+
 // Lookup returns an account's saved scope, and whether it has one.
 func (s *Store) Lookup(login string) (Scope, bool) {
 	a := s.accounts[accountKey(login)]
@@ -379,7 +422,7 @@ func (s *Store) writeAll(accounts map[string]account, app appJSON) error {
 	for k, v := range accounts {
 		encoded[k] = v.encode()
 	}
-	if app != (appJSON{}) {
+	if !app.empty() {
 		encoded[appKey] = app
 	}
 	data, err := json.MarshalIndent(encoded, "", "  ")

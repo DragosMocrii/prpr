@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/DragosMocrii/prpr/internal/readiness"
 )
 
 func TestOpenSaveAndReopenDistinguishesMissingFromAll(t *testing.T) {
@@ -320,5 +322,75 @@ func TestIconChoiceIsSavedWithThePinnedAccount(t *testing.T) {
 	}
 	if _, err := Open(path); err == nil {
 		t.Error("opened an unknown icon set")
+	}
+}
+
+func TestRulesAreSavedWithTheOtherAppSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Rules().Customized() || store.RulesErr() != nil {
+		t.Fatal("a new store has rules of its own")
+	}
+	rules := readiness.DefaultRules()
+	rules.Owners = map[string]readiness.Rule{"acme": {MergeButton: true, Approvals: 1, CodeOwners: true}}
+	if err := store.SaveIcons("nerd"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveRules(rules); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save("alice", "acme/a"); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rule, own := reopened.Rules().For("acme/api"); !own || rule != rules.Owners["acme"] || reopened.Icons() != "nerd" {
+		t.Fatalf("after reopening: rule %+v %t, icons %q", rule, own, reopened.Icons())
+	}
+	// Changing the returned rules leaves the store's alone.
+	reopened.Rules().Owners["acme"] = readiness.Rule{}
+	if rule, _ := reopened.Rules().For("acme/api"); rule != rules.Owners["acme"] {
+		t.Fatal("the store's rules changed through a copy")
+	}
+}
+
+func TestUnreadableRulesKeepTheRestAndSurviveOtherSaves(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	written := `{"app":{"icons":"nerd","ready":{"default":{"merge_buton":true}}},"github.com/alice":"acme/a"}`
+	if err := os.WriteFile(path, []byte(written), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.RulesErr() == nil || store.Rules().Customized() || store.Icons() != "nerd" {
+		t.Fatalf("rules error %v, customized %t, icons %q", store.RulesErr(), store.Rules().Customized(), store.Icons())
+	}
+	if scope, ok := store.Lookup("alice"); !ok || scope.Repository != "acme/a" {
+		t.Fatalf("scope = %+v, %t", scope, ok)
+	}
+	// Other saves write the unreadable rules back as they were.
+	if err := store.Save("alice", "acme/b"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "merge_buton") {
+		t.Fatalf("a scope save dropped the unreadable rules: %s", data)
+	}
+	if err := store.SaveRules(readiness.DefaultRules()); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil || reopened.RulesErr() != nil {
+		t.Fatalf("after saving rules: %v, %v", err, reopened.RulesErr())
 	}
 }

@@ -89,7 +89,7 @@ func (m *model) needYouCount() int {
 				continue
 			}
 			for _, number := range needYouCategories {
-				if categoryMatches(number, id, pr, m.snapshot.Preview) {
+				if m.categoryMatches(number, id, pr, m.snapshot.Preview) {
 					count++
 					break
 				}

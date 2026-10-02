@@ -20,6 +20,7 @@ import (
 	"github.com/DragosMocrii/prpr/internal/github"
 	"github.com/DragosMocrii/prpr/internal/notifier"
 	"github.com/DragosMocrii/prpr/internal/preferences"
+	"github.com/DragosMocrii/prpr/internal/readiness"
 )
 
 const (
@@ -66,10 +67,13 @@ type model struct {
 	// newest countdown tick chain keeps running.
 	refreshDue          time.Time
 	countdownGeneration uint64
-	quota               github.RateLimit
-	quotaKnown          bool
-	quotaStale          bool
-	quotaPaused         bool
+	// unknownRechecks counts the fetches in a row that left a merge state in
+	// scope unknown; while it is positive, auto-refresh comes sooner.
+	unknownRechecks int
+	quota           github.RateLimit
+	quotaKnown      bool
+	quotaStale      bool
+	quotaPaused     bool
 	// bots shows the Bots column and the selected PR's bot breakdown.
 	bots bool
 	// mouse is mouse mode: hover, click, and wheel input instead of the
@@ -98,6 +102,13 @@ type model struct {
 	readiness map[prKey]bool
 	// icons draws status symbols: unicodeIcons or nerdIcons.
 	icons *iconSet
+	// rules decide when an authored pull request is ready to merge;
+	// rulesEditor is the screen that edits them, nil when closed.
+	rules       readiness.Rules
+	rulesEditor *rulesEditor
+	// refetchForRules starts a fetch when the running one finishes, for
+	// rules that need fields it does not select.
+	refetchForRules bool
 	// setTitle sets the terminal title. flashText is an alert the title
 	// flashes until flashUntil, the terminal gains focus, or a key or click;
 	// ticks from an older flashGeneration are dropped.
@@ -162,6 +173,11 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m.openBrowser = client.OpenInBrowser
 	m.notify = notify
 	m.icons = startIcons(icons, preferences)
+	m.rules = preferences.Rules()
+	client.SetNeeds(m.rules.Needs())
+	if err := preferences.RulesErr(); err != nil {
+		m.preferenceErr = err
+	}
 	m.setTitle = title
 	m.desktopNotify = notifier.Desktop()
 	m.listAccounts = client.Accounts
@@ -188,6 +204,7 @@ func newModel(ctx context.Context, client *github.Client, preferences *preferenc
 		darkBackground: true,
 		now:            time.Now,
 		icons:          &unicodeIcons,
+		rules:          readiness.DefaultRules(),
 	}
 	m.panes = [2]prPane{newPRPane(), newPRPane()}
 	m.rebuildPRTable(true)
@@ -222,16 +239,41 @@ func (m *model) startFetch() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// unknownRecheckDelay is how soon auto-refresh comes after the first fetch
+// that leaves a merge state unknown; each further such fetch doubles it, up
+// to the refresh interval. GitHub computes merge states in the background
+// and answers UNKNOWN until it is done.
+const unknownRecheckDelay = 15 * time.Second
+
+// countUnknownRechecks records whether a full fetch left a merge state in
+// scope unknown.
+func (m *model) countUnknownRechecks() {
+	for _, id := range paneIDs {
+		for i := range m.source(id) {
+			if pr := &m.source(id)[i]; m.inScope(pr) && unknownMergeState(pr) {
+				m.unknownRechecks++
+				return
+			}
+		}
+	}
+	m.unknownRechecks = 0
+}
+
 // scheduleAutoRefresh starts the auto-refresh timer for the current fetch
-// generation.
+// generation, sooner while merge states are unknown.
 func (m *model) scheduleAutoRefresh() tea.Cmd {
 	if m.refreshInterval <= 0 {
 		return nil
 	}
+	delay := m.refreshInterval
+	if m.unknownRechecks > 0 && m.err == nil {
+		recheck := unknownRecheckDelay << min(m.unknownRechecks-1, 10)
+		delay = min(delay, recheck)
+	}
 	generation := m.refreshGeneration
-	m.refreshDue = m.now().Add(m.refreshInterval)
+	m.refreshDue = m.now().Add(delay)
 	m.countdownGeneration++
-	return tea.Batch(tea.Tick(m.refreshInterval, func(time.Time) tea.Msg {
+	return tea.Batch(tea.Tick(delay, func(time.Time) tea.Msg {
 		return autoRefreshMsg{generation: generation}
 	}), m.countdownTick())
 }
@@ -296,6 +338,11 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.picker.clamp(m.pickerViewportHeight())
 		}
 		m.setSearchStyle()
+		if m.rulesEditor != nil {
+			// The form redraws its fields only on a message of its own.
+			m.sizeRulesForm()
+			return m, m.updateRules(msg)
+		}
 	case tea.BackgroundColorMsg:
 		m.darkBackground = msg.IsDark()
 		m.help.Styles = help.DefaultStyles(m.darkBackground)
@@ -304,6 +351,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.picker.setDark(m.darkBackground)
 		}
 		m.setSearchStyle()
+		if m.rulesEditor != nil {
+			return m, m.updateRules(msg)
+		}
 	case spinner.TickMsg:
 		if m.spinning() {
 			var cmd tea.Cmd
@@ -338,6 +388,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
+			// The retry selects the fields current rules need.
+			m.refetchForRules = false
 			// The picker can be open when the scope is chosen from a preview.
 			m.closeRepositoryPicker()
 			// The search input belongs to the list, which the error replaces.
@@ -358,6 +410,11 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			notify := m.applySnapshot(msg.snapshot)
+			m.countUnknownRechecks()
+			if m.refetchForRules {
+				m.refetchForRules = false
+				return m, tea.Batch(notify, m.startFetch(), m.resumeQuota())
+			}
 			return m, tea.Batch(notify, m.scheduleAutoRefresh(), m.resumeQuota())
 		}
 		if m.err == nil {
@@ -395,6 +452,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BlurMsg:
 		m.handleFocus(focusOut)
 	case tea.PasteMsg:
+		if m.rulesEditor != nil {
+			return m, m.updateRules(msg)
+		}
 		if m.picker != nil {
 			return m, m.picker.paste(msg.Content, m.pickerViewportHeight())
 		}
@@ -409,6 +469,11 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stopFlash()
 		}
 		m.handleMouse(msg.(tea.MouseMsg))
+	default:
+		// The rule editor's form steps itself with messages of its own.
+		if m.rulesEditor != nil {
+			return m, m.updateRules(msg)
+		}
 	}
 	return m, nil
 }
@@ -420,6 +485,9 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.closeRepositoryPicker()
 		m.cancel()
 		return tea.Quit
+	}
+	if m.rulesEditor != nil {
+		return m.updateRules(msg)
 	}
 	if m.picker != nil {
 		return m.updateRepositoryPicker(msg)
@@ -485,6 +553,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleNotify()
 	case key.Matches(msg, k.Icons):
 		m.toggleIcons()
+	case key.Matches(msg, k.Rules):
+		return m.openRules()
 	case key.Matches(msg, k.Help):
 		m.help.ShowAll = !m.help.ShowAll
 		m.rebuildPRTable(false)
@@ -621,7 +691,7 @@ func (m *model) rebuildVisiblePRs() {
 			}
 		}
 		if id == paneMine {
-			sortMine(pane.visible, source)
+			m.sortMine(pane.visible, source)
 		}
 		m.rebuildGone(id)
 	}
@@ -724,10 +794,10 @@ func (m *model) keepingSelection(rebuild func()) {
 
 // sortMine orders authored pull requests ready to merge first, then oldest
 // created first. Ties keep the fetched order.
-func sortMine(visible []int, source []github.PullRequest) {
+func (m *model) sortMine(visible []int, source []github.PullRequest) {
 	slices.SortStableFunc(visible, func(a, b int) int {
 		x, y := &source[a], &source[b]
-		readyX, readyY := mergeReady(x.Draft, x.Mergeable, x.MergeState), mergeReady(y.Draft, y.Mergeable, y.MergeState)
+		readyX, readyY := m.ready(x), m.ready(y)
 		if readyX != readyY {
 			if readyX {
 				return -1
@@ -810,6 +880,8 @@ func (m *model) View() tea.View {
 	var lines []string
 	list := m.showingList()
 	switch {
+	case m.rulesEditor != nil && m.width >= minimumWidth && m.height >= minimumHeight:
+		lines = m.rulesLines()
 	case m.detailsShown():
 		lines = m.detailsView()
 	case list:
@@ -970,7 +1042,7 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 	} else if m.notice != "" {
 		fixed = strings.TrimLeft(fixed+"  "+m.notice, " ")
 	} else if !(layout.single && m.focus != paneMine) && rowCount(&m.panes[paneMine]) > 0 {
-		legend = m.icons.legend()
+		legend = m.icons.legend(m.rules.Customized())
 	}
 	if m.searching != nil {
 		lines = append(lines, m.searching.View())

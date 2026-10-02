@@ -122,9 +122,14 @@ func (m *model) toggleIcons() {
 	m.rebuildPRTable(false)
 }
 
-// legend explains the Merge column's symbols.
-func (ic *iconSet) legend() string {
-	return ic.check + " ready  " + ic.pending + " blocked  " + ic.behind + " behind  " + ic.cross + " conflicts  " + ic.unknown + " unknown"
+// legend explains the Merge column's symbols. With rules of the user's own,
+// a yellow check means only GitHub would merge.
+func (ic *iconSet) legend(rules bool) string {
+	ready := ic.check + " ready  "
+	if rules {
+		ready = ic.check + " ready (yellow: GitHub only)  "
+	}
+	return ready + ic.pending + " blocked  " + ic.behind + " behind  " + ic.cross + " conflicts  " + ic.unknown + " unknown"
 }
 
 // stateText is the State column: words, or an icon in the Nerd set.

@@ -116,7 +116,8 @@ func cellChanges(old, pr *github.PullRequest) changedCells {
 	if old.Draft != pr.Draft {
 		cells |= cellState
 	}
-	if old.Draft != pr.Draft || old.Mergeable != pr.Mergeable || old.MergeState != pr.MergeState {
+	if old.Draft != pr.Draft || old.Mergeable != pr.Mergeable || old.MergeState != pr.MergeState ||
+		old.ChangesRequested != pr.ChangesRequested || ruleFieldsChanged(old, pr) {
 		cells |= cellMerge
 	}
 	if old.Author != pr.Author {
@@ -138,6 +139,15 @@ func cellChanges(old, pr *github.PullRequest) changedCells {
 		cells |= cellSize
 	}
 	return cells
+}
+
+// ruleFieldsChanged compares the fields only rules read, which decide the
+// Merge column with the merge state. Each is compared only when both
+// fetches read it, so turning a rule on or off marks nothing.
+func ruleFieldsChanged(old, pr *github.PullRequest) bool {
+	return (old.CodeOwnersKnown && pr.CodeOwnersKnown && !slices.Equal(old.PendingCodeOwners, pr.PendingCodeOwners)) ||
+		(old.ThreadsKnown && pr.ThreadsKnown && old.UnresolvedThreads != pr.UnresolvedThreads) ||
+		(old.RequiredChecks != "" && pr.RequiredChecks != "" && old.RequiredChecks != pr.RequiredChecks)
 }
 
 // see clears the mark of a pull request that is still listed.

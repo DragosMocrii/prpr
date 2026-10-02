@@ -65,7 +65,7 @@ func (m *model) shown(id paneID, pr *github.PullRequest, preview bool) bool {
 	if !m.inScope(pr) {
 		return false
 	}
-	if m.category != 0 && !categoryMatches(m.category, id, pr, preview) {
+	if m.category != 0 && !m.categoryMatches(m.category, id, pr, preview) {
 		return false
 	}
 	switch m.quick {
@@ -78,7 +78,7 @@ func (m *model) shown(id paneID, pr *github.PullRequest, preview bool) bool {
 			return false
 		}
 	case quickReady:
-		if preview || !mergeReady(pr.Draft, pr.Mergeable, pr.MergeState) {
+		if preview || !m.readyIn(id, pr) {
 			return false
 		}
 	}

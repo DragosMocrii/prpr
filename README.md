@@ -84,7 +84,7 @@ prpr --refresh 10m
 prpr --refresh 0
 ```
 
-The title shows the active interval, and its top-right corner counts down to the next refresh. A manual refresh restarts the timer. Auto-refresh waits while the repository picker, the first-run repository prompt, or GitHub login is open, and retries failed fetches except authentication failures, which need `l`.
+The title shows the active interval, and its top-right corner counts down to the next refresh. A manual refresh restarts the timer. GitHub computes merge states in the background and reports them as not yet computed (`?`) until it is done, so while a pull request in the repository filter shows `?`, the next refresh comes sooner: after 15 seconds, then 30, 60, and so on, up to the interval. Auto-refresh waits while the repository picker, the first-run repository prompt, or GitHub login is open, and retries failed fetches except authentication failures, which need `l`.
 
 The status line shows the remaining GitHub GraphQL quota and its reset time (for example `API 4,981/5,000 · resets 06:14`), read every 10 seconds with a GraphQL query for the rate limit alone, which GitHub does not count against the quota. The quota is shared by everything using your GitHub account. It turns yellow below 20% and red below 5%, is marked `?` when the latest read failed. On narrow terminals the merge legend is dropped first, then the reset time, then the quota shortens to bare numbers and finally hides.
 
@@ -100,7 +100,7 @@ prpr --bots ''
 
 Bot reporting costs more GraphQL quota, mostly to read review threads: about 28 points per 100 pull requests listed, against about 3 without bots.
 
-Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository or watchlist choice and the watchlists of each GitHub account, the login of a pinned GitHub CLI account, and the icon set chosen with `i`; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice. Accounts without watchlists keep the format earlier versions read; once an account saves a watchlist, an account is pinned, or `i` saves an icon choice, prpr 0.1.16 and older refuse to open the file until it is repaired, 0.1.17 drops the pinned account and icon choice the next time it saves, and 0.1.18 and 0.1.19 drop the icon choice.
+Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository or watchlist choice and the watchlists of each GitHub account, the login of a pinned GitHub CLI account, the icon set chosen with `i`, and the ready-to-merge rules; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice. Accounts without watchlists keep the format earlier versions read; once an account saves a watchlist, an account is pinned, or `i` saves an icon choice, prpr 0.1.16 and older refuse to open the file until it is repaired, 0.1.17 drops the pinned account and icon choice the next time it saves, 0.1.18 and 0.1.19 drop the icon choice, and 0.1.22 and older drop the ready-to-merge rules. Rules prpr cannot read, such as a misspelled condition, are kept in the file as written while prpr uses the defaults and says so, until you save rules with `,`.
 
 If startup reports invalid preferences, back up, repair, or remove only the reported `prpr/preferences.json` file before retrying. Do not remove GitHub CLI credentials to repair app preferences.
 
@@ -128,12 +128,13 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `m`: turn mouse mode on or off; see [Mouse](#mouse).
 - `n`: turn notifications on or off; see [Notifications](#notifications).
 - `i`: switch between Unicode and Nerd Font icons, and save the choice; see [Icons](#icons).
+- `,`: edit what ready to merge means, for every repository or one owner's; see [Ready-to-merge rules](#ready-to-merge-rules).
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
 
-Repository filtering applies to both lists: the active account's authored open pull requests, and open pull requests requesting the account's review (`user-review-requested:@me`, which excludes requests to the account's teams). **My PRs** lists pull requests GitHub would merge now (`✓`) first, then the oldest created first; **Review requested** keeps the most recently updated first, with pull requests you already reviewed after them (see [After your review](#after-your-review)). Both show draft status. The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no matching pull requests in either list remains selectable and shows empty scoped lists. Repository and All selections are saved separately for each GitHub account.
+Repository filtering applies to both lists: the active account's authored open pull requests, and open pull requests requesting the account's review (`user-review-requested:@me`, which excludes requests to the account's teams). **My PRs** lists pull requests ready to merge (the green `✓`, by your [rules](#ready-to-merge-rules)) first, then the oldest created first; **Review requested** keeps the most recently updated first, with pull requests you already reviewed after them (see [After your review](#after-your-review)). Both show draft status. The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no matching pull requests in either list remains selectable and shows empty scoped lists. Repository and All selections are saved separately for each GitHub account.
 
-The pull request table shows draft/open state and whether GitHub would allow a merge now, branch protection included: `✓` ready (optional checks may still be failing), `●` blocked by required reviews or checks, `↓` behind the base branch, `✗` conflicts, `–` draft, and `?` not yet computed. The review list shows the PR author instead of merge status. 
+The pull request table shows draft/open state and whether GitHub would allow a merge now, branch protection included: `✓` ready (optional checks may still be failing), `●` blocked by required reviews or checks, `↓` behind the base branch, `✗` conflicts, `–` draft, and `?` not yet computed. With [ready-to-merge rules](#ready-to-merge-rules) of your own, `✓` is green only when they hold, and yellow when GitHub would merge but your rules say not yet. The review list shows the PR author instead of merge status.
 
 Both lists also show statistics columns, which narrow terminals drop in this order: Size, Comments, Review, CI, Bots, Age.
 
@@ -160,7 +161,7 @@ The line under the title counts pull requests by status, each with the number ke
 1 ✓ 2 ready to merge · 2 ✗ 1 changes requested · 3 ✗ 1 failing CI · 4 ✗ 1 conflicts · 5 ✗ 3 bot threads · 6 ● 3 awaiting your review · 7 ? 1 status unknown
 ```
 
-1–5 cover **My PRs**: ready to merge (the green `✓`), changes requested, failing checks, conflicts, and unresolved bot threads. 6 counts review requests and reviewed pull requests that need you again, but not those waiting on others, and 7 counts pull requests in either list whose merge status GitHub has not computed yet. Unknown is its own category; it is never counted as ready or healthy, and null review decisions or check results are never counted as changes requested or failing. Categories with no pull requests are left out, and the numbers never change. There is no priority score.
+1–5 cover **My PRs**: ready to merge (the green `✓`, by your [rules](#ready-to-merge-rules)), changes requested, failing checks, conflicts, and unresolved bot threads. 6 counts review requests and reviewed pull requests that need you again, but not those waiting on others, and 7 counts pull requests in either list whose merge status GitHub has not computed yet. Unknown is its own category; it is never counted as ready or healthy, and null review decisions or check results are never counted as changes requested or failing. Categories with no pull requests are left out, and the numbers never change. There is no priority score.
 
 Pressing a number shows only that category, focuses its list, and highlights it in the summary; pressing it again or Esc shows everything. It replaces the `D`/`F`/`M` quick filter and combines with search and the repository filter. Counts follow the repository filter but not the search or quick filter, and leave out gone rows. While the quick first look is loading, only conflicts are counted. Narrow terminals shorten the labels, and terminals under 14 lines drop the summary.
 
@@ -168,7 +169,7 @@ Pressing a number shows only that category, focuses its list, and highlights it 
 
 `/` opens a search line in place of the status line. Both lists narrow as you type to pull requests whose title, repository, author, or `#number` contains every word typed, ignoring case: `412` and `#41` both find #412. Enter keeps the search and returns to the list; Esc while typing restores the previous search.
 
-The quick filters show only drafts (`D`), pull requests whose checks failed (`F`), or pull requests GitHub would merge now (`M`, the same rule as the green `✓`). One is active at a time; pressing its key again turns it off. While the quick first look is loading, CI and merge states are unknown, so `F` and `M` match nothing until the details arrive.
+The quick filters show only drafts (`D`), pull requests whose checks failed (`F`), or pull requests ready to merge (`M`: in **My PRs** the same rule as the green `✓`; in **Review requested**, which does not read the fields rules use, whether GitHub would merge it). One is active at a time; pressing its key again turns it off. While the quick first look is loading, CI and merge states are unknown, so `F` and `M` match nothing until the details arrive.
 
 Search and quick filters combine with the repository filter and apply to both lists, gone rows included. The title line names every active filter, list titles count shown rows against all rows in scope (`My PRs (3 of 12)`), and Esc on the list clears the search, quick filter, and attention category; `c` still clears only the repository filter. Filters are kept in memory only.
 
@@ -176,9 +177,28 @@ Search and quick filters combine with the repository filter and apply to both li
 
 Enter opens a screen that describes the selected pull request in words: its full title, and why it can or cannot be merged, its checks, reviews, each bot's state, how long it has waited, when it was opened and updated, its size, and its comment count. On terminals at least 100 columns wide and 24 lines tall the details appear in a box over the list; smaller terminals give them the whole screen. Nothing is hidden on narrow terminals; long lines wrap.
 
-The merge explanation names a blocker only when GitHub's data proves it. A required review or requested changes are named, since GitHub reports a review decision only when reviews are required. Failing checks are never named as the blocker, because the data does not say which checks are required; when GitHub blocks a merge for another reason, the screen says GitHub does not name the rule.
+The merge explanation names a blocker only when GitHub's data proves it. A required review or requested changes are named, since GitHub reports a review decision only when reviews are required. Failing checks are never named as the blocker, because the data does not say which checks are required; when GitHub blocks a merge for another reason, the screen says GitHub does not name the rule. With [ready-to-merge rules](#ready-to-merge-rules) of your own, a **Ready** row lists each of the rule's conditions for an authored pull request, met or not and why.
 
 Up and Down (`k`/`j`) move to the previous or next pull request in the same list, clearing change marks as on the list. `o`, `y`, `r`, and `q` work as on the list. The screen follows the pull request across refreshes, and says so when it has left the list.
+
+### Ready-to-merge rules
+
+By default, ready to merge means GitHub's merge button is green. That follows branch protection for you, so it can be green while your team still waits on an approval, for example when you may bypass the rules. Press `,` to choose your own conditions, which must all hold:
+
+- GitHub's merge button is green (on by default).
+- Required checks passed: the head commit's checks that branch protection requires, read with one extra query per 10 pull requests.
+- All checks passed.
+- At least a number of approvals, up to 10.
+- No changes requested.
+- Every code owner approved: no review request GitHub made for CODEOWNERS is still pending.
+- No unresolved threads.
+- Bots clear: no configured bot has open concerns or a running or failed check.
+
+Drafts, conflicts, and merge states GitHub has not computed always block. The first choice in the editor is the default rule, for every owner without rules of its own; an owner's rules (a user or organization, as in `owner/repo`) replace the default for its repositories, and can be removed to use the default again. The editor lists the owners of the pull requests on screen, and **Another owner…** names any other. Space toggles a condition, Enter moves on and saves at the end, and Esc closes without saving.
+
+The rules decide the green `✓`, attention category 1, the `M` filter, the order of **My PRs**, the terminal title's count, and the ready-to-merge notification. Changing them never notifies. They apply to **My PRs** only: review requests do not read the fields they need.
+
+What prpr cannot see: a required check that has not started yet is not reported at all, so keep the merge button on to cover it unless you bypass branch rules; and a code-owner request removed without an approval looks the same as an approved one. A pull request with more than 50 review requests, 100 review threads, or 100 checks leaves the condition unknown unless one already fails, and unknown is never ready. Each condition beyond the defaults is read only while a rule uses it, and costs a little more GraphQL quota.
 
 ### Change marks
 
@@ -241,7 +261,7 @@ The VS Code terminal shows the title on its tab only with `"terminal.integrated.
 
 Notifications are off unless prpr starts with `--notify`; `n` turns them on or off for the session, and the title shows `notify` while they are on. After each refresh, prpr sends one desktop notification if, since the previous refresh:
 
-- one of your pull requests became ready to merge (`✓`), its CI started failing, or a reviewer requested changes;
+- one of your pull requests became ready to merge (the green `✓`, by your [rules](#ready-to-merge-rules)), its CI started failing, or a reviewer requested changes;
 - a new review request arrived, or a pull request you reviewed needs you again (`new commits`, `replied`, `dismissed`, `activity`). Starting to wait on the author never alerts.
 
 Only changes alert, not the current state: the first load, a switch to another GitHub account, and pull requests you just opened never do, and a failed refresh is skipped. A merge state that GitHub briefly reports as unknown is compared with the last known one. Pull requests outside the repository filter are ignored; search and quick filters are not. A notification names one pull request with its title, or the first two and a count of the rest, and the same text appears in the status line until the next key press.

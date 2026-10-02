@@ -167,7 +167,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		state := ic.stateText(pr.Draft)
 		// A preview has no merge state, but conflicts are already known.
 		preview := m.snapshot.Preview && !gone
-		last, lastCell := mergeIcon(ic, pr.Draft, pr.Mergeable, pr.MergeState), cellMerge
+		last, lastCell := m.mergeCell(pr), cellMerge
 		if preview && pr.Mergeable != "CONFLICTING" {
 			last = pendingText
 		}
@@ -496,10 +496,14 @@ func mergeReady(draft bool, mergeable, state string) bool {
 	return state == "CLEAN" || state == "HAS_HOOKS" || state == "UNSTABLE"
 }
 
-// mergeIcon is green exactly when mergeReady holds.
-func mergeIcon(ic *iconSet, draft bool, mergeable, state string) string {
-	if mergeReady(draft, mergeable, state) {
+// mergeIcon draws GitHub's merge state. ready is the rules' answer: green
+// when they hold, and yellow when only GitHub would merge.
+func mergeIcon(ic *iconSet, draft bool, mergeable, state string, ready bool) string {
+	if ready {
 		return coloredIcon(ic.check, "2")
+	}
+	if mergeReady(draft, mergeable, state) {
+		return coloredIcon(ic.check, "3")
 	}
 	if mergeable == "CONFLICTING" || state == "DIRTY" {
 		return coloredIcon(ic.cross, "1")

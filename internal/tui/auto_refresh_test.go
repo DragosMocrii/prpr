@@ -29,7 +29,7 @@ func finishFetch(m *model, msg fetchFinishedMsg) tea.Cmd {
 }
 
 func aliceSnapshot() fetchFinishedMsg {
-	return fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{{Number: 1, Repository: "acme/a"}}}}
+	return fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{{Number: 1, Repository: "acme/a", Mergeable: "MERGEABLE", MergeState: "CLEAN"}}}}
 }
 
 func TestAutoRefreshTickStartsFetchAndManualRefreshResetsTimer(t *testing.T) {
@@ -218,5 +218,33 @@ func TestCountdownFitsNarrowTerminals(t *testing.T) {
 		if title := ansi.Strip(lines[0]); !strings.HasSuffix(title, "refresh in 1:01:00") {
 			t.Fatalf("width %d title = %q", width, title)
 		}
+	}
+}
+
+func TestUnknownMergeStatesRefreshSoonerUntilKnown(t *testing.T) {
+	m := autoRefreshModel(t, 5*time.Minute)
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	m.now = func() time.Time { return now }
+	unknown := aliceSnapshot()
+	unknown.snapshot.PullRequests = []github.PullRequest{{Number: 1, Repository: "acme/a", Mergeable: "UNKNOWN", MergeState: "UNKNOWN"}}
+	for _, want := range []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute, 5 * time.Minute, 5 * time.Minute} {
+		m.startFetch()
+		finishFetch(m, unknown)
+		if got := m.refreshDue.Sub(now); got != want {
+			t.Fatalf("refresh in %v, want %v", got, want)
+		}
+	}
+	// Known merge states go back to the interval, and an unknown one out of
+	// scope does not count.
+	m.startFetch()
+	finishFetch(m, aliceSnapshot())
+	if got := m.refreshDue.Sub(now); got != 5*time.Minute {
+		t.Fatalf("refresh in %v once known", got)
+	}
+	m.chooseRepository("acme/b")
+	m.startFetch()
+	finishFetch(m, unknown)
+	if got := m.refreshDue.Sub(now); got != 5*time.Minute {
+		t.Fatalf("refresh in %v for an unknown state out of scope", got)
 	}
 }

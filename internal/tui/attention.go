@@ -21,7 +21,7 @@ type attentionCategory struct {
 	// both means the category covers both panes; otherwise pane.
 	both  bool
 	pane  paneID
-	match func(pr *github.PullRequest) bool
+	match func(m *model, pr *github.PullRequest) bool
 }
 
 func unknownMergeState(pr *github.PullRequest) bool {
@@ -32,15 +32,17 @@ func unknownMergeState(pr *github.PullRequest) bool {
 // change, so an empty category leaves a gap.
 var attentionCategories = []attentionCategory{
 	{label: "ready to merge", short: "ready", color: "2", pane: paneMine,
-		match: func(pr *github.PullRequest) bool { return mergeReady(pr.Draft, pr.Mergeable, pr.MergeState) }},
+		match: func(m *model, pr *github.PullRequest) bool { return m.ready(pr) }},
 	{label: "changes requested", short: "changes", color: "1", pane: paneMine,
-		match: func(pr *github.PullRequest) bool { return pr.ReviewDecision == "CHANGES_REQUESTED" }},
+		match: func(_ *model, pr *github.PullRequest) bool { return pr.ReviewDecision == "CHANGES_REQUESTED" }},
 	{label: "failing CI", short: "failing", color: "1", pane: paneMine,
-		match: func(pr *github.PullRequest) bool { return pr.Checks == "FAILURE" || pr.Checks == "ERROR" }},
+		match: func(_ *model, pr *github.PullRequest) bool { return pr.Checks == "FAILURE" || pr.Checks == "ERROR" }},
 	{label: "conflicts", short: "conflicts", color: "1", pane: paneMine,
-		match: func(pr *github.PullRequest) bool { return pr.Mergeable == "CONFLICTING" || pr.MergeState == "DIRTY" }},
+		match: func(_ *model, pr *github.PullRequest) bool {
+			return pr.Mergeable == "CONFLICTING" || pr.MergeState == "DIRTY"
+		}},
 	{label: "bot threads", short: "bots", color: "1", pane: paneMine,
-		match: func(pr *github.PullRequest) bool {
+		match: func(_ *model, pr *github.PullRequest) bool {
 			for _, bot := range pr.Bots {
 				if bot.State == github.BotConcerns {
 					return true
@@ -49,8 +51,9 @@ var attentionCategories = []attentionCategory{
 			return false
 		}},
 	{label: "awaiting your review", short: "to review", color: "3", pane: paneReview,
-		match: func(pr *github.PullRequest) bool { return !pr.ReviewStatus.Waiting() }},
-	{label: "status unknown", short: "unknown", color: "3", both: true, match: unknownMergeState},
+		match: func(_ *model, pr *github.PullRequest) bool { return !pr.ReviewStatus.Waiting() }},
+	{label: "status unknown", short: "unknown", color: "3", both: true,
+		match: func(_ *model, pr *github.PullRequest) bool { return unknownMergeState(pr) }},
 }
 
 // categoryConflicts is the one category a preview already knows.
@@ -75,9 +78,9 @@ func categoryKnown(number int, preview bool) bool {
 
 // categoryMatches reports whether a pull request in pane id is in category
 // number (from 1). Preview rows match only categories a preview knows.
-func categoryMatches(number int, id paneID, pr *github.PullRequest, preview bool) bool {
+func (m *model) categoryMatches(number int, id paneID, pr *github.PullRequest, preview bool) bool {
 	category := attentionCategories[number-1]
-	return category.covers(id) && categoryKnown(number, preview) && category.match(pr)
+	return category.covers(id) && categoryKnown(number, preview) && category.match(m, pr)
 }
 
 // categoryCount counts the current pull requests in category number within
@@ -87,7 +90,7 @@ func (m *model) categoryCount(number int) int {
 	for _, id := range paneIDs {
 		source := m.source(id)
 		for i := range source {
-			if m.inScope(&source[i]) && categoryMatches(number, id, &source[i], m.snapshot.Preview) {
+			if m.inScope(&source[i]) && m.categoryMatches(number, id, &source[i], m.snapshot.Preview) {
 				count++
 			}
 		}

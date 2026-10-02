@@ -44,6 +44,26 @@ type PullRequest struct {
 	// ReviewStatus places a review-pane pull request; zero for a pending
 	// request and for authored pull requests.
 	ReviewStatus ReviewStatus
+	// ChangesRequested counts the latest reviews that request changes.
+	ChangesRequested int
+	// The fields below are read only for authored pull requests, and only
+	// when the client's [Needs] ask for them; each is unknown otherwise.
+	// ID is GitHub's node ID, read for the required checks.
+	ID string
+	// PendingCodeOwners names the code owners whose review is still
+	// requested, "" for one GitHub does not name. CodeOwnersKnown reports
+	// whether they were read.
+	PendingCodeOwners []string
+	CodeOwnersKnown   bool
+	// UnresolvedThreads counts unresolved review threads, outdated ones
+	// included, when ThreadsKnown.
+	UnresolvedThreads int
+	ThreadsKnown      bool
+	// RequiredChecks is "SUCCESS", "PENDING", or "FAILURE" for the head
+	// commit's required checks that reported, or "" when unknown.
+	// RequiredNotPassed names the required checks that have not passed.
+	RequiredChecks    string
+	RequiredNotPassed []string
 }
 
 type Snapshot struct {
@@ -67,6 +87,8 @@ type Client struct {
 	// token is its token once read.
 	login string
 	token secret
+	// needs are the rule fields fetches select.
+	needs Needs
 }
 
 type AuthError struct {
@@ -110,13 +132,13 @@ func pullRequestFields(bots bool) string {
         } } }` + extra
 }
 
-func pullRequestsQuery(bots bool) string {
+func pullRequestsQuery(bots bool, needs Needs) string {
 	return `query($endCursor: String) {
   viewer {
     login
     pullRequests(first: ` + strconv.Itoa(pageSize) + `, after: $endCursor, states: [OPEN],
                  orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes {` + pullRequestFields(bots) + `
+      nodes {` + pullRequestFields(bots) + needsFields(needs) + `
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -255,6 +277,7 @@ type pullRequestNode struct {
 		Nodes []*activityNode `json:"nodes"`
 	} `json:"activity"`
 	botNodes
+	needsNodes
 }
 
 // pullRequest converts a node. A non-empty login selects the latest direct
@@ -293,8 +316,12 @@ func (node *pullRequestNode) pullRequest(login string, bots []Bot) PullRequest {
 		}
 	}
 	for _, review := range node.LatestOpinionatedReviews.Nodes {
-		if review != nil && review.State == "APPROVED" {
+		switch {
+		case review == nil:
+		case review.State == "APPROVED":
 			pr.Approvals++
+		case review.State == "CHANGES_REQUESTED":
+			pr.ChangesRequested++
 		}
 	}
 	var headDate time.Time
@@ -312,6 +339,7 @@ func (node *pullRequestNode) pullRequest(login string, bots []Bot) PullRequest {
 			pr.Bots[i] = botReview(bot, &node.botNodes, headDate, checks)
 		}
 	}
+	node.applyNeeds(&pr)
 	return pr
 }
 
@@ -327,9 +355,10 @@ func NewClient(bots []Bot) (*Client, error) {
 // Bots returns the configured review bots.
 func (c *Client) Bots() []Bot { return c.bots }
 
-// Fetch checks authentication, then fetches both lists. A pinned account's
-// token is read from gh again first, so a new login or refresh of that
-// account takes effect.
+// Fetch checks authentication, then fetches both lists, and the required
+// checks of authored pull requests when [Needs] asks for them; every query
+// must succeed. A pinned account's token is read from gh again first, so a
+// new login or refresh of that account takes effect.
 func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	if _, err := c.accountToken(ctx, true); err != nil {
 		return Snapshot{}, err
@@ -341,8 +370,15 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 		}
 		return Snapshot{}, &AuthError{Err: err}
 	}
-	bots := len(c.bots) > 0
-	return c.run(ctx, pullRequestsQuery(bots), reviewRequestsQuery(bots), reviewedQuery(bots, time.Now()), c.bots)
+	bots, needs := len(c.bots) > 0, c.currentNeeds()
+	snapshot, err := c.run(ctx, pullRequestsQuery(bots, needs), reviewRequestsQuery(bots), reviewedQuery(bots, time.Now()), c.bots)
+	if err != nil || !needs.RequiredChecks {
+		return snapshot, err
+	}
+	if err := c.requiredChecks(ctx, snapshot.PullRequests); err != nil {
+		return Snapshot{}, err
+	}
+	return snapshot, nil
 }
 
 // Preview fetches both lists with only the fields GitHub answers quickly, for

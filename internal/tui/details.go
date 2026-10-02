@@ -24,7 +24,7 @@ func (m *model) detailsShown() bool {
 
 func (m *model) detailsOpen() bool {
 	if !m.details || (m.loading && !m.loginActive && !m.refreshing()) ||
-		m.err != nil || m.picker != nil || m.accounts != nil || !m.scopeChosen {
+		m.err != nil || m.picker != nil || m.accounts != nil || m.rulesEditor != nil || !m.scopeChosen {
 		return false
 	}
 	_, ok := m.selectedPR()
@@ -163,6 +163,13 @@ func (m *model) detailRows(pr *github.PullRequest, gone bool) []detailRowText {
 		merge = loadingDetails
 	}
 	add("Merge", merge)
+	if !review && !preview {
+		if lines := m.ruleDetails(pr); len(lines) > 0 {
+			// The Merge row is GitHub's answer, which the rules may overrule.
+			rows[len(rows)-1].values[0] = strings.Replace(merge, "Ready to merge", "GitHub allows merging", 1)
+			add("Ready", lines...)
+		}
+	}
 	add("CI", pending(checksDetail(pr.Checks)))
 	add("Review", pending(reviewDetail(pr.ReviewDecision, pr.Approvals)))
 	if m.bots {

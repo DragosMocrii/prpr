@@ -32,6 +32,8 @@ type keyMap struct {
 	Mouse           key.Binding
 	Notify          key.Binding
 	Icons           key.Binding
+	Rules           key.Binding
+	RulesCancel     key.Binding
 	Account         key.Binding
 	Retry           key.Binding
 	Login           key.Binding
@@ -102,6 +104,8 @@ func defaultKeyMap() keyMap {
 		Mouse:           key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mouse on")),
 		Notify:          key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "notify on")),
 		Icons:           key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "nerd icons")),
+		Rules:           key.NewBinding(key.WithKeys(","), key.WithHelp(",", "ready rules")),
+		RulesCancel:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel without saving")),
 		Account:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "account")),
 		Retry:           key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
 		Login:           key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log in to GitHub")),
@@ -192,6 +196,7 @@ func (m *model) syncKeys() {
 	}
 	k.Notify.SetEnabled(listing)
 	k.Icons.SetEnabled(listing)
+	k.Rules.SetEnabled(listing && m.rulesEditor == nil)
 	if m.icons.nerd {
 		k.Icons.SetHelp("i", "unicode icons")
 	} else {
@@ -293,7 +298,7 @@ func (k keyMap) listHelp() helpKeys {
 		full: [][]key.Binding{
 			{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom},
 			{t.PageUp, t.PageDown, t.HalfPageUp, t.HalfPageDown},
-			{k.Pages.PrevPage, k.Pages.NextPage, k.Icons},
+			{k.Pages.PrevPage, k.Pages.NextPage, k.Icons, k.Rules},
 			{k.NextPane, k.PrevPane, k.Account},
 			{k.Details, k.Open, k.CopyURL},
 			{k.Search, k.Categories, k.ClearFilters},
@@ -307,6 +312,10 @@ func (k keyMap) listHelp() helpKeys {
 func (k keyMap) detailsHelp() helpKeys {
 	t := k.Table
 	return helpKeys{short: []key.Binding{k.Back, t.LineUp, t.LineDown, k.Open, k.CopyURL, k.Refresh, k.Quit}}
+}
+
+func (k keyMap) rulesHelp() helpKeys {
+	return helpKeys{short: []key.Binding{k.RulesCancel, k.ForceQuit}}
 }
 
 func (k keyMap) searchHelp() helpKeys {
