@@ -78,6 +78,8 @@ type model struct {
 	// the next key press. noticeID increments whenever it is set.
 	notice   string
 	noticeID uint64
+	// details is the details screen for the focused pane's selected row.
+	details bool
 }
 
 type fetchFinishedMsg struct {
@@ -214,6 +216,12 @@ func (m *model) spinning() bool {
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	m.closeStaleDetails()
+	return model, cmd
+}
+
+func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -349,6 +357,10 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			m.rebuildVisiblePRs()
 		})
+	case key.Matches(msg, k.Details):
+		m.details = true
+	case key.Matches(msg, k.Back):
+		m.details = false
 	case key.Matches(msg, k.Open):
 		return m.openSelected()
 	case key.Matches(msg, k.CopyURL):
@@ -604,6 +616,8 @@ func (m *model) View() tea.View {
 	var lines []string
 	list := m.showingList()
 	switch {
+	case m.detailsShown():
+		lines = m.detailsView()
 	case list:
 		lines = m.listLines()
 	case m.width < minimumWidth || m.height < minimumHeight:
@@ -700,6 +714,11 @@ func (m *model) panesFit() bool {
 }
 
 func (m *model) listLines() []string {
+	return m.listLinesWith(keyMap.listHelp)
+}
+
+// listLinesWith draws the list with the given screen's help.
+func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 	scope := "All repositories"
 	if m.selectedRepository != "" {
 		scope = singleLine(m.selectedRepository)
@@ -743,7 +762,7 @@ func (m *model) listLines() []string {
 		legend = "✓ ready  ● blocked  ↓ behind  ✗ conflicts  ? unknown"
 	}
 	lines = append(lines, m.statusLine(fixed, legend))
-	return append(lines, m.helpLines(keyMap.listHelp)...)
+	return append(lines, m.helpLines(screen)...)
 }
 
 // titleLine puts a refresh indicator in the top-right corner while a fetch

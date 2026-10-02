@@ -19,6 +19,8 @@ type keyMap struct {
 	PrevPane        key.Binding
 	Refresh         key.Binding
 	ClearMarks      key.Binding
+	Details         key.Binding
+	Back            key.Binding
 	Open            key.Binding
 	CopyURL         key.Binding
 	Mouse           key.Binding
@@ -56,6 +58,8 @@ func defaultKeyMap() keyMap {
 		PrevPane:        key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev list")),
 		Refresh:         key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		ClearMarks:      key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "clear marks")),
+		Details:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "details")),
+		Back:            key.NewBinding(key.WithKeys("esc", "enter"), key.WithHelp("esc", "back")),
 		Open:            key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open")),
 		CopyURL:         key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy URL")),
 		Mouse:           key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mouse on")),
@@ -95,19 +99,24 @@ func (m *model) syncKeys() {
 	viewing := !m.loginActive && m.err == nil && m.picker == nil && m.scopeChosen && m.snapshot.Login != ""
 	pane := m.focused()
 	rows := viewing && rowCount(pane) > 0
+	details := m.detailsShown()
+	// The details screen keeps row movement, opening, refresh, and quit.
+	listing := viewing && !details
 
 	k.ChoiceUp.SetEnabled(scopeChoice)
 	k.ChoiceDown.SetEnabled(scopeChoice)
 	k.Continue.SetEnabled(scopeChoice)
-	k.PickRepository.SetEnabled(browsing)
-	k.AllRepositories.SetEnabled(browsing)
-	k.NextPane.SetEnabled(viewing)
-	k.PrevPane.SetEnabled(viewing)
+	k.PickRepository.SetEnabled(browsing && !details)
+	k.AllRepositories.SetEnabled(browsing && !details)
+	k.NextPane.SetEnabled(listing)
+	k.PrevPane.SetEnabled(listing)
 	k.Refresh.SetEnabled(idle && m.err == nil && m.picker == nil)
-	k.ClearMarks.SetEnabled(viewing && m.hasMarks())
+	k.ClearMarks.SetEnabled(listing && m.hasMarks())
+	k.Details.SetEnabled(rows && !details)
+	k.Back.SetEnabled(details)
 	k.Open.SetEnabled(rows)
 	k.CopyURL.SetEnabled(rows)
-	k.Mouse.SetEnabled(viewing)
+	k.Mouse.SetEnabled(listing)
 	if m.mouse {
 		k.Mouse.SetHelp("m", "mouse off")
 	} else {
@@ -115,7 +124,7 @@ func (m *model) syncKeys() {
 	}
 	k.Retry.SetEnabled(idle && m.err != nil)
 	k.Login.SetEnabled(idle && m.err != nil)
-	k.Help.SetEnabled(viewing)
+	k.Help.SetEnabled(listing)
 	if m.help.ShowAll {
 		k.Help.SetHelp("?", "less")
 	} else {
@@ -128,7 +137,7 @@ func (m *model) syncKeys() {
 	} {
 		binding.SetEnabled(rows)
 	}
-	paged := rows && pane.pages.TotalPages > 1
+	paged := rows && !details && pane.pages.TotalPages > 1
 	k.Pages.PrevPage.SetEnabled(paged)
 	k.Pages.NextPage.SetEnabled(paged)
 	for _, id := range paneIDs {
@@ -167,17 +176,22 @@ func (k keyMap) errorHelp() helpKeys {
 func (k keyMap) listHelp() helpKeys {
 	t := k.Table
 	return helpKeys{
-		short: []key.Binding{t.LineUp, t.LineDown, k.NextPane, k.PickRepository, k.AllRepositories, k.Refresh, k.Help, k.Quit, k.Mouse, k.ClearMarks, k.Open},
+		short: []key.Binding{t.LineUp, t.LineDown, k.Details, k.NextPane, k.PickRepository, k.Refresh, k.Help, k.Quit, k.Mouse, k.ClearMarks, k.Open},
 		full: [][]key.Binding{
 			{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom},
 			{t.PageUp, t.PageDown, t.HalfPageUp, t.HalfPageDown},
 			{k.Pages.PrevPage, k.Pages.NextPage},
 			{k.NextPane, k.PrevPane},
-			{k.Open, k.CopyURL},
+			{k.Details, k.Open, k.CopyURL},
 			{k.PickRepository, k.AllRepositories, k.Refresh, k.ClearMarks},
 			{k.Mouse, k.Help, k.Quit},
 		},
 	}
+}
+
+func (k keyMap) detailsHelp() helpKeys {
+	t := k.Table
+	return helpKeys{short: []key.Binding{k.Back, t.LineUp, t.LineDown, k.Open, k.CopyURL, k.Refresh, k.Quit}}
 }
 
 func (k keyMap) pickerHelp() helpKeys {

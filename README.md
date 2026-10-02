@@ -109,6 +109,7 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `f` / `b` / Page Down / Page Up / Space: move by a page; `d` / `u`: move by half a page; `g` / `G` / Home / End: jump to the first or last pull request.
 - Left / Right: jump to the previous or next page shown in the page indicator.
 - Tab / Shift+Tab: switch between **My PRs** and **Review requested**. Each list keeps its own selection and scroll position; navigation keys move only the focused list.
+- Enter: show the selected pull request's details; Esc or Enter goes back. See [Details](#details).
 - `?`: show or hide all key bindings.
 - `p`: find and select a repository to filter both lists; choose `All repositories` to clear the filter.
 - `c`: clear the repository filter and show all authored open PRs and review requests.
@@ -141,6 +142,14 @@ Both lists also show statistics columns, which narrow terminals drop in this ord
   - `–`: no bot has acted on the pull request.
 
   The line under the table lists each bot's state for the selected pull request when it fits beside the URL. Findings a bot writes only in a summary comment are not counted, and only the 20 most recent review threads are read. The head commit is dated by when it was committed, not pushed, so a commit pushed long after it was made can leave an earlier bot review showing `✓` instead of `✓*`.
+
+### Details
+
+Enter opens a screen that describes the selected pull request in words: its full title, and why it can or cannot be merged, its checks, reviews, each bot's state, how long it has waited, when it was opened and updated, its size, and its comment count. On terminals at least 100 columns wide and 24 lines tall the details appear in a box over the list; smaller terminals give them the whole screen. Nothing is hidden on narrow terminals; long lines wrap.
+
+The merge explanation names a blocker only when GitHub's data proves it. A required review or requested changes are named, since GitHub reports a review decision only when reviews are required. Failing checks are never named as the blocker, because the data does not say which checks are required; when GitHub blocks a merge for another reason, the screen says GitHub does not name the rule.
+
+Up and Down (`k`/`j`) move to the previous or next pull request in the same list, clearing change marks as on the list. `o`, `y`, `r`, and `q` work as on the list. The screen follows the pull request across refreshes, and says so when it has left the list.
 
 ### Change marks
 
