@@ -159,9 +159,13 @@ func containsControl(text string) bool {
 	return strings.ContainsFunc(text, unicode.IsControl)
 }
 
-// safeTrunkURL accepts only https links to app.trunk.io without user info.
+// maxQueueURL caps URL, which comes from text others write.
+const maxQueueURL = 200
+
+// safeTrunkURL accepts only https links to app.trunk.io without user info,
+// at most maxQueueURL bytes.
 func safeTrunkURL(raw string) bool {
-	if raw == "" || containsControl(raw) {
+	if raw == "" || len(raw) > maxQueueURL || containsControl(raw) {
 		return false
 	}
 	parsed, err := url.Parse(raw)

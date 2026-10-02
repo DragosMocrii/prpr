@@ -1,6 +1,9 @@
 package github
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func trunkComment(line string) []queueComment {
 	return []queueComment{
@@ -64,6 +67,13 @@ func TestTrunkEntryKeepsOnlySafeSingleLineText(t *testing.T) {
 	long := trunkEntry(trunkComment("⚠️ The required check [`a\x1b[31mvery-long-check-name-that-goes-on-and-on-and-on`](https://x) (Failure) has failed."))
 	if len([]rune(long.Detail)) > maxQueueDetail || containsControl(long.Detail) {
 		t.Fatalf("detail not single-line and capped: %q", long.Detail)
+	}
+	tooLong := "https://app.trunk.io/" + strings.Repeat("x", maxQueueURL)
+	if safeTrunkURL(tooLong) {
+		t.Errorf("safeTrunkURL kept a %d-byte URL", len(tooLong))
+	}
+	if entry := trunkEntry(trunkComment("🧪 Running tests - [details](" + tooLong + ").")); entry.URL != "" {
+		t.Errorf("too-long URL kept: %d bytes", len(entry.URL))
 	}
 	for _, raw := range []string{"http://app.trunk.io/x", "https://app.trunk.io.evil.test/x", "https://user@app.trunk.io/x", "https://app.trunk.io/x\n", ""} {
 		if safeTrunkURL(raw) {
