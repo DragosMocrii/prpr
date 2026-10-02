@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -168,6 +170,61 @@ func TestLegendDrawsWhatTheTablesDraw(t *testing.T) {
 		for _, symbol := range drawn {
 			if !strings.Contains(legend, symbol) {
 				t.Errorf("nerd %t: legend lacks %q", nerd, ansi.Strip(symbol))
+			}
+		}
+	}
+}
+
+// legendExempt names the iconSet fields the legend leaves out on purpose.
+// A new icon fails TestEveryIconIsInTheLegend until it gets a legend entry
+// or a line here saying why it needs none.
+var legendExempt = map[string]string{
+	"nerd":       "not an icon",
+	"gap":        "spacing between an icon and what follows, not a symbol",
+	"categories": "the summary line spells out each category's label beside its icon",
+}
+
+func TestEveryIconIsInTheLegend(t *testing.T) {
+	for _, set := range []*iconSet{&unicodeIcons, &nerdIcons} {
+		m := newPaneModel(t, 240, 80, manyPRs(1), reviewPRs(1))
+		m.icons = set
+		m.bots = true
+		m.rules = readiness.Rules{Default: readiness.Rule{Approvals: 1}}
+		pressL(m)
+		if legend := ansi.Strip(strings.Join(m.legendLines(), "\n")); strings.Contains(legend, "taller terminal") {
+			t.Fatalf("nerd %t: legend cut short:\n%s", set.nerd, legend)
+		}
+		// Each entry starts with the symbol it explains.
+		var entries []string
+		for _, section := range m.legendSections() {
+			for _, item := range section.items {
+				entries = append(entries, ansi.Strip(item))
+			}
+		}
+		explained := func(icon string) bool {
+			return slices.ContainsFunc(entries, func(entry string) bool { return strings.HasPrefix(entry, icon) })
+		}
+		value := reflect.ValueOf(*set)
+		for i := range value.NumField() {
+			name := value.Type().Field(i).Name
+			if _, ok := legendExempt[name]; ok {
+				continue
+			}
+			var icons []string
+			switch field := value.Field(i); field.Kind() {
+			case reflect.String:
+				icons = append(icons, field.String())
+			case reflect.Map:
+				for _, key := range field.MapKeys() {
+					icons = append(icons, field.MapIndex(key).String())
+				}
+			default:
+				t.Fatalf("iconSet.%s is a %s; list its icons here or exempt it", name, field.Kind())
+			}
+			for _, icon := range icons {
+				if icon != "" && !explained(icon) {
+					t.Errorf("nerd %t: iconSet.%s %q is not in the legend; add it to legendSections or legendExempt", set.nerd, name, icon)
+				}
 			}
 		}
 	}
