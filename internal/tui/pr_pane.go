@@ -281,6 +281,15 @@ func (m *model) paneTitle(id paneID, single bool) string {
 		name = "Review requested"
 	}
 	title := fmt.Sprintf("%s (%d)", name, len(m.panes[id].visible))
+	if m.filtersActive() {
+		total := 0
+		for i := range m.source(id) {
+			if m.inScope(&m.source(id)[i]) {
+				total++
+			}
+		}
+		title = fmt.Sprintf("%s (%d of %d)", name, len(m.panes[id].visible), total)
+	}
 	if single {
 		title += " · tab: other list"
 	}
@@ -326,6 +335,9 @@ func (m *model) emptyPaneLine(id paneID) string {
 	text := "No open pull requests"
 	if id == paneReview {
 		text = "No review requests"
+	}
+	if m.filtersActive() {
+		return "  No pull requests match the filters; esc clears them."
 	}
 	if m.selectedRepository != "" {
 		text += " in " + singleLine(m.selectedRepository)

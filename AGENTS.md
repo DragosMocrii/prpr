@@ -13,6 +13,7 @@
 - `internal/tui/quota.go` owns rate-limit polling and the status line.
 - `internal/tui/changes.go` owns change tracking between refreshes: row marks, changed cells, and gone pull requests.
 - `internal/tui/mouse.go` owns mouse mode: mapping screen lines to panes and rows, hover, clicks, and the wheel.
+- `internal/tui/filters.go` owns search and quick filters: matching, the search input, and the active-filter text.
 - `internal/tui/details.go` owns the details screen (a Lip Gloss layer over the list on large terminals, full screen otherwise) and the wording of each status.
 - `internal/tui/open.go` owns opening the selected pull request in the browser and copying its URL, and the status-line notice they set.
 - `internal/tui/pr_table.go` owns pull-request table columns, statistics cells, and links.
@@ -52,6 +53,7 @@ Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package 
 - Mouse mode is off at start, toggled by `m`, and kept in memory only. Only the list screen requests mouse input; other screens leave it to the terminal. Hover never moves the cursor or clears marks; clicks and the wheel move the cursor through the same leave-row rule as keys. Hit testing follows `listLines` and finds a table's first drawn row from its selected row, since Bubbles does not expose its scroll position.
 - Bubbles owns the pull-request table cursor and scrolling. Preserve ANSI/grapheme-aware width behavior and safe OSC 8 hyperlink targets. Cells end their colors with full resets, so row stripes and the selected-row background are re-applied after each reset when the table is drawn.
 - `o` opens the selected row through `gh pr view --web -- <url>`, run asynchronously; `y` copies its URL with OSC 52 (`tea.SetClipboard`). Both act on the focused pane's selected row, gone rows included, and refuse URLs that fail `safePullRequestURL`.
+- Search and quick filters apply to both panes on top of the repository scope, gone rows included, and stay in memory. Preview rows never match the failing-CI or ready-to-merge filters. The title line always names active filters, and Esc on the list clears them.
 - The details screen describes the focused pane's selected row and moves through the same leave-row rule. Its merge text names a blocker only when the data proves it: a review decision (set only when reviews are required) can be named; checks never are, since required checks are not fetched. Preview rows show loading text for detail fields.
 - The Merge column is green only for a `mergeStateStatus` of `CLEAN`, `HAS_HOOKS`, or `UNSTABLE`. `mergeable` alone says nothing about required reviews or checks. Conflicts win over every other state, drafts come from `isDraft` (the `DRAFT` state is deprecated), and an unknown or missing state is never shown as mergeable.
 - Age is ready-for-review time (last `ReadyForReviewEvent`, else `createdAt`; zero for drafts), or for review requests the latest `ReviewRequestedEvent` naming the viewer with that ready time as fallback. Null review decisions and check rollups are unknown, never approved or passing.

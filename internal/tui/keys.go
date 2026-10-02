@@ -21,6 +21,11 @@ type keyMap struct {
 	ClearMarks      key.Binding
 	Details         key.Binding
 	Back            key.Binding
+	Search          key.Binding
+	QuickDrafts     key.Binding
+	QuickFailing    key.Binding
+	QuickReady      key.Binding
+	ClearFilters    key.Binding
 	Open            key.Binding
 	CopyURL         key.Binding
 	Mouse           key.Binding
@@ -32,6 +37,14 @@ type keyMap struct {
 	Table           table.KeyMap
 	Pages           paginator.KeyMap
 	Picker          pickerKeyMap
+	SearchInput     searchKeyMap
+}
+
+type searchKeyMap struct {
+	Apply  key.Binding
+	Cancel key.Binding
+	Clear  key.Binding
+	Quit   key.Binding
 }
 
 type pickerKeyMap struct {
@@ -52,14 +65,19 @@ func defaultKeyMap() keyMap {
 		ChoiceUp:        key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
 		ChoiceDown:      key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
 		Continue:        key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "continue")),
-		PickRepository:  key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "change repo")),
+		PickRepository:  key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "repo")),
 		AllRepositories: key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "all PRs")),
-		NextPane:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch list")),
+		NextPane:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch")),
 		PrevPane:        key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev list")),
 		Refresh:         key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		ClearMarks:      key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "clear marks")),
 		Details:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "details")),
 		Back:            key.NewBinding(key.WithKeys("esc", "enter"), key.WithHelp("esc", "back")),
+		Search:          key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+		QuickDrafts:     key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "drafts")),
+		QuickFailing:    key.NewBinding(key.WithKeys("F"), key.WithHelp("F", "failing CI")),
+		QuickReady:      key.NewBinding(key.WithKeys("M"), key.WithHelp("M", "ready to merge")),
+		ClearFilters:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filters")),
 		Open:            key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open")),
 		CopyURL:         key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy URL")),
 		Mouse:           key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mouse on")),
@@ -80,6 +98,12 @@ func defaultKeyMap() keyMap {
 			Cancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 			Clear:  key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear")),
 			Retry:  key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "retry")),
+			Quit:   key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+		},
+		SearchInput: searchKeyMap{
+			Apply:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "keep search")),
+			Cancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+			Clear:  key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear")),
 			Quit:   key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 		},
 	}
@@ -113,6 +137,10 @@ func (m *model) syncKeys() {
 	k.Refresh.SetEnabled(idle && m.err == nil && m.picker == nil)
 	k.ClearMarks.SetEnabled(listing && m.hasMarks())
 	k.Details.SetEnabled(rows && !details)
+	for _, binding := range []*key.Binding{&k.Search, &k.QuickDrafts, &k.QuickFailing, &k.QuickReady} {
+		binding.SetEnabled(listing)
+	}
+	k.ClearFilters.SetEnabled(listing && m.filtersActive())
 	k.Back.SetEnabled(details)
 	k.Open.SetEnabled(rows)
 	k.CopyURL.SetEnabled(rows)
@@ -176,13 +204,14 @@ func (k keyMap) errorHelp() helpKeys {
 func (k keyMap) listHelp() helpKeys {
 	t := k.Table
 	return helpKeys{
-		short: []key.Binding{t.LineUp, t.LineDown, k.Details, k.NextPane, k.PickRepository, k.Refresh, k.Help, k.Quit, k.Mouse, k.ClearMarks, k.Open},
+		short: []key.Binding{t.LineUp, t.LineDown, k.ClearFilters, k.Details, k.Search, k.NextPane, k.PickRepository, k.Refresh, k.Help, k.Quit, k.Mouse, k.ClearMarks, k.Open},
 		full: [][]key.Binding{
 			{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom},
 			{t.PageUp, t.PageDown, t.HalfPageUp, t.HalfPageDown},
 			{k.Pages.PrevPage, k.Pages.NextPage},
 			{k.NextPane, k.PrevPane},
 			{k.Details, k.Open, k.CopyURL},
+			{k.Search, k.QuickDrafts, k.QuickFailing, k.QuickReady, k.ClearFilters},
 			{k.PickRepository, k.AllRepositories, k.Refresh, k.ClearMarks},
 			{k.Mouse, k.Help, k.Quit},
 		},
@@ -192,6 +221,11 @@ func (k keyMap) listHelp() helpKeys {
 func (k keyMap) detailsHelp() helpKeys {
 	t := k.Table
 	return helpKeys{short: []key.Binding{k.Back, t.LineUp, t.LineDown, k.Open, k.CopyURL, k.Refresh, k.Quit}}
+}
+
+func (k keyMap) searchHelp() helpKeys {
+	s := k.SearchInput
+	return helpKeys{short: []key.Binding{s.Apply, s.Cancel, s.Clear, s.Quit}}
 }
 
 func (k keyMap) pickerHelp() helpKeys {

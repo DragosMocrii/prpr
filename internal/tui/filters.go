@@ -1,0 +1,179 @@
+package tui
+
+import (
+	"strconv"
+	"strings"
+	"unicode"
+
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/DragosMocrii/prpr/internal/github"
+)
+
+// quickFilter narrows both lists to one kind of pull request. At most one is
+// active.
+type quickFilter int
+
+const (
+	quickNone quickFilter = iota
+	quickDrafts
+	quickFailing
+	quickReady
+)
+
+func (q quickFilter) label() string {
+	switch q {
+	case quickDrafts:
+		return "drafts"
+	case quickFailing:
+		return "failing CI"
+	case quickReady:
+		return "ready to merge"
+	default:
+		return ""
+	}
+}
+
+// filtersActive reports whether a search or quick filter hides rows.
+func (m *model) filtersActive() bool {
+	return strings.TrimSpace(m.search) != "" || m.quick != quickNone
+}
+
+// filterText names the active search and quick filter for the title line.
+func (m *model) filterText() string {
+	var parts []string
+	if search := strings.TrimSpace(m.search); search != "" {
+		parts = append(parts, "search "+strconv.Quote(singleLine(search)))
+	}
+	if m.quick != quickNone {
+		parts = append(parts, m.quick.label())
+	}
+	return strings.Join(parts, " · ")
+}
+
+// shown reports whether a pull request passes the repository scope, the
+// search, and the quick filter. A preview row's CI and merge state are
+// unknown, so it never matches the failing or ready filters.
+func (m *model) shown(pr *github.PullRequest, preview bool) bool {
+	if !m.inScope(pr) {
+		return false
+	}
+	switch m.quick {
+	case quickDrafts:
+		if !pr.Draft {
+			return false
+		}
+	case quickFailing:
+		if preview || (pr.Checks != "FAILURE" && pr.Checks != "ERROR") {
+			return false
+		}
+	case quickReady:
+		if preview || !mergeReady(pr.Draft, pr.Mergeable, pr.MergeState) {
+			return false
+		}
+	}
+	return searchMatches(pr, m.search)
+}
+
+// searchMatches reports whether every word of the search appears, ignoring
+// case, in the title, repository, author, or #number.
+func searchMatches(pr *github.PullRequest, search string) bool {
+	haystack := strings.ToLower(strings.Join([]string{
+		pr.Title, pr.Repository, pr.Author, "#" + strconv.Itoa(pr.Number),
+	}, "\n"))
+	for _, word := range strings.Fields(strings.ToLower(search)) {
+		if !strings.Contains(haystack, word) {
+			return false
+		}
+	}
+	return true
+}
+
+// applyFilters rebuilds both lists, keeping each pane's selection when its
+// pull request is still shown.
+func (m *model) applyFilters() {
+	m.keepingSelection(m.rebuildVisiblePRs)
+}
+
+func (m *model) toggleQuick(q quickFilter) {
+	if m.quick == q {
+		m.quick = quickNone
+	} else {
+		m.quick = q
+	}
+	m.applyFilters()
+}
+
+func (m *model) clearFilters() {
+	m.search = ""
+	m.quick = quickNone
+	m.applyFilters()
+}
+
+// openSearch starts editing the search; the input replaces the status line.
+func (m *model) openSearch() tea.Cmd {
+	input := textinput.New()
+	input.Prompt = "/ "
+	input.Placeholder = "title, repository, author, or #number"
+	// Terminal paste arrives as tea.PasteMsg; skip the clipboard helper.
+	input.KeyMap.Paste.SetEnabled(false)
+	input.SetValue(m.search)
+	input.CursorEnd()
+	m.searchBefore = m.search
+	m.searching = &input
+	m.setSearchStyle()
+	return m.searching.Focus()
+}
+
+func (m *model) setSearchStyle() {
+	if m.searching == nil {
+		return
+	}
+	styles := textinput.DefaultStyles(m.darkBackground)
+	styles.Cursor.Blink = false
+	m.searching.SetStyles(styles)
+	// Leave a column for the cursor cell after the prompt and text.
+	m.searching.SetWidth(max(1, m.width-ansi.StringWidth(m.searching.Prompt)-1))
+}
+
+// updateSearch edits the search, filtering both lists as it changes. Enter
+// keeps it; Esc restores the search from before editing.
+func (m *model) updateSearch(msg tea.Msg) tea.Cmd {
+	k := m.keys.SearchInput
+	if msg, ok := msg.(tea.KeyPressMsg); ok {
+		switch {
+		case key.Matches(msg, k.Apply):
+			m.searching = nil
+			m.search = strings.TrimSpace(m.search)
+			return nil
+		case key.Matches(msg, k.Cancel):
+			m.searching = nil
+			m.search = m.searchBefore
+			m.applyFilters()
+			return nil
+		case key.Matches(msg, k.Clear):
+			m.searching.SetValue("")
+			m.search = ""
+			m.applyFilters()
+			return nil
+		}
+	}
+	if paste, ok := msg.(tea.PasteMsg); ok {
+		msg = tea.PasteMsg{Content: strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return ' '
+			}
+			return r
+		}, paste.Content)}
+	}
+	var cmd tea.Cmd
+	*m.searching, cmd = m.searching.Update(msg)
+	if value := m.searching.Value(); value != m.search {
+		m.search = value
+		m.applyFilters()
+	}
+	return cmd
+}

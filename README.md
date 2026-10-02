@@ -109,6 +109,9 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `f` / `b` / Page Down / Page Up / Space: move by a page; `d` / `u`: move by half a page; `g` / `G` / Home / End: jump to the first or last pull request.
 - Left / Right: jump to the previous or next page shown in the page indicator.
 - Tab / Shift+Tab: switch between **My PRs** and **Review requested**. Each list keeps its own selection and scroll position; navigation keys move only the focused list.
+- `/`: search both lists; see [Search and quick filters](#search-and-quick-filters).
+- `D` / `F` / `M`: show only drafts, PRs with failing CI, or PRs ready to merge; press again to show all.
+- Esc: clear the search and quick filter.
 - Enter: show the selected pull request's details; Esc or Enter goes back. See [Details](#details).
 - `?`: show or hide all key bindings.
 - `p`: find and select a repository to filter both lists; choose `All repositories` to clear the filter.
@@ -142,6 +145,14 @@ Both lists also show statistics columns, which narrow terminals drop in this ord
   - `–`: no bot has acted on the pull request.
 
   The line under the table lists each bot's state for the selected pull request when it fits beside the URL. Findings a bot writes only in a summary comment are not counted, and only the 20 most recent review threads are read. The head commit is dated by when it was committed, not pushed, so a commit pushed long after it was made can leave an earlier bot review showing `✓` instead of `✓*`.
+
+### Search and quick filters
+
+`/` opens a search line in place of the status line. Both lists narrow as you type to pull requests whose title, repository, author, or `#number` contains every word typed, ignoring case: `412` and `#41` both find #412. Enter keeps the search and returns to the list; Esc while typing restores the previous search.
+
+The quick filters show only drafts (`D`), pull requests whose checks failed (`F`), or pull requests GitHub would merge now (`M`, the same rule as the green `✓`). One is active at a time; pressing its key again turns it off. While the quick first look is loading, CI and merge states are unknown, so `F` and `M` match nothing until the details arrive.
+
+Search and quick filters combine with the repository filter and apply to both lists, gone rows included. The title line names every active filter, list titles count shown rows against all rows in scope (`My PRs (3 of 12)`), and Esc on the list clears the search and quick filter; `c` still clears only the repository filter. Filters are kept in memory only.
 
 ### Details
 

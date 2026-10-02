@@ -12,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -80,6 +81,12 @@ type model struct {
 	noticeID uint64
 	// details is the details screen for the focused pane's selected row.
 	details bool
+	// search and quick filter both lists; searching is the search input while
+	// it is edited, and searchBefore the search that Esc restores.
+	search       string
+	quick        quickFilter
+	searching    *textinput.Model
+	searchBefore string
 }
 
 type fetchFinishedMsg struct {
@@ -231,6 +238,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.picker.setWidth(m.width)
 			m.picker.clamp(m.pickerViewportHeight())
 		}
+		m.setSearchStyle()
 	case tea.BackgroundColorMsg:
 		m.darkBackground = msg.IsDark()
 		m.help.Styles = help.DefaultStyles(m.darkBackground)
@@ -238,6 +246,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.picker != nil {
 			m.picker.setDark(m.darkBackground)
 		}
+		m.setSearchStyle()
 	case spinner.TickMsg:
 		if m.spinning() {
 			var cmd tea.Cmd
@@ -271,6 +280,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			// The picker can be open when the scope is chosen from a preview.
 			m.closeRepositoryPicker()
+			// The search input belongs to the list, which the error replaces.
+			m.searching = nil
 			m.snapshot = github.Snapshot{}
 			// Change tracking keeps its baseline, so the next success is
 			// compared with the last good lists.
@@ -311,6 +322,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.picker != nil {
 			return m, m.picker.paste(msg.Content, m.pickerViewportHeight())
 		}
+		if m.searching != nil {
+			return m, m.updateSearch(msg)
+		}
 	case tea.KeyPressMsg:
 		return m, m.handleKey(msg)
 	case tea.MouseClickMsg, tea.MouseWheelMsg, tea.MouseMotionMsg:
@@ -329,6 +343,9 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.picker != nil {
 		return m.updateRepositoryPicker(msg)
+	}
+	if m.searching != nil {
+		return m.updateSearch(msg)
 	}
 	m.notice = ""
 	switch {
@@ -361,6 +378,16 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.details = true
 	case key.Matches(msg, k.Back):
 		m.details = false
+	case key.Matches(msg, k.Search):
+		return m.openSearch()
+	case key.Matches(msg, k.QuickDrafts):
+		m.toggleQuick(quickDrafts)
+	case key.Matches(msg, k.QuickFailing):
+		m.toggleQuick(quickFailing)
+	case key.Matches(msg, k.QuickReady):
+		m.toggleQuick(quickReady)
+	case key.Matches(msg, k.ClearFilters):
+		m.clearFilters()
 	case key.Matches(msg, k.Open):
 		return m.openSelected()
 	case key.Matches(msg, k.CopyURL):
@@ -474,7 +501,7 @@ func (m *model) rebuildVisiblePRs() {
 		pane.visible = pane.visible[:0]
 		source := m.source(id)
 		for index, pr := range source {
-			if m.inScope(&pr) {
+			if m.shown(&pr, m.snapshot.Preview) {
 				pane.visible = append(pane.visible, index)
 			}
 		}
@@ -591,7 +618,7 @@ func (m *model) rebuildGone(id paneID) {
 	pane := &m.panes[id]
 	pane.gone = pane.gone[:0]
 	for index := range m.changes[id].gone {
-		if m.inScope(&m.changes[id].gone[index]) {
+		if m.shown(&m.changes[id].gone[index], false) {
 			pane.gone = append(pane.gone, index)
 		}
 	}
@@ -724,6 +751,9 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 		scope = singleLine(m.selectedRepository)
 	}
 	title := fmt.Sprintf("prpr — @%s — %s", m.snapshot.Login, scope)
+	if filters := m.filterText(); filters != "" {
+		title += " · " + filters
+	}
 	if m.refreshInterval > 0 {
 		title += " · auto " + intervalText(m.refreshInterval)
 	}
@@ -760,6 +790,10 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 		fixed = strings.TrimLeft(fixed+"  "+m.notice, " ")
 	} else if !(layout.single && m.focus != paneMine) && rowCount(&m.panes[paneMine]) > 0 {
 		legend = "✓ ready  ● blocked  ↓ behind  ✗ conflicts  ? unknown"
+	}
+	if m.searching != nil {
+		lines = append(lines, m.searching.View())
+		return append(lines, m.helpLines(keyMap.searchHelp)...)
 	}
 	lines = append(lines, m.statusLine(fixed, legend))
 	return append(lines, m.helpLines(screen)...)
