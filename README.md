@@ -19,8 +19,6 @@ Complete the displayed device-code flow in a browser if GitHub CLI cannot open o
 
 ## Install
 
-The package and download links below work once this repository is public.
-
 ### Homebrew (macOS and Linux)
 
 ```sh
