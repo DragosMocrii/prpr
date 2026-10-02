@@ -78,6 +78,8 @@ type model struct {
 	bots bool
 	// legend is whether the icon legend panel is open; it is saved.
 	legend bool
+	// showDrafts puts draft pull requests in scope; it is saved.
+	showDrafts bool
 	// mouse is mouse mode: hover, click, and wheel input instead of the
 	// terminal's own selection. pointer is where the mouse was last seen.
 	mouse   bool
@@ -176,6 +178,7 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m.notify = notify
 	m.icons = startIcons(icons, preferences)
 	m.legend = preferences.Legend()
+	m.showDrafts = preferences.ShowDrafts()
 	m.rules = preferences.Rules()
 	client.SetNeeds(m.rules.Needs())
 	if err := preferences.RulesErr(); err != nil {
@@ -534,8 +537,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.details = false
 	case key.Matches(msg, k.Search):
 		return m.openSearch()
-	case key.Matches(msg, k.QuickDrafts):
-		m.toggleQuick(quickDrafts)
+	case key.Matches(msg, k.Drafts):
+		m.toggleDrafts()
 	case key.Matches(msg, k.QuickFailing):
 		m.toggleQuick(quickFailing)
 	case key.Matches(msg, k.QuickReady):
@@ -813,7 +816,14 @@ func (m *model) sortMine(visible []int, source []github.PullRequest) {
 	})
 }
 
+// inScope reports whether a pull request is in the scope: its repository,
+// and drafts only while they are shown. Counts, the title, and notifications
+// follow it.
 func (m *model) inScope(pr *github.PullRequest) bool {
+	return (m.showDrafts || !pr.Draft) && m.inRepositoryScope(pr)
+}
+
+func (m *model) inRepositoryScope(pr *github.PullRequest) bool {
 	if m.watchlist.Name != "" {
 		return slices.ContainsFunc(m.watchlist.Repositories, func(repository string) bool {
 			return strings.EqualFold(pr.Repository, repository)

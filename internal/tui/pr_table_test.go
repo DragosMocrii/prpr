@@ -24,13 +24,15 @@ func newTableModel(t *testing.T, width, height int, prs []github.PullRequest) *m
 		t.Fatal(err)
 	}
 	m := testModel(store, width, height)
+	// Table tests draw every row, drafts included.
+	m.showDrafts = true
 	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: prs}})
 	return m
 }
 
 func TestTableFilterPreservesPRIdentityAndClickableNumber(t *testing.T) {
 	m := newTableModel(t, 79, 12, []github.PullRequest{
-		{Number: 1, Repository: "acme/a", URL: "https://github.com/acme/a/pull/1", Title: "first", Draft: true, Mergeable: "MERGEABLE"},
+		{Number: 1, Repository: "acme/a", URL: "https://github.com/acme/a/pull/1", Title: "first", Mergeable: "MERGEABLE"},
 		{Number: 1, Repository: "acme/b", URL: "https://github.com/acme/b/pull/1", Title: "other"},
 		{Number: 2, Repository: "acme/a", URL: "https://github.com/acme/a/pull/2", Title: "second", Mergeable: "UNKNOWN"},
 	})

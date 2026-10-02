@@ -18,6 +18,8 @@ func TestMyPRsSortReadyToMergeFirstThenOldestCreated(t *testing.T) {
 	draft.Draft = true
 	// Fetched in updated order; #6 and #7 tie on created time.
 	m := changesModel(t, pr(1, "BLOCKED", 3), pr(2, "CLEAN", 4), draft, pr(3, "UNSTABLE", 2), pr(4, "BEHIND", 0), pr(6, "CLEAN", 9), pr(7, "CLEAN", 9))
+	// A clean draft is never ready, so it sorts with the rest.
+	m.toggleDrafts()
 	order := func() []int {
 		var numbers []int
 		for row := range rowCount(&m.panes[paneMine]) {

@@ -58,6 +58,8 @@ type Store struct {
 	icons string
 	// legend is whether the icon legend panel is open.
 	legend bool
+	// drafts is whether draft pull requests are shown.
+	drafts bool
 	// rules are the saved ready-to-merge rules, or the defaults. Saved
 	// rules that cannot be read are kept as rulesRaw, written back
 	// unchanged until rules are saved, with rulesErr saying why.
@@ -74,16 +76,17 @@ type appJSON struct {
 	Account string          `json:"account,omitempty"`
 	Icons   string          `json:"icons,omitempty"`
 	Legend  bool            `json:"legend,omitempty"`
+	Drafts  bool            `json:"drafts,omitempty"`
 	Ready   json.RawMessage `json:"ready,omitempty"`
 }
 
 func (a appJSON) empty() bool {
-	return a.Account == "" && a.Icons == "" && !a.Legend && len(a.Ready) == 0
+	return a.Account == "" && a.Icons == "" && !a.Legend && !a.Drafts && len(a.Ready) == 0
 }
 
 // app is the app settings as saved.
 func (s *Store) app() appJSON {
-	return appJSON{Account: s.pinned, Icons: s.icons, Legend: s.legend, Ready: s.rulesRaw}
+	return appJSON{Account: s.pinned, Icons: s.icons, Legend: s.legend, Drafts: s.drafts, Ready: s.rulesRaw}
 }
 
 // accountJSON is an account's value when it has watchlists or a watchlist
@@ -121,7 +124,7 @@ func Open(path string) (*Store, error) {
 			if app.Icons != "" && !ValidIcons(app.Icons) {
 				return nil, fmt.Errorf("decode preferences %q: %q has an unknown icon set %q", path, appKey, app.Icons)
 			}
-			store.pinned, store.icons, store.legend = app.Account, app.Icons, app.Legend
+			store.pinned, store.icons, store.legend, store.drafts = app.Account, app.Icons, app.Legend, app.Drafts
 			// Rules that cannot be read leave the defaults in use and the
 			// rest of the preferences readable.
 			if len(app.Ready) != 0 {
@@ -295,6 +298,20 @@ func (s *Store) SaveLegend(open bool) error {
 		return err
 	}
 	s.legend = open
+	return nil
+}
+
+// ShowDrafts reports whether draft pull requests were left shown.
+func (s *Store) ShowDrafts() bool { return s.drafts }
+
+// SaveShowDrafts saves whether draft pull requests are shown.
+func (s *Store) SaveShowDrafts(show bool) error {
+	app := s.app()
+	app.Drafts = show
+	if err := s.writeAll(s.accounts, app); err != nil {
+		return err
+	}
+	s.drafts = show
 	return nil
 }
 

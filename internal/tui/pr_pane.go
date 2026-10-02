@@ -308,6 +308,11 @@ func (m *model) paneTitle(id paneID, single bool) string {
 			title += suffix
 		}
 	}
+	if hidden := m.hiddenDrafts(id); hidden > 0 {
+		if suffix := " · " + plural(hidden, "draft") + " hidden"; 2+lipgloss.Width(title)+lipgloss.Width(suffix) <= m.width {
+			title += suffix
+		}
+	}
 	if single {
 		title += " · tab: other list"
 	}
@@ -376,6 +381,11 @@ func (m *model) emptyPaneLine(id paneID) string {
 		text += " in " + singleLine(m.watchlist.Name)
 	} else if m.selectedRepository != "" {
 		text += " in " + singleLine(m.selectedRepository)
+	}
+	if hidden := m.hiddenDrafts(id); hidden == 1 {
+		text += "; 1 draft hidden, D shows it"
+	} else if hidden > 1 {
+		text += "; " + plural(hidden, "draft") + " hidden, D shows them"
 	}
 	return "  " + text + "."
 }

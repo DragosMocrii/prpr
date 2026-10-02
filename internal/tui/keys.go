@@ -22,7 +22,7 @@ type keyMap struct {
 	Details         key.Binding
 	Back            key.Binding
 	Search          key.Binding
-	QuickDrafts     key.Binding
+	Drafts          key.Binding
 	QuickFailing    key.Binding
 	QuickReady      key.Binding
 	ClearFilters    key.Binding
@@ -95,7 +95,7 @@ func defaultKeyMap() keyMap {
 		Details:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "details")),
 		Back:            key.NewBinding(key.WithKeys("esc", "enter"), key.WithHelp("esc", "back")),
 		Search:          key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
-		QuickDrafts:     key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "drafts")),
+		Drafts:          key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "show drafts")),
 		QuickFailing:    key.NewBinding(key.WithKeys("F"), key.WithHelp("F", "failing CI")),
 		QuickReady:      key.NewBinding(key.WithKeys("M"), key.WithHelp("M", "ready to merge")),
 		ClearFilters:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filters")),
@@ -182,10 +182,15 @@ func (m *model) syncKeys() {
 	k.Refresh.SetEnabled(idle && m.err == nil && m.picker == nil)
 	k.ClearMarks.SetEnabled(listing && m.hasMarks())
 	k.Details.SetEnabled(rows && !details)
-	for _, binding := range []*key.Binding{&k.Search, &k.QuickDrafts, &k.QuickFailing, &k.QuickReady} {
+	for _, binding := range []*key.Binding{&k.Search, &k.Drafts, &k.QuickFailing, &k.QuickReady} {
 		binding.SetEnabled(listing)
 	}
 	k.ClearFilters.SetEnabled(listing && m.filtersActive())
+	if m.showDrafts {
+		k.Drafts.SetHelp("D", "hide drafts")
+	} else {
+		k.Drafts.SetHelp("D", "show drafts")
+	}
 	k.Categories.SetEnabled(listing && m.summaryShown())
 	k.Back.SetEnabled(details)
 	k.Open.SetEnabled(rows)
@@ -310,7 +315,7 @@ func (k keyMap) listHelp() helpKeys {
 			{k.NextPane, k.PrevPane, k.Account, k.Legend},
 			{k.Details, k.Open, k.CopyURL},
 			{k.Search, k.Categories, k.ClearFilters},
-			{k.QuickDrafts, k.QuickFailing, k.QuickReady},
+			{k.Drafts, k.QuickFailing, k.QuickReady},
 			{k.PickRepository, k.AllRepositories, k.Refresh, k.ClearMarks},
 			{k.Mouse, k.Notify, k.Help, k.Quit},
 		},

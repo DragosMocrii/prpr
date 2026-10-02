@@ -395,7 +395,7 @@ func TestUnreadableRulesKeepTheRestAndSurviveOtherSaves(t *testing.T) {
 	}
 }
 
-func TestLegendIsSavedWithTheOtherAppSettings(t *testing.T) {
+func TestLegendAndDraftsAreSavedWithTheOtherAppSettings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "preferences.json")
 	store, err := Open(path)
 	if err != nil {
@@ -410,6 +410,9 @@ func TestLegendIsSavedWithTheOtherAppSettings(t *testing.T) {
 	if err := store.SaveLegend(true); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.SaveShowDrafts(true); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.Save("alice", "acme/a"); err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +420,7 @@ func TestLegendIsSavedWithTheOtherAppSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reopened.Legend() || reopened.Icons() != "nerd" {
+	if !reopened.Legend() || !reopened.ShowDrafts() || reopened.Icons() != "nerd" {
 		t.Fatalf("after reopening: legend %t, icons %q", reopened.Legend(), reopened.Icons())
 	}
 	if err := reopened.SaveLegend(false); err != nil {
@@ -427,7 +430,7 @@ func TestLegendIsSavedWithTheOtherAppSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Legend() || again.Icons() != "nerd" {
+	if again.Legend() || !again.ShowDrafts() || again.Icons() != "nerd" {
 		t.Fatalf("after closing: legend %t, icons %q", again.Legend(), again.Icons())
 	}
 }

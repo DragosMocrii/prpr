@@ -31,6 +31,7 @@ func TestNerdIconsCompactTheColumnsAndKeepWordsElsewhere(t *testing.T) {
 	draft := changePR(2, "acme/a")
 	draft.Draft = true
 	m := changesModel(t, changePR(1, "acme/a"), draft)
+	press(m, tea.Key{Code: 'D', Text: "D"})
 	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: m.snapshot.PullRequests,
 		ReviewRequests: []github.PullRequest{reviewedPR(9, github.ReviewWaitingOnAuthor)}}})
 	unicodeWidth := nameWidth(m, paneMine)

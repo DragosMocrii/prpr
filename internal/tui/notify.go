@@ -81,7 +81,8 @@ func (m *model) alerts() []prAlert {
 		old, listed := reviews[keyOf(pr)]
 		// A review row alerts when it starts needing the viewer: it arrives, or
 		// it stops waiting on others.
-		if pr.ReviewStatus.Waiting() || (listed && !old.ReviewStatus.Waiting()) || !m.inScope(pr) {
+		// A hidden draft arrives when it leaves draft.
+		if pr.ReviewStatus.Waiting() || (listed && !old.ReviewStatus.Waiting() && m.inScope(old)) || !m.inScope(pr) {
 			continue
 		}
 		kind := "review requested"

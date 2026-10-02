@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
@@ -19,15 +20,12 @@ type quickFilter int
 
 const (
 	quickNone quickFilter = iota
-	quickDrafts
 	quickFailing
 	quickReady
 )
 
 func (q quickFilter) label() string {
 	switch q {
-	case quickDrafts:
-		return "drafts"
 	case quickFailing:
 		return "failing CI"
 	case quickReady:
@@ -54,6 +52,9 @@ func (m *model) filterText() string {
 	if m.category != 0 {
 		parts = append(parts, attentionCategories[m.category-1].label)
 	}
+	if m.showDrafts {
+		parts = append(parts, "drafts shown")
+	}
 	return strings.Join(parts, " · ")
 }
 
@@ -69,10 +70,6 @@ func (m *model) shown(id paneID, pr *github.PullRequest, preview bool) bool {
 		return false
 	}
 	switch m.quick {
-	case quickDrafts:
-		if !pr.Draft {
-			return false
-		}
 	case quickFailing:
 		if preview || (pr.Checks != "FAILURE" && pr.Checks != "ERROR") {
 			return false
@@ -113,6 +110,31 @@ func (m *model) toggleQuick(q quickFilter) {
 		m.category = 0
 	}
 	m.applyFilters()
+}
+
+// toggleDrafts shows or hides draft pull requests and saves the choice. A
+// failed save keeps the new choice for the session and shows the warning.
+func (m *model) toggleDrafts() {
+	m.showDrafts = !m.showDrafts
+	if err := m.preferences.SaveShowDrafts(m.showDrafts); err != nil {
+		m.preferenceErr = fmt.Errorf("Drafts choice not saved: %w", err)
+	}
+	m.applyFilters()
+}
+
+// hiddenDrafts counts the drafts in a pane's repository scope that are
+// hidden.
+func (m *model) hiddenDrafts(id paneID) int {
+	if m.showDrafts {
+		return 0
+	}
+	count := 0
+	for i := range m.source(id) {
+		if pr := &m.source(id)[i]; pr.Draft && m.inRepositoryScope(pr) {
+			count++
+		}
+	}
+	return count
 }
 
 func (m *model) clearFilters() {
