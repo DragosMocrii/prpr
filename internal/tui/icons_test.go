@@ -142,3 +142,23 @@ func TestNerdIconsKeepNumbersOffTheIcon(t *testing.T) {
 		t.Errorf("unicode review = %q, want it unchanged", got)
 	}
 }
+
+func TestNerdSummaryGivesEachCategoryItsOwnIcon(t *testing.T) {
+	if len(nerdIcons.categories) != len(attentionCategories) {
+		t.Fatalf("%d category icons for %d categories", len(nerdIcons.categories), len(attentionCategories))
+	}
+	seen := make(map[string]bool)
+	for _, icon := range nerdIcons.categories {
+		if seen[icon] || ansi.StringWidth(icon) != 1 {
+			t.Errorf("category icon %U is repeated or not one cell", []rune(icon))
+		}
+		seen[icon] = true
+	}
+	unknown := changePR(1, "acme/a")
+	unknown.MergeState = ""
+	m := changesModel(t, unknown)
+	pressI(m)
+	if summary := m.summaryLine(); !strings.Contains(summary, nerdIcons.categories[6]) {
+		t.Fatalf("summary %q does not use the Nerd category icons", summary)
+	}
+}

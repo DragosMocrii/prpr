@@ -29,6 +29,8 @@ type iconSet struct {
 	// are often drawn wider than the one cell the terminal gives them, so
 	// whatever follows directly would be drawn over them.
 	gap string
+	// categories are the attention categories' icons, numbered from 1.
+	categories [7]string
 	// Column headers, by column title; missing ones keep the title.
 	headers map[string]string
 }
@@ -36,7 +38,8 @@ type iconSet struct {
 var unicodeIcons = iconSet{
 	check: "✓", cross: "✗", pending: "●", behind: "↓", unknown: "?", none: "–",
 	passed: "✓", failed: "✗", botRunning: "◌", botFailed: "!",
-	star: "★",
+	star:       "★",
+	categories: [7]string{"✓", "✗", "✗", "✗", "✗", "●", "?"},
 }
 
 // nerdIcons are octicons in Nerd Fonts 3.
@@ -48,6 +51,9 @@ var nerdIcons = iconSet{
 	newCommits: "", replied: "", dismissed: "", activity: "",
 	waiting: "", approved: "", backInDraft: "",
 	star: "", pin: "", bell: "", gap: " ",
+	// Ready to merge, changes requested, failing CI, conflicts, bot threads,
+	// awaiting your review, and status unknown.
+	categories: [7]string{"\uf419", "\uf52f", "\uf45e", "\uf47f", "\uf477", "\uf4af", "\uf420"},
 	headers: map[string]string{
 		"State": "", "Merge": "", "Age": "", "Bots": "",
 		"CI": "", "Review": "", "Comments": "", "Size": "",
