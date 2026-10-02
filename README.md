@@ -113,14 +113,14 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `f` / `b` / Page Down / Page Up / Space: move by a page; `d` / `u`: move by half a page; `g` / `G` / Home / End: jump to the first or last pull request.
 - Left / Right: jump to the previous or next page shown in the page indicator.
 - Tab / Shift+Tab: switch between **My PRs**, **Merge queue** (while it has rows), and **Review requested**. Each list keeps its own selection and scroll position; navigation keys move only the focused list.
-- `/`: search both lists; see [Search and quick filters](#search-and-quick-filters).
-- `D`: show or hide draft pull requests in both lists, and save the choice; see [Drafts](#drafts).
+- `/`: search every list; see [Search and quick filters](#search-and-quick-filters).
+- `D`: show or hide draft pull requests in every list, and save the choice; see [Drafts](#drafts).
 - `F` / `M`: show only PRs with failing CI, or PRs ready to merge; press again to show all.
 - `1`–`7`: show one attention category from the summary line; press again to show all. See [Attention summary](#attention-summary).
 - Esc: clear the search, quick filter, and attention category.
 - Enter: show the selected pull request's details; Esc or Enter goes back. See [Details](#details).
 - `?`: show or hide all key bindings.
-- `p`: find and select a repository or watchlist to filter both lists; choose `All repositories` to clear the filter. See [Watchlists](#watchlists).
+- `p`: find and select a repository or watchlist to filter every list; choose `All repositories` to clear the filter. See [Watchlists](#watchlists).
 - `c`: clear the repository filter and show all authored open PRs and review requests.
 - In the repository picker, type to search (Left/Right move within the query), Enter to apply, Esc to cancel, Ctrl+U to clear, and Ctrl+R to reload accessible repositories. Enter `owner/repo` to check a repository outside the browsed list. Space marks repositories for a watchlist, and Ctrl+E and Ctrl+D edit and delete the watchlist under the cursor.
 - `r`: refresh as the pinned GitHub CLI account, or gh's active one, and restart the auto-refresh timer.
@@ -136,7 +136,7 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
 
-Repository filtering applies to both lists: the active account's authored open pull requests, and open pull requests requesting the account's review (`user-review-requested:@me`, which excludes requests to the account's teams). **My PRs** lists pull requests ready to merge (the green `✓`, by your [rules](#ready-to-merge-rules)) first, then the oldest created first; **Review requested** keeps the most recently updated first, with pull requests you already reviewed after them (see [After your review](#after-your-review)). Both hide drafts unless `D` shows them (see [Drafts](#drafts)). The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no matching pull requests in either list remains selectable and shows empty scoped lists. Repository and All selections are saved separately for each GitHub account.
+Repository filtering applies to every list, which come from two queries: the active account's authored open pull requests, and open pull requests requesting the account's review (`user-review-requested:@me`, which excludes requests to the account's teams). **My PRs** lists pull requests ready to merge (the green `✓`, by your [rules](#ready-to-merge-rules)) first, then the oldest created first; **Review requested** keeps the most recently updated first, with pull requests you already reviewed after them (see [After your review](#after-your-review)). Both hide drafts unless `D` shows them (see [Drafts](#drafts)). The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no matching pull requests in either list remains selectable and shows empty scoped lists. Repository and All selections are saved separately for each GitHub account.
 
 The pull request table shows draft/open state and, in the first column of **My PRs**, whether GitHub would allow a merge now, branch protection included: `✓` ready (optional checks may still be failing), `●` blocked by required reviews or checks, `↓` behind the base branch, `✗` conflicts, `–` draft, and `?` not yet computed. With [ready-to-merge rules](#ready-to-merge-rules) of your own, `✓` is green only when they hold, and yellow when GitHub would merge but your rules say not yet. The review list shows the PR author, after the State column, instead of merge status.
 
@@ -177,15 +177,15 @@ The quick filters show only pull requests whose checks failed (`F`), or pull req
 
 ### Drafts
 
-Both lists hide draft pull requests, including reviewed ones turned back into drafts; closed pull requests are never fetched. A list's title says how many drafts it hides, as in `My PRs (4) · 1 draft hidden`. A list with only hidden drafts says so and that `D` shows them. Press `D` to show drafts alongside the rest, and `D` again to hide them; prpr remembers the choice, and the title line says `drafts shown` while they are. Hidden drafts are left out like pull requests outside the repository filter: attention counts, the terminal title count, and notifications skip them, and a review request on a hidden draft notifies when it leaves draft. Esc clears the search and filters but leaves drafts as they are.
+All lists hide draft pull requests, including reviewed ones turned back into drafts; closed pull requests are never fetched. A list's title says how many drafts it hides, as in `My PRs (4) · 1 draft hidden`. A list with only hidden drafts says so and that `D` shows them. Press `D` to show drafts alongside the rest, and `D` again to hide them; prpr remembers the choice, and the title line says `drafts shown` while they are. Hidden drafts are left out like pull requests outside the repository filter: attention counts, the terminal title count, and notifications skip them, and a review request on a hidden draft notifies when it leaves draft. Esc clears the search and filters but leaves drafts as they are.
 
-Search and quick filters combine with the repository filter and apply to both lists, gone rows included. The title line names every active filter, list titles count shown rows against all rows in scope (`My PRs (3 of 12)`), and Esc on the list clears the search, quick filter, and attention category; `c` still clears only the repository filter. Filters are kept in memory only.
+Search and quick filters combine with the repository filter and apply to every list, gone rows included. The title line names every active filter, list titles count shown rows against all rows in scope (`My PRs (3 of 12)`), and Esc on the list clears the search, quick filter, and attention category; `c` still clears only the repository filter. Filters are kept in memory only.
 
 ### Merge queue
 
 Pull requests you have handed to a merge queue move to a **Merge queue** list between **My PRs** and **Review requested**, which appears only while it has rows. prpr reads two queues, both through GitHub: [Trunk](https://trunk.io), from the comment Trunk keeps on each pull request, and GitHub's own merge queue. No Trunk token is needed. Each row shows the state (`submitted`, `queued`, `testing`, `failing`, `passed`, or `?` for wording prpr does not recognize) and a detail such as the pull request Trunk tests on; furthest along comes first (passed, failing, testing, queued, submitted, then `?`). A merged pull request closes and leaves the list as a gone row. When every open pull request of yours is queued, **My PRs** says so.
 
-When Trunk removes a pull request, because its tests failed or someone canceled it, it returns to **My PRs** tagged `queue failed` or `queue canceled` until Trunk's comment changes, and a failed removal sends a notification. Pull requests in the queue count in no attention category and not in the terminal title. `--queues=github` or `--queues=trunk` reads one queue; `--queues=` reads none and hides the list. prpr reads the first 10 comments of each of your open pull requests to find Trunk's, which is almost always the first.
+When Trunk removes a pull request, because its tests failed or someone canceled it, it returns to **My PRs** tagged `queue failed` or `queue canceled` until Trunk's comment changes, and a failed removal sends a notification while notifications are on (`--notify` or `n`). Pull requests in the queue count in no attention category and not in the terminal title. `--queues=github` or `--queues=trunk` reads one queue; `--queues=` reads none and hides the list. prpr reads the first 10 comments of each of your open pull requests to find Trunk's, which is almost always the first.
 
 ### Details
 
@@ -246,7 +246,7 @@ When `GH_TOKEN` or `GITHUB_TOKEN` is set in prpr's environment, gh uses that tok
 
 ### Watchlists
 
-A watchlist is a named group of repositories, such as "My services" or "Open source", that both lists can show instead of one repository or all of them. Watchlists are saved for each GitHub account and appear at the top of the `p` picker, marked `★`; Enter shows one, and the title names it.
+A watchlist is a named group of repositories, such as "My services" or "Open source", that every list can show instead of one repository or all of them. Watchlists are saved for each GitHub account and appear at the top of the `p` picker, marked `★`; Enter shows one, and the title names it.
 
 - To create one, press Space on each repository in the picker. Marks stay while you change the search, and Space on `Use owner/repo (check access)` checks that repository, then marks it. Press Enter, type a name of up to 40 characters, and press Enter again to save and show the watchlist. Esc goes back to the marks; Esc on the marks clears them.
 - To change one, press Ctrl+E on it: its repositories are marked, and Enter saves the marks under the name you keep or type. A new name renames it. Taking the name of another watchlist asks for a second Enter, which replaces that one.
@@ -296,7 +296,7 @@ Mouse mode is off at start, so the terminal handles the mouse as usual. Press `m
 
 While mouse mode is on, the terminal passes the mouse to prpr, so selecting text and clicking links need a modifier key: Shift in most terminals, Option in iTerm2. The key varies by terminal. Other screens, such as the repository picker, leave the mouse to the terminal. Press `m` again to turn it off.
 
-When prpr starts, or after an error, it first shows both lists from a quick query while the full query runs: the Merge, Age, Bots, CI, Review, and Comments columns show `…` until the details arrive, and the corner shows "Loading details". Conflicts already show `✗`. The scope prompt and the rows can be used meanwhile. Refreshes keep the full rows on screen instead.
+When prpr starts, or after an error, it first shows the lists from a quick query while the full query runs: the Merge, Age, Bots, CI, Review, and Comments columns show `…` until the details arrive, and the corner shows "Loading details". Conflicts already show `✗`. The scope prompt and the rows can be used meanwhile. Refreshes keep the full rows on screen instead.
 
 On short terminals only the focused list is shown. PR numbers use OSC 8 links in supporting terminals. The selected pull request URL is also shown below the table, and `o` and `y` open or copy it. A refresh replaces the visible account and both lists together; failed refreshes do not leave stale results displayed. Gone rows are the one exception: they are kept on purpose and always marked as gone.
 

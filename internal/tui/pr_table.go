@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -63,6 +64,7 @@ type tableLayout struct {
 	columns          []table.Column
 	repositoryColumn bool
 	stats            []statColumn
+	detail           bool // the queue pane's Detail column is shown
 	fits             bool
 }
 
@@ -94,7 +96,12 @@ func (m *model) paneLayout(id paneID) tableLayout {
 		}
 		columns = append(columns, table.Column{Title: "Number", Width: maxNumberWidth})
 		nameColumn := len(columns)
-		columns = append(columns, table.Column{Title: "PR name"}, table.Column{Title: "Detail", Width: min(24, max(10, width/6))})
+		columns = append(columns, table.Column{Title: "PR name"})
+		// Like statistics columns, Detail stays only while the name keeps room.
+		withDetail := append(slices.Clone(columns), table.Column{Title: "Detail", Width: min(24, max(10, width/6))})
+		if remainingWidth(width, withDetail) >= minStatsNameWidth {
+			columns, layout.detail = withDetail, true
+		}
 		nameWidth := remainingWidth(width, columns)
 		layout.fits = nameWidth >= 8
 		columns[nameColumn].Width = max(8, nameWidth)
@@ -203,7 +210,10 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			if layout.repositoryColumn {
 				cells = append(cells, singleLine(pr.Repository))
 			}
-			cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(cellName, name), changed(cellQueue, singleLine(pr.Queue.Detail)))
+			cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(cellName, name))
+			if layout.detail {
+				cells = append(cells, changed(cellQueue, singleLine(pr.Queue.Detail)))
+			}
 			if gone {
 				for i := 1; i < len(cells); i++ {
 					cells[i] = restyle(cells[i], goneOn, goneOff)

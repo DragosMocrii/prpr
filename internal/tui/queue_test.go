@@ -252,3 +252,35 @@ func TestQueueEmptyingFocusGoesToThePaneWithRows(t *testing.T) {
 		t.Fatalf("focus = %v, want review", m.focus)
 	}
 }
+
+func TestQueuePaneDropsDetailBeforeItsNameGetsTooNarrow(t *testing.T) {
+	titles := func(m *model) string {
+		var names []string
+		for _, column := range m.paneLayout(paneQueue).columns {
+			names = append(names, column.Title)
+		}
+		return strings.Join(names, ",")
+	}
+	wide := queueModel(t, 140, 30)
+	if layout := wide.paneLayout(paneQueue); !layout.detail || !strings.Contains(titles(wide), "Detail") {
+		t.Fatalf("width 140 columns %v", titles(wide))
+	}
+	narrow := queueModel(t, 40, 10)
+	layout := narrow.paneLayout(paneQueue)
+	if !layout.fits || layout.detail || strings.Contains(titles(narrow), "Detail") {
+		t.Fatalf("width 40 fits %v detail %v columns %v", layout.fits, layout.detail, titles(narrow))
+	}
+	for _, row := range narrow.paneRows(paneQueue, layout) {
+		if len(row) != len(layout.columns) {
+			t.Fatalf("row has %d cells for %d columns", len(row), len(layout.columns))
+		}
+	}
+	press(narrow, tea.Key{Code: tea.KeyTab})
+	if narrow.focus != paneQueue {
+		t.Fatalf("focus = %v", narrow.focus)
+	}
+	view := ansi.Strip(strings.Join(assertBounded(t, narrow, 40, 10), "\n"))
+	if strings.Contains(view, "too small") || !strings.Contains(view, "Merge queue") {
+		t.Fatalf("queue pane at 40x10:\n%s", view)
+	}
+}
