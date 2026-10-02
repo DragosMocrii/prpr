@@ -97,3 +97,45 @@ jobs:
             [[ "$TAG" == *-* ]] && prerelease=(--prerelease)
             gh release create "$TAG" "$dist"/* --verify-tag --generate-notes --title "$TAG" "${prerelease[@]}"
           fi
+
+      - name: Update Homebrew tap and Scoop bucket
+        shell: bash
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          TAP_REPO: ${{ github.repository_owner }}/homebrew-tap
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$TAP_TOKEN" ]]; then
+            echo "::notice::TAP_GITHUB_TOKEN is not set; skipping the Homebrew tap and Scoop bucket."
+            exit 0
+          fi
+          if [[ "$TAG" == *-* ]]; then
+            echo "Prerelease ${TAG}; leaving the tap unchanged."
+            exit 0
+          fi
+          basic=$(printf 'x-access-token:%s' "$TAP_TOKEN" | base64 -w0)
+          echo "::add-mask::${basic}"
+          header="http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}"
+          tap="${RUNNER_TEMP}/tap"
+          git -c "$header" clone --depth 1 "https://github.com/${TAP_REPO}.git" "$tap"
+
+          # A re-run for an older tag must not downgrade the published version.
+          current=$(sed -n 's/^  version "\(.*\)"$/\1/p' "${tap}/Formula/prpr.rb" 2>/dev/null || true)
+          version="${TAG#v}"
+          if [[ -n "$current" && "$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -n 1)" != "$version" ]]; then
+            echo "The tap already has ${current}; leaving it unchanged."
+            exit 0
+          fi
+
+          .github/scripts/package-manifests.sh "$TAG" "${RUNNER_TEMP}/dist/checksums.txt" "$tap"
+          cd "$tap"
+          git add Formula/prpr.rb bucket/prpr.json
+          if git diff --cached --quiet; then
+            echo "The tap is already up to date."
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "prpr ${version}"
+          git -c "$header" push -q origin HEAD

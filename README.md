@@ -2,10 +2,12 @@
 
 `prpr` is a terminal app for monitoring open pull requests authored by the active GitHub CLI account. It includes drafts and pulls across repositories visible to that account, and lists open pull requests that request a review from you directly in a second pane; requests to your teams, such as code-owner teams, are left out.
 
+![prpr listing pull requests, then marking a new, a changed, and a merged pull request after a refresh](docs/demo.gif)
+
 ## Requirements
 
-- Go 1.26 or later.
-- GitHub CLI (`gh`) on `PATH`, authenticated to `github.com`.
+- GitHub CLI (`gh`) on `PATH`, authenticated to `github.com`. Homebrew and Scoop install it for you.
+- Go 1.26 or later, only to install with `go install` or build from source. Packages and prebuilt binaries need no Go.
 
 The app uses GitHub CLI's existing credentials and does not store tokens itself. GitHub CLI manages credential storage and may use its own plaintext fallback when no operating-system credential store is available. To connect or change accounts, use `l` from the app's authentication/error screen, or run:
 
@@ -17,19 +19,36 @@ Complete the displayed device-code flow in a browser if GitHub CLI cannot open o
 
 ## Install
 
+The package and download links below work once this repository is public.
+
+### Homebrew (macOS and Linux)
+
+```sh
+brew install DragosMocrii/tap/prpr
+```
+
+### Scoop (Windows)
+
+```powershell
+scoop bucket add dragosmocrii https://github.com/DragosMocrii/homebrew-tap
+scoop install prpr
+```
+
+Upgrade with `brew upgrade prpr` or `scoop update prpr`. `prpr --version` prints the installed version.
+
+### Prebuilt binaries
+
 Each [release](https://github.com/DragosMocrii/prpr/releases) has prebuilt archives for Linux, macOS, and Windows on amd64 and arm64, plus `checksums.txt`. Unpack the archive for your platform and put `prpr` (`prpr.exe` on Windows) on `PATH`. Run `uname -m` on macOS or Linux to choose: `arm64`/`aarch64` is arm64, and `x86_64` is amd64.
 
-The macOS binaries are not signed or notarized, so macOS blocks them on first run. After checking the archive against `checksums.txt`, clear the quarantine flag:
+The macOS binaries are not signed or notarized, so macOS blocks a downloaded binary on first run; Homebrew installs are not affected. After checking the archive against `checksums.txt`, clear the quarantine flag:
 
 ```sh
 xattr -d com.apple.quarantine prpr
 ```
 
-`prpr --version` prints the installed version.
-
 ### Install with Go
 
-After this repository is public and these changes have been pushed, install the latest version with:
+With Go 1.26 or later:
 
 ```sh
 go install github.com/DragosMocrii/prpr/cmd/prpr@latest
@@ -41,9 +60,9 @@ Ensure Go's bin directory is on `PATH`, then run:
 prpr
 ```
 
-Until then, install from a source checkout using the instructions below.
+### Run from source
 
-## Run from source
+With Go 1.26 or later:
 
 ```sh
 git clone https://github.com/DragosMocrii/prpr.git
@@ -148,4 +167,4 @@ When prpr starts, or after an error, it first shows both lists from a quick quer
 
 On short terminals only the focused list is shown. PR numbers use OSC 8 links in supporting terminals. The selected pull request URL is also shown below the table for copying. A refresh replaces the visible account and both lists together; failed refreshes do not leave stale results displayed. Gone rows are the one exception: they are kept on purpose and always marked as gone.
 
-See [contributing](CONTRIBUTING.md), the [MIT license](LICENSE), the [CI workflow](.github/workflows/ci.yml), and the [release workflow](.github/workflows/release.yml).
+See [contributing](CONTRIBUTING.md), the [MIT license](LICENSE), the [CI workflow](.github/workflows/ci.yml), and the [release workflow](.github/workflows/release.yml). The demo at the top is recorded with made-up data by [`docs/demo`](docs/demo/main.go).

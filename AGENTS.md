@@ -15,6 +15,8 @@
 - `internal/tui/mouse.go` owns mouse mode: mapping screen lines to panes and rows, hover, clicks, and the wheel.
 - `internal/tui/pr_table.go` owns pull-request table columns, statistics cells, and links.
 - `internal/tui/keys.go` owns key bindings, their enabled state, and per-screen help.
+- `docs/demo` is a separate Go module that records `docs/demo.gif` against a fake `gh` with made-up data; see CONTRIBUTING.md.
+- `.github/scripts/package-manifests.sh` writes the Homebrew formula and Scoop manifest that the release workflow publishes to the `homebrew-tap` repository.
 
 ## Development commands
 
