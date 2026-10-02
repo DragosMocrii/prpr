@@ -31,6 +31,7 @@ type keyMap struct {
 	CopyURL         key.Binding
 	Mouse           key.Binding
 	Notify          key.Binding
+	Account         key.Binding
 	Retry           key.Binding
 	Login           key.Binding
 	Help            key.Binding
@@ -41,6 +42,16 @@ type keyMap struct {
 	Picker          pickerKeyMap
 	SearchInput     searchKeyMap
 	WatchlistName   searchKeyMap
+	AccountPicker   accountKeyMap
+}
+
+type accountKeyMap struct {
+	Up     key.Binding
+	Down   key.Binding
+	Apply  key.Binding
+	Cancel key.Binding
+	Retry  key.Binding
+	Quit   key.Binding
 }
 
 type searchKeyMap struct {
@@ -89,6 +100,7 @@ func defaultKeyMap() keyMap {
 		CopyURL:         key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy URL")),
 		Mouse:           key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mouse on")),
 		Notify:          key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "notify on")),
+		Account:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "account")),
 		Retry:           key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
 		Login:           key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log in to GitHub")),
 		Help:            key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "more")),
@@ -109,6 +121,14 @@ func defaultKeyMap() keyMap {
 			Mark:   key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "mark")),
 			Edit:   key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "edit list")),
 			Delete: key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "delete list")),
+			Quit:   key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+		},
+		AccountPicker: accountKeyMap{
+			Up:     key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
+			Down:   key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+			Apply:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "use account")),
+			Cancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+			Retry:  key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "check again")),
 			Quit:   key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 		},
 		WatchlistName: searchKeyMap{
@@ -169,6 +189,14 @@ func (m *model) syncKeys() {
 		k.Mouse.SetHelp("m", "mouse on")
 	}
 	k.Notify.SetEnabled(listing)
+	k.Account.SetEnabled(m.switchAccounts && idle && m.picker == nil && m.accounts == nil && !details)
+	choosing := m.accounts != nil
+	k.AccountPicker.Up.SetEnabled(choosing)
+	k.AccountPicker.Down.SetEnabled(choosing)
+	k.AccountPicker.Apply.SetEnabled(choosing && !m.accounts.busy)
+	k.AccountPicker.Cancel.SetEnabled(choosing)
+	k.AccountPicker.Retry.SetEnabled(choosing && !m.accounts.busy)
+	k.AccountPicker.Quit.SetEnabled(choosing)
 	if m.notify {
 		k.Notify.SetHelp("n", "notify off")
 	} else {
@@ -243,11 +271,11 @@ func (h helpKeys) ShortHelp() []key.Binding  { return h.short }
 func (h helpKeys) FullHelp() [][]key.Binding { return h.full }
 
 func (k keyMap) scopeChoiceHelp() helpKeys {
-	return helpKeys{short: []key.Binding{k.ChoiceUp, k.ChoiceDown, k.Continue, k.Quit}}
+	return helpKeys{short: []key.Binding{k.ChoiceUp, k.ChoiceDown, k.Continue, k.Account, k.Quit}}
 }
 
 func (k keyMap) errorHelp() helpKeys {
-	return helpKeys{short: []key.Binding{k.Login, k.Retry, k.Quit}}
+	return helpKeys{short: []key.Binding{k.Login, k.Retry, k.Account, k.Quit}}
 }
 
 func (k keyMap) listHelp() helpKeys {
@@ -258,7 +286,7 @@ func (k keyMap) listHelp() helpKeys {
 			{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom},
 			{t.PageUp, t.PageDown, t.HalfPageUp, t.HalfPageDown},
 			{k.Pages.PrevPage, k.Pages.NextPage},
-			{k.NextPane, k.PrevPane},
+			{k.NextPane, k.PrevPane, k.Account},
 			{k.Details, k.Open, k.CopyURL},
 			{k.Search, k.Categories, k.ClearFilters},
 			{k.QuickDrafts, k.QuickFailing, k.QuickReady},
@@ -281,6 +309,11 @@ func (k keyMap) searchHelp() helpKeys {
 func (k keyMap) pickerHelp() helpKeys {
 	p := k.Picker
 	return helpKeys{short: []key.Binding{p.Up, p.Down, p.Apply, p.Mark, p.Edit, p.Delete, p.Cancel, p.Clear, p.Retry, p.Quit}}
+}
+
+func (k keyMap) accountPickerHelp() helpKeys {
+	a := k.AccountPicker
+	return helpKeys{short: []key.Binding{a.Up, a.Down, a.Apply, a.Cancel, a.Retry, a.Quit}}
 }
 
 func (k keyMap) watchlistNameHelp() helpKeys {

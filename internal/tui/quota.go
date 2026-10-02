@@ -19,6 +19,8 @@ const quotaPollInterval = 10 * time.Second
 type rateLimitMsg struct {
 	limit github.RateLimit
 	err   error
+	// account is the accountGeneration the quota was read for.
+	account uint64
 }
 
 type quotaTickMsg struct{}
@@ -26,10 +28,10 @@ type quotaTickMsg struct{}
 // pollQuota reads the quota once. Only one poll chain runs: each result
 // schedules the next tick.
 func (m *model) pollQuota() tea.Cmd {
-	client, ctx := m.client, m.ctx
+	client, ctx, account := m.client, m.ctx, m.accountGeneration
 	return func() tea.Msg {
 		limit, err := client.RateLimit(ctx)
-		return rateLimitMsg{limit: limit, err: err}
+		return rateLimitMsg{limit: limit, err: err, account: account}
 	}
 }
 
@@ -42,7 +44,8 @@ func (m *model) quotaBlocked() bool {
 
 // handleQuota advances the poll chain, pausing it while quotaBlocked.
 func (m *model) handleQuota(msg tea.Msg) tea.Cmd {
-	if result, ok := msg.(rateLimitMsg); ok {
+	// A quota read as another account still continues the chain.
+	if result, ok := msg.(rateLimitMsg); ok && result.account == m.accountGeneration {
 		if result.err != nil {
 			m.quotaStale = true
 		} else {

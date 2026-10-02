@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -54,6 +55,13 @@ type Snapshot struct {
 type Client struct {
 	path string
 	bots []Bot
+	// mu guards the pinned account and its token, which requests read from
+	// several goroutines.
+	mu sync.Mutex
+	// login is the pinned account, or "" to follow gh's active account;
+	// token is its token once read.
+	login string
+	token secret
 }
 
 type AuthError struct {
@@ -304,10 +312,19 @@ func NewClient(bots []Bot) (*Client, error) {
 // Bots returns the configured review bots.
 func (c *Client) Bots() []Bot { return c.bots }
 
+// Fetch checks authentication, then fetches both lists. A pinned account's
+// token is read from gh again first, so a new login or refresh of that
+// account takes effect.
 func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
-	auth := exec.CommandContext(ctx, c.path, "auth", "status", "--active", "--hostname", "github.com")
-	if _, err := auth.Output(); err != nil {
-		return Snapshot{}, &AuthError{Err: commandError("GitHub authentication check failed", err)}
+	if _, err := c.accountToken(ctx, true); err != nil {
+		return Snapshot{}, err
+	}
+	if _, err := c.output(ctx, "GitHub authentication check failed", "auth", "status", "--active", "--hostname", "github.com"); err != nil {
+		var authErr *AuthError
+		if errors.As(err, &authErr) {
+			return Snapshot{}, err
+		}
+		return Snapshot{}, &AuthError{Err: err}
 	}
 	return c.run(ctx, pullRequestsQuery(len(c.bots) > 0), reviewRequestsQuery(len(c.bots) > 0), c.bots)
 }
@@ -338,23 +355,21 @@ func (c *Client) run(ctx context.Context, pullRequests, reviewRequests string, b
 	}
 	reviews := make(chan output, 1)
 	go func() {
-		review := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+reviewRequests)
-		data, err := review.Output()
+		data, err := c.output(ctx, "GitHub review request query failed", "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+reviewRequests)
 		reviews <- output{data, err}
 	}()
 
-	api := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+pullRequests)
-	data, err := api.Output()
+	data, err := c.output(ctx, "GitHub pull request query failed", "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+pullRequests)
 	review := <-reviews
 	if err != nil {
-		return Snapshot{}, commandError("GitHub pull request query failed", err)
+		return Snapshot{}, err
 	}
 	snapshot, err := decodePages(data, bots)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	if review.err != nil {
-		return Snapshot{}, commandError("GitHub review request query failed", review.err)
+		return Snapshot{}, review.err
 	}
 	snapshot.ReviewRequests, err = decodeReviewPages(review.data, snapshot.Login, bots)
 	if err != nil {
@@ -364,11 +379,10 @@ func (c *Client) run(ctx context.Context, pullRequests, reviewRequests string, b
 }
 
 func (c *Client) ListRepositories(ctx context.Context) ([]string, error) {
-	api := exec.CommandContext(ctx, c.path, "api", "--hostname", "github.com", "--paginate", "--slurp",
+	data, err := c.output(ctx, "GitHub repository list failed", "api", "--hostname", "github.com", "--paginate", "--slurp",
 		"user/repos?visibility=all&affiliation=owner,collaborator,organization_member&sort=full_name&direction=asc&per_page=100")
-	data, err := api.Output()
 	if err != nil {
-		return nil, commandError("GitHub repository list failed", err)
+		return nil, err
 	}
 	return decodeRepositoryPages(data)
 }
@@ -378,10 +392,9 @@ func (c *Client) ResolveRepository(ctx context.Context, fullName string) (string
 	if !ValidRepositoryName(fullName) {
 		return "", errors.New("Enter a repository as owner/repo.")
 	}
-	api := exec.CommandContext(ctx, c.path, "api", "--hostname", "github.com", "repos/"+fullName)
-	data, err := api.Output()
+	data, err := c.output(ctx, "GitHub repository lookup failed", "api", "--hostname", "github.com", "repos/"+fullName)
 	if err != nil {
-		return "", commandError("GitHub repository lookup failed", err)
+		return "", err
 	}
 	return decodeRepository(data)
 }
@@ -459,8 +472,12 @@ func (c *Client) LoginCommand(ctx context.Context) *exec.Cmd {
 }
 
 // OpenInBrowser opens a pull request's page in the browser that gh is
-// configured to use.
+// configured to use. With an account pinned it opens the URL without gh,
+// which would pass the token on to the browser.
 func (c *Client) OpenInBrowser(ctx context.Context, url string) error {
+	if c.PinnedAccount() != "" {
+		return c.openURL(ctx, url)
+	}
 	if _, err := c.openCommand(ctx, url).Output(); err != nil {
 		return commandError("Could not open the browser", err)
 	}
@@ -592,10 +609,9 @@ const rateLimitQuery = `{ rateLimit { limit remaining resetAt } }`
 
 // RateLimit reads the quota without spending it.
 func (c *Client) RateLimit(ctx context.Context) (RateLimit, error) {
-	api := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "-f", "query="+rateLimitQuery)
-	data, err := api.Output()
+	data, err := c.output(ctx, "GitHub rate limit query failed", "api", "graphql", "--hostname", "github.com", "-f", "query="+rateLimitQuery)
 	if err != nil {
-		return RateLimit{}, commandError("GitHub rate limit query failed", err)
+		return RateLimit{}, err
 	}
 	return decodeRateLimit(data)
 }

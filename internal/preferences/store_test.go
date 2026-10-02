@@ -225,3 +225,57 @@ func TestMissingWatchlistScopePromptsAgain(t *testing.T) {
 		t.Fatalf("watchlists = %+v, want the kept one", lists)
 	}
 }
+
+func TestPinnedAccountIsSavedApartFromAccounts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.PinnedAccount() != "" {
+		t.Fatal("a new store pins an account")
+	}
+	if err := store.Save("alice", "acme/a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePinnedAccount("alice_acme"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save("bob", ""); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.PinnedAccount(); got != "alice_acme" {
+		t.Fatalf("pinned account = %q", got)
+	}
+	if got, found := reopened.Lookup("alice"); !found || got != (Scope{Repository: "acme/a"}) {
+		t.Fatalf("pinning changed alice's scope: %+v, %v", got, found)
+	}
+	if _, found := reopened.Lookup("app"); found {
+		t.Fatal("the app settings read as an account")
+	}
+	if err := reopened.SavePinnedAccount(""); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"app"`) {
+		t.Fatalf("following the active account kept the app settings: %s", data)
+	}
+	if err := reopened.SavePinnedAccount("not a login"); err == nil {
+		t.Fatal("saved an invalid login")
+	}
+	for _, contents := range []string{`{"app":"alice"}`, `{"app":{"account":"bad login"}}`} {
+		if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Open(path); err == nil {
+			t.Errorf("Open(%s) succeeded", contents)
+		}
+	}
+}

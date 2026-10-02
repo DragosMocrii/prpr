@@ -51,6 +51,16 @@ type account struct {
 type Store struct {
 	path     string
 	accounts map[string]account
+	// pinned is the GitHub CLI account prpr uses, or "" for gh's active one.
+	pinned string
+}
+
+// appKey holds settings that belong to the app rather than to an account.
+// Account keys always contain a slash, so it cannot name an account.
+const appKey = "app"
+
+type appJSON struct {
+	Account string `json:"account,omitempty"`
 }
 
 // accountJSON is an account's value when it has watchlists or a watchlist
@@ -80,6 +90,14 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("decode preferences %q: %w", path, err)
 	}
 	for key, value := range raw {
+		if key == appKey {
+			var app appJSON
+			if err := json.Unmarshal(value, &app); err != nil || !validLogin(app.Account) && app.Account != "" {
+				return nil, fmt.Errorf("decode preferences %q: %q must be an object with a valid GitHub login as account", path, appKey)
+			}
+			store.pinned = app.Account
+			continue
+		}
 		decoded, err := decodeAccount(value)
 		if err != nil {
 			return nil, fmt.Errorf("decode preferences %q: account %q %w", path, key, err)
@@ -179,6 +197,32 @@ func (a account) encode() any {
 		object.Watchlists[watchlist.Name] = watchlist.Repositories
 	}
 	return object
+}
+
+// validLogin reports whether login can name a gh account. It does not
+// follow GitHub's login rules, which differ for managed users such as
+// handle_shortcode: any single word without control characters will do.
+func validLogin(login string) bool {
+	return login != "" && !strings.ContainsFunc(login, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	})
+}
+
+// PinnedAccount returns the GitHub CLI account saved for prpr to use, or ""
+// to follow gh's active account.
+func (s *Store) PinnedAccount() string { return s.pinned }
+
+// SavePinnedAccount saves the account prpr uses; "" follows gh's active
+// account.
+func (s *Store) SavePinnedAccount(login string) error {
+	if login != "" && !validLogin(login) {
+		return fmt.Errorf("save preferences %q: invalid GitHub login %q", s.path, login)
+	}
+	if err := s.writeAll(s.accounts, login); err != nil {
+		return err
+	}
+	s.pinned = login
+	return nil
 }
 
 // Lookup returns an account's saved scope, and whether it has one.
@@ -287,19 +331,27 @@ func (s *Store) change(login string, edit func(*account) error) error {
 		accounts[k] = v
 	}
 	accounts[key] = edited
-	encoded := make(map[string]any, len(accounts))
+	if err := s.writeAll(accounts, s.pinned); err != nil {
+		return err
+	}
+	s.accounts = accounts
+	return nil
+}
+
+// writeAll writes every account and the pinned account.
+func (s *Store) writeAll(accounts map[string]account, pinned string) error {
+	encoded := make(map[string]any, len(accounts)+1)
 	for k, v := range accounts {
 		encoded[k] = v.encode()
+	}
+	if pinned != "" {
+		encoded[appKey] = appJSON{Account: pinned}
 	}
 	data, err := json.MarshalIndent(encoded, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode preferences %q: %w", s.path, err)
 	}
-	if err := s.write(data); err != nil {
-		return err
-	}
-	s.accounts = accounts
-	return nil
+	return s.write(data)
 }
 
 func (s *Store) write(data []byte) error {

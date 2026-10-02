@@ -98,17 +98,36 @@ type model struct {
 	readiness map[prKey]bool
 	// desktopNotify posts through the system notifier; nil means OSC 9.
 	desktopNotify notifier.Func
+	// pinnedAccount is the GitHub CLI account prpr uses, or "" for gh's
+	// active one. switchAccounts is false when the environment gives gh a
+	// token, which wins over any account. accountGeneration increments with
+	// each choice, so results requested as another account are dropped.
+	pinnedAccount     string
+	switchAccounts    bool
+	accountGeneration uint64
+	accounts          *accountPicker
+	// keepPreferenceErr keeps a failed account-choice save in view past the
+	// new account's first snapshot.
+	keepPreferenceErr bool
+	accountRequestID  uint64
+	listAccounts      func(context.Context) ([]github.Account, error)
+	useAccount        func(string)
+	// tokenChanged reports whether gh has a new token for the pinned account.
+	tokenChanged func(context.Context) bool
 }
 
 type fetchFinishedMsg struct {
 	snapshot github.Snapshot
 	err      error
+	// account is the accountGeneration the fetch ran for.
+	account uint64
 }
 
 // previewMsg carries a fast first look at both lists for the fetch of that
 // generation.
 type previewMsg struct {
 	generation uint64
+	account    uint64
 	snapshot   github.Snapshot
 	err        error
 }
@@ -130,6 +149,15 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m.openBrowser = client.OpenInBrowser
 	m.notify = notify
 	m.desktopNotify = notifier.Desktop()
+	m.listAccounts = client.Accounts
+	m.useAccount = client.UseAccount
+	m.tokenChanged = client.PinnedTokenChanged
+	// An environment token wins over every stored account.
+	m.switchAccounts = !github.EnvironmentToken()
+	if m.switchAccounts {
+		m.pinnedAccount = preferences.PinnedAccount()
+		client.UseAccount(m.pinnedAccount)
+	}
 	return m
 }
 
@@ -161,10 +189,10 @@ func (m *model) startFetch() tea.Cmd {
 	m.refreshGeneration++
 	m.refreshDue = time.Time{}
 	m.err = nil
-	client, ctx := m.client, m.ctx
+	client, ctx, account := m.client, m.ctx, m.accountGeneration
 	cmds := []tea.Cmd{func() tea.Msg {
 		snapshot, err := client.Fetch(ctx)
-		return fetchFinishedMsg{snapshot: snapshot, err: err}
+		return fetchFinishedMsg{snapshot: snapshot, err: err, account: account}
 	}, m.spinner.Tick}
 	// With no rows on screen, a preview shows rows while the full fetch runs.
 	// A refresh keeps the full rows already shown instead.
@@ -172,7 +200,7 @@ func (m *model) startFetch() tea.Cmd {
 		generation := m.refreshGeneration
 		cmds = append(cmds, func() tea.Msg {
 			snapshot, err := client.Preview(ctx)
-			return previewMsg{generation: generation, snapshot: snapshot, err: err}
+			return previewMsg{generation: generation, account: account, snapshot: snapshot, err: err}
 		})
 	}
 	return tea.Batch(cmds...)
@@ -232,7 +260,7 @@ func (m *model) refreshing() bool {
 // spinning reports whether a visible request is in flight. Spinner ticks
 // that arrive otherwise are dropped, which ends the tick loop.
 func (m *model) spinning() bool {
-	return (m.loading && !m.loginActive) || (m.picker != nil && m.picker.busy)
+	return (m.loading && !m.loginActive) || (m.picker != nil && m.picker.busy) || (m.accounts != nil && m.accounts.busy)
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -288,6 +316,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.startFetch()
 	case fetchFinishedMsg:
+		if msg.account != m.accountGeneration {
+			return m, nil
+		}
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
@@ -303,10 +334,11 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.panes[id].gone = nil
 			}
 			m.rebuildPRTable(true)
-			// Authentication failures need a login, not a retry.
+			// Authentication failures need a login, not a retry. A pinned
+			// account is fetched again once gh has a new token for it.
 			var authErr *github.AuthError
 			if errors.As(msg.err, &authErr) {
-				return m, nil
+				return m, m.scheduleTokenRecheck()
 			}
 		} else {
 			notify := m.applySnapshot(msg.snapshot)
@@ -319,7 +351,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case previewMsg:
 		// A preview is dropped once its fetch has finished or been replaced,
 		// and when it fails: the full fetch reports errors.
-		if msg.err == nil && msg.generation == m.refreshGeneration && m.loading && m.snapshot.Login == "" {
+		if msg.err == nil && msg.generation == m.refreshGeneration && msg.account == m.accountGeneration && m.loading && m.snapshot.Login == "" {
 			m.applySnapshot(msg.snapshot)
 		}
 	case loginFinishedMsg:
@@ -332,6 +364,12 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startFetch()
 	case browserOpenedMsg:
 		m.handleBrowserOpened(msg)
+	case accountsListedMsg:
+		m.handleAccountsListed(msg)
+	case tokenRecheckMsg:
+		return m, m.handleTokenRecheck(msg)
+	case tokenCheckedMsg:
+		return m, m.handleTokenChecked(msg)
 	case desktopNotifiedMsg:
 		m.handleDesktopNotified(msg)
 	case tea.PasteMsg:
@@ -359,6 +397,9 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.picker != nil {
 		return m.updateRepositoryPicker(msg)
+	}
+	if m.accounts != nil {
+		return m.updateAccountPicker(msg)
 	}
 	if m.searching != nil {
 		return m.updateSearch(msg)
@@ -410,6 +451,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.openSelected()
 	case key.Matches(msg, k.CopyURL):
 		return m.copySelected()
+	case key.Matches(msg, k.Account):
+		return m.openAccountPicker()
 	case key.Matches(msg, k.Mouse):
 		m.toggleMouse()
 	case key.Matches(msg, k.Notify):
@@ -564,9 +607,11 @@ func (m *model) rebuildVisiblePRs() {
 func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 	accountChanged := !strings.EqualFold(m.filterLogin, snapshot.Login)
 	if accountChanged {
-		if m.filterLogin != "" {
+		// A failed save of the account choice stays shown for the new account.
+		if m.filterLogin != "" && !m.keepPreferenceErr {
 			m.preferenceErr = nil
 		}
+		m.keepPreferenceErr = false
 		m.filterLogin = snapshot.Login
 		if scope, found := m.preferences.Lookup(snapshot.Login); found {
 			m.setScope(snapshot.Login, scope)
@@ -740,6 +785,8 @@ func (m *model) View() tea.View {
 		lines = m.listLines()
 	case m.width < minimumWidth || m.height < minimumHeight:
 		lines = wrapWords("Terminal too small; resize or press Ctrl+C to quit.", m.width)
+	case m.accounts != nil:
+		lines = m.accountPickerLines()
 	case m.loading && !m.loginActive && !m.refreshing():
 		lines = []string{m.spinner.View() + " Loading open pull requests..."}
 	case m.err != nil:
@@ -796,7 +843,7 @@ func (m *model) scopeChoiceLines() []string {
 		all = "> Show all my PRs"
 	}
 	return append([]string{
-		m.titleLine(fmt.Sprintf("prpr — @%s", m.snapshot.Login), ""),
+		m.titleLine("prpr — "+m.accountLabel(), ""),
 		"What would you like to watch?",
 		pick,
 		all,
@@ -810,6 +857,12 @@ func (m *model) errorLines() []string {
 		message = m.err.Error()
 	}
 	lines := []string{message}
+	if m.awaitingToken() {
+		lines = append(lines, "Waiting for "+singleLine(m.pinnedAccount)+" to log in again; prpr retries when gh has a new token.")
+	}
+	if m.switchAccounts {
+		lines = append(lines, "Press a to choose another GitHub CLI account.")
+	}
 	if quota := m.quotaText(0); quota != "" {
 		lines = append(lines, quota)
 	}
@@ -837,7 +890,7 @@ func (m *model) listLines() []string {
 
 // listLinesWith draws the list with the given screen's help.
 func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
-	title := fmt.Sprintf("prpr — @%s — %s", m.snapshot.Login, m.scopeLabel())
+	title := fmt.Sprintf("prpr — %s — %s", m.accountLabel(), m.scopeLabel())
 	if filters := m.filterText(); filters != "" {
 		title += " · " + filters
 	}

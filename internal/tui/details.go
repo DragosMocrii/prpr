@@ -24,7 +24,7 @@ func (m *model) detailsShown() bool {
 
 func (m *model) detailsOpen() bool {
 	if !m.details || (m.loading && !m.loginActive && !m.refreshing()) ||
-		m.err != nil || m.picker != nil || !m.scopeChosen {
+		m.err != nil || m.picker != nil || m.accounts != nil || !m.scopeChosen {
 		return false
 	}
 	_, ok := m.selectedPR()
@@ -88,7 +88,7 @@ func (m *model) detailsBody(width int) (*github.PullRequest, []string) {
 // the URL, status line, and help stay at the bottom.
 func (m *model) detailsLines() []string {
 	pr, body := m.detailsBody(m.width)
-	title := fmt.Sprintf("prpr — @%s — #%d %s", m.snapshot.Login, pr.Number, singleLine(pr.Repository))
+	title := fmt.Sprintf("prpr — %s — #%d %s", m.accountLabel(), pr.Number, singleLine(pr.Repository))
 	lines := []string{m.titleLine(title, m.countdownText()), ""}
 	fixed := m.notice
 	if m.preferenceErr != nil {

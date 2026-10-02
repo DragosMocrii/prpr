@@ -1,6 +1,6 @@
 # prpr
 
-`prpr` is a terminal app for monitoring open pull requests authored by the active GitHub CLI account. It includes drafts and pulls across repositories visible to that account, and lists open pull requests that request a review from you directly in a second pane; requests to your teams, such as code-owner teams, are left out.
+`prpr` is a terminal app for monitoring open pull requests authored by a GitHub CLI account: gh's active account, or one you pin in prpr (see [GitHub accounts](#github-accounts)). It includes drafts and pulls across repositories visible to that account, and lists open pull requests that request a review from you directly in a second pane; requests to your teams, such as code-owner teams, are left out.
 
 ![prpr listing pull requests, then marking a new, a changed, and a merged pull request after a refresh](docs/demo.gif)
 
@@ -100,7 +100,7 @@ prpr --bots ''
 
 Bot reporting costs more GraphQL quota, mostly to read review threads: about 28 points per 100 pull requests listed, against about 3 without bots.
 
-Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository or watchlist choice and the watchlists of each GitHub account; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice. Accounts without watchlists keep the format earlier versions read; once an account saves a watchlist, prpr 0.1.16 and older refuse to open the file until it is repaired.
+Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository or watchlist choice and the watchlists of each GitHub account, and the login of a pinned GitHub CLI account; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice. Accounts without watchlists keep the format earlier versions read; once an account saves a watchlist or an account is pinned, prpr 0.1.16 and older refuse to open the file until it is repaired, and 0.1.17 drops the pinned account the next time it saves.
 
 If startup reports invalid preferences, back up, repair, or remove only the reported `prpr/preferences.json` file before retrying. Do not remove GitHub CLI credentials to repair app preferences.
 
@@ -120,8 +120,9 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `p`: find and select a repository or watchlist to filter both lists; choose `All repositories` to clear the filter. See [Watchlists](#watchlists).
 - `c`: clear the repository filter and show all authored open PRs and review requests.
 - In the repository picker, type to search (Left/Right move within the query), Enter to apply, Esc to cancel, Ctrl+U to clear, and Ctrl+R to reload accessible repositories. Enter `owner/repo` to check a repository outside the browsed list. Space marks repositories for a watchlist, and Ctrl+E and Ctrl+D edit and delete the watchlist under the cursor.
-- `r`: refresh using the currently active GitHub CLI account, and restart the auto-refresh timer.
-- `o`: open the selected pull request in the browser. GitHub CLI picks the browser: its `browser` setting, `GH_BROWSER`, or `BROWSER`, else the system default.
+- `r`: refresh as the pinned GitHub CLI account, or gh's active one, and restart the auto-refresh timer.
+- `a`: choose the GitHub CLI account prpr uses; see [GitHub accounts](#github-accounts).
+- `o`: open the selected pull request in the browser. GitHub CLI picks the browser: its `browser` setting, `GH_BROWSER`, or `BROWSER`, else the system default. With an account pinned, prpr opens the URL itself in the same order, so the browser never receives the account's token.
 - `y`: copy the selected pull request's URL to the clipboard. The copy is sent as an OSC 52 terminal sequence, so it also works over SSH and in containers, but terminals without OSC 52 support, such as macOS Terminal, ignore it; copy the URL shown below the table instead.
 - `x`: clear every change mark and drop gone rows (shown only while there are marks).
 - `m`: turn mouse mode on or off; see [Mouse](#mouse).
@@ -188,6 +189,16 @@ After each refresh, the column at the left of each list marks what changed since
 - `−`: the pull request left the list (merged, closed, or the review request was withdrawn). It stays as a dimmed, struck-through row at the bottom of the list, and its link still opens it.
 
 Marks pile up across refreshes until you look: a row's mark clears when the cursor leaves it, and a gone row is removed the same way. `x` clears them all, and is the only way to clear a list's last remaining row. Each list's title counts its new, changed, and gone rows when that fits. A failed refresh does not reset the comparison, and switching GitHub accounts starts over. Changes are kept in memory only.
+
+### GitHub accounts
+
+prpr follows gh's active account unless you pin one. Press `a` to list the accounts gh has stored for github.com (`gh auth status --json hosts`) and choose one; the first row, **Follow gh's active account**, unpins. A pinned account stays in use when gh's active account changes, for example after `gh auth switch` in another terminal, and the title marks it `(pinned)`. The choice is saved across runs.
+
+prpr never stores the token. Before each fetch it reads the pinned account's token with `gh auth token --hostname github.com --user <login>`, so a new login or `gh auth refresh` of that account takes effect at the next refresh, and passes it to its own gh commands in `GH_TOKEN` only, never as an argument. It drops inherited `GH_TOKEN`, `GITHUB_TOKEN`, `GH_DEBUG`, and `DEBUG` from those commands, and never shows the token: error text has any copy of it replaced by `[redacted]`.
+
+If the pinned account is logged out of gh or its token stops working, prpr shows that on the error screen instead of switching accounts; press `a` to choose another account or `l` to log in. It also checks once a minute whether gh has a new token for the account, reading gh's local store without contacting GitHub, and fetches again as soon as it does, so logging in again or running `gh auth refresh` in another terminal is enough. gh does not report when tokens expire; tokens from `gh auth login` do not expire unless revoked. Logging in with `l` runs `gh auth login` without the token, and makes the new account gh's active one, as it always has.
+
+When `GH_TOKEN` or `GITHUB_TOKEN` is set in prpr's environment, gh uses that token instead of any stored account, so prpr follows it and `a` is off.
 
 ### Watchlists
 
