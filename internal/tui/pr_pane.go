@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/paginator"
@@ -16,9 +17,63 @@ type paneID int
 const (
 	paneMine paneID = iota
 	paneReview
+	// paneQueue shows authored pull requests a merge queue holds. It shares
+	// the authored list and its change tracker with paneMine.
+	paneQueue
 )
 
-var paneIDs = [...]paneID{paneMine, paneReview}
+// paneIDs is the drawing order.
+var paneIDs = [...]paneID{paneMine, paneQueue, paneReview}
+
+// listIDs name the two fetched lists, each with its change tracker.
+var listIDs = [...]paneID{paneMine, paneReview}
+
+// queued reports whether a merge queue holds an authored pull request.
+func queued(pr *github.PullRequest) bool {
+	return pr.Queue != nil && pr.Queue.State.InQueue()
+}
+
+// inPane reports whether a pull request of the pane's list belongs to it:
+// the authored list splits between My PRs and the queue pane.
+func (m *model) inPane(id paneID, pr *github.PullRequest) bool {
+	switch id {
+	case paneMine:
+		return !queued(pr)
+	case paneQueue:
+		return queued(pr)
+	}
+	return true
+}
+
+// tracker is the change tracker of a pane's list.
+func (m *model) tracker(id paneID) *paneChanges {
+	if id == paneQueue {
+		return &m.changes[paneMine]
+	}
+	return &m.changes[id]
+}
+
+// drawnPanes lists the panes on screen in order: the queue pane only while
+// it has rows.
+func (m *model) drawnPanes() []paneID {
+	ids := make([]paneID, 0, len(paneIDs))
+	for _, id := range paneIDs {
+		if id != paneQueue || rowCount(&m.panes[id]) > 0 {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// nextPane is the drawn pane step places after the focused one, wrapping.
+func (m *model) nextPane(step int) paneID {
+	drawn := m.drawnPanes()
+	at := slices.Index(drawn, m.focus)
+	if at < 0 {
+		return drawn[0]
+	}
+	return drawn[(at+step+len(drawn))%len(drawn)]
+}
 
 // prPane is one pull-request list. visible holds indices into the pane's
 // source slice, so a row is identified by its visible index, never by number.
@@ -48,14 +103,14 @@ func rowCount(pane *prPane) int {
 const minTableHeight = 3
 
 // minDualTableHeight is a table header plus two rows, the smallest table when
-// both panes are drawn.
+// several panes are drawn.
 const minDualTableHeight = 4
 
 // paneLayout gives each pane's table height, including its header. A zero
 // height means the pane is empty or not drawn.
 type paneLayout struct {
 	single bool // only the focused pane is drawn
-	tables [2]int
+	tables [3]int
 }
 
 // listChromeHeight counts list lines outside the panes: the title, the
@@ -84,23 +139,31 @@ func (m *model) layoutPanes() paneLayout {
 		}
 		return 2 // title and empty line
 	}
+	drawn := m.drawnPanes()
+	total := 0
+	var full []paneID
+	for _, id := range drawn {
+		total += need(id)
+		if filled(id) {
+			full = append(full, id)
+		}
+	}
 	var layout paneLayout
-	if avail < need(paneMine)+need(paneReview) {
+	if avail < total {
 		layout.single = true
 		if filled(m.focus) {
 			layout.tables[m.focus] = max(minTableHeight, avail-1)
 		}
 		return layout
 	}
-	rows := avail - 2 // pane titles
-	switch {
-	case filled(paneMine) && filled(paneReview):
-		layout.tables[paneMine] = rows - rows/2
-		layout.tables[paneReview] = rows / 2
-	case filled(paneMine):
-		layout.tables[paneMine] = rows - 1
-	case filled(paneReview):
-		layout.tables[paneReview] = rows - 1
+	// Pane titles, then an empty line for each pane without rows; filled
+	// panes share the rest, earlier panes taking the remainder.
+	rows := avail - len(drawn) - (len(drawn) - len(full))
+	for i, id := range full {
+		layout.tables[id] = rows / len(full)
+		if i < rows%len(full) {
+			layout.tables[id]++
+		}
 	}
 	return layout
 }
@@ -131,7 +194,7 @@ func (m *model) paneRow(id paneID, row int) (*github.PullRequest, bool, bool) {
 		return nil, false, false
 	}
 	row -= len(pane.visible)
-	gone := m.changes[id].gone
+	gone := m.tracker(id).gone
 	if row < len(pane.gone) {
 		if index := pane.gone[row]; index >= 0 && index < len(gone) {
 			return &gone[index], true, true
@@ -288,14 +351,17 @@ func keepBackground(line, sgr string) string {
 
 func (m *model) paneTitle(id paneID, single bool) string {
 	name := "My PRs"
-	if id == paneReview {
+	switch id {
+	case paneReview:
 		name = "Review requested"
+	case paneQueue:
+		name = "Merge queue"
 	}
 	title := fmt.Sprintf("%s (%d)", name, len(m.panes[id].visible))
 	if m.filtersActive() {
 		total := 0
 		for i := range m.source(id) {
-			if m.inScope(&m.source(id)[i]) {
+			if pr := &m.source(id)[i]; m.inScope(pr) && m.inPane(id, pr) {
 				total++
 			}
 		}
@@ -348,7 +414,7 @@ func (m *model) changeSummary(id paneID) string {
 	added, changed := 0, 0
 	for row := range len(pane.visible) {
 		if pr, _, ok := m.paneRow(id, row); ok {
-			switch m.changes[id].mark(pr).kind {
+			switch m.tracker(id).mark(pr).kind {
 			case markNew:
 				added++
 			case markChanged:
@@ -371,8 +437,11 @@ func (m *model) changeSummary(id paneID) string {
 
 func (m *model) emptyPaneLine(id paneID) string {
 	text := "No open pull requests"
-	if id == paneReview {
+	switch id {
+	case paneReview:
 		text = "No review requests"
+	case paneQueue:
+		text = "Nothing in a merge queue"
 	}
 	if m.filtersActive() {
 		return "  No pull requests match the filters; esc clears them."

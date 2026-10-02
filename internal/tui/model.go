@@ -38,7 +38,7 @@ type model struct {
 	// watchlist is the watchlist scope; its empty name means none.
 	watchlist   preferences.Watchlist
 	filterLogin string
-	panes       [2]prPane
+	panes       [3]prPane
 	changes     [2]paneChanges
 	// changesLogin is the account the change baseline belongs to.
 	changesLogin        string
@@ -212,7 +212,7 @@ func newModel(ctx context.Context, client *github.Client, preferences *preferenc
 		icons:          &unicodeIcons,
 		rules:          readiness.DefaultRules(),
 	}
-	m.panes = [2]prPane{newPRPane(), newPRPane()}
+	m.panes = [3]prPane{newPRPane(), newPRPane(), newPRPane()}
 	m.rebuildPRTable(true)
 	return m
 }
@@ -254,7 +254,7 @@ const unknownRecheckDelay = 15 * time.Second
 // countUnknownRechecks records whether a full fetch left a merge state in
 // scope unknown.
 func (m *model) countUnknownRechecks() {
-	for _, id := range paneIDs {
+	for _, id := range listIDs {
 		for i := range m.source(id) {
 			if pr := &m.source(id)[i]; m.inScope(pr) && unknownMergeState(pr) {
 				m.unknownRechecks++
@@ -522,11 +522,14 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, k.AllRepositories):
 		m.chooseRepository("")
 	case key.Matches(msg, k.NextPane, k.PrevPane):
-		// Two panes: next and previous are the same move.
-		m.setFocus(1 - m.focus)
+		step := 1
+		if key.Matches(msg, k.PrevPane) {
+			step = -1
+		}
+		m.setFocus(m.nextPane(step))
 	case key.Matches(msg, k.ClearMarks):
 		m.keepingSelection(func() {
-			for _, id := range paneIDs {
+			for _, id := range listIDs {
 				m.changes[id].clear()
 			}
 			m.rebuildVisiblePRs()
@@ -608,13 +611,19 @@ func (m *model) leaveRow(id paneID, row int) {
 		return
 	}
 	if !gone {
-		if m.changes[id].see(pr) {
+		if m.tracker(id).see(pr) {
 			m.redrawRows(id)
 		}
 		return
 	}
-	m.changes[id].dismiss(pr)
-	m.rebuildGone(id)
+	m.tracker(id).dismiss(pr)
+	// The authored panes share one tracker, so both lose the dismissed row.
+	if id == paneReview {
+		m.rebuildGone(id)
+	} else {
+		m.rebuildGone(paneMine)
+		m.rebuildGone(paneQueue)
+	}
 	target := pane.table.Cursor()
 	if row < target {
 		target--
@@ -703,6 +712,11 @@ func (m *model) rebuildVisiblePRs() {
 		}
 		m.rebuildGone(id)
 	}
+	// An emptied queue pane is no longer drawn, so it cannot keep the focus.
+	if !slices.Contains(m.drawnPanes(), m.focus) {
+		m.focus = paneMine
+		m.applyFocusStyles()
+	}
 	m.rebuildPRTable(true)
 }
 
@@ -730,7 +744,7 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 	}
 	// A preview cannot sort ready pull requests first, so a cursor still on
 	// its first row stays on the first row once the details arrive.
-	var atTop [2]bool
+	var atTop [3]bool
 	for _, id := range paneIDs {
 		atTop[id] = m.snapshot.Preview && !snapshot.Preview && m.panes[id].table.Cursor() == 0
 	}
@@ -755,7 +769,7 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 			} else {
 				alerts = m.alerts()
 			}
-			for _, id := range paneIDs {
+			for _, id := range listIDs {
 				if reset {
 					m.changes[id].reset(m.source(id))
 				} else {
@@ -767,8 +781,11 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 	})
 	if accountChanged {
 		focus := paneMine
-		if len(m.panes[paneMine].visible) == 0 && len(m.panes[paneReview].visible) > 0 {
-			focus = paneReview
+		for _, id := range m.drawnPanes() {
+			if len(m.panes[id].visible) > 0 {
+				focus = id
+				break
+			}
 		}
 		m.setFocus(focus)
 	}
@@ -786,7 +803,7 @@ func (m *model) keepingSelection(rebuild func()) {
 		number     int
 		ok         bool
 	}
-	var previous [2]selection
+	var previous [3]selection
 	for _, id := range paneIDs {
 		if pr, ok := m.paneSelectedPR(id); ok {
 			previous[id] = selection{pr.Repository, pr.Number, true}
@@ -863,8 +880,9 @@ func (m *model) scopeLabel() string {
 func (m *model) rebuildGone(id paneID) {
 	pane := &m.panes[id]
 	pane.gone = pane.gone[:0]
-	for index := range m.changes[id].gone {
-		if m.shown(id, &m.changes[id].gone[index], false) {
+	t := m.tracker(id)
+	for index := range t.gone {
+		if m.shown(id, &t.gone[index], false) {
 			pane.gone = append(pane.gone, index)
 		}
 	}
@@ -993,7 +1011,7 @@ func (m *model) errorLines() []string {
 // panesFit reports whether every drawn pane with rows has room for its columns.
 func (m *model) panesFit() bool {
 	layout := m.layoutPanes()
-	for _, id := range paneIDs {
+	for _, id := range m.drawnPanes() {
 		if layout.single && id != m.focus {
 			continue
 		}
@@ -1030,7 +1048,7 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 		lines = append(lines, m.summaryLine())
 	}
 	layout := m.layoutPanes()
-	for _, id := range paneIDs {
+	for _, id := range m.drawnPanes() {
 		if layout.single && id != m.focus {
 			continue
 		}

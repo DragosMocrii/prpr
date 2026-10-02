@@ -45,7 +45,7 @@ func (m *model) hitTest(y int) (paneHit, bool) {
 	if m.summaryShown() {
 		top++
 	}
-	for _, id := range paneIDs {
+	for _, id := range m.drawnPanes() {
 		if layout.single && id != m.focus {
 			continue
 		}

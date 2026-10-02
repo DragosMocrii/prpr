@@ -67,7 +67,12 @@ func (m *model) summaryShown() bool {
 	return m.height >= minSummaryHeight
 }
 
+// covers reports whether a category limits pane id. The queue pane shares
+// the authored list, so counting it too would count those rows twice.
 func (c attentionCategory) covers(id paneID) bool {
+	if id == paneQueue {
+		return false
+	}
 	return c.both || c.pane == id
 }
 
@@ -79,6 +84,9 @@ func categoryKnown(number int, preview bool) bool {
 // categoryMatches reports whether a pull request in pane id is in category
 // number (from 1). Preview rows match only categories a preview knows.
 func (m *model) categoryMatches(number int, id paneID, pr *github.PullRequest, preview bool) bool {
+	if !m.inPane(id, pr) {
+		return false
+	}
 	category := attentionCategories[number-1]
 	return category.covers(id) && categoryKnown(number, preview) && category.match(m, pr)
 }

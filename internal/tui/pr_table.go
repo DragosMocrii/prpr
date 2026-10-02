@@ -153,7 +153,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		if !ok {
 			continue
 		}
-		mark := m.changes[id].mark(pr)
+		mark := m.tracker(id).mark(pr)
 		changed := func(cell changedCells, text string) string {
 			if mark.kind == markChanged && mark.cells&cell != 0 {
 				return restyle(text, reverseOn, reverseOff)

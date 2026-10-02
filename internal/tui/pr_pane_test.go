@@ -369,7 +369,7 @@ func TestDualLayoutGivesEachPaneHeaderPlusTwoRows(t *testing.T) {
 		m := newPaneModel(t, width, height, manyPRs(30), reviewPRs(30))
 		layout := m.layoutPanes()
 		if !layout.single {
-			for _, id := range paneIDs {
+			for _, id := range m.drawnPanes() {
 				// Height is the row viewport; the header takes two more lines.
 				if got := m.panes[id].table.Height(); got < 2 {
 					t.Fatalf("height %d: pane %d shows %d rows, want at least 2", height, id, got)

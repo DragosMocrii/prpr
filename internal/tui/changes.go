@@ -185,7 +185,7 @@ func (m *model) hasMarks() bool {
 			return true
 		}
 		for row := range len(pane.visible) {
-			if pr, _, ok := m.paneRow(id, row); ok && m.changes[id].mark(pr).kind != markNone {
+			if pr, _, ok := m.paneRow(id, row); ok && m.tracker(id).mark(pr).kind != markNone {
 				return true
 			}
 		}

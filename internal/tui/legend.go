@@ -146,7 +146,10 @@ func (m *model) legendRoom() int {
 		}
 		return 2
 	}
-	dual := need(paneMine) + need(paneReview)
+	dual := 0
+	for _, id := range m.drawnPanes() {
+		dual += need(id)
+	}
 	if avail >= dual {
 		return avail - dual
 	}

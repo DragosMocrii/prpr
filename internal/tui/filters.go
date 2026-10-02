@@ -63,7 +63,7 @@ func (m *model) filterText() string {
 // row's CI and merge state are unknown, so it never matches the failing or
 // ready filters.
 func (m *model) shown(id paneID, pr *github.PullRequest, preview bool) bool {
-	if !m.inScope(pr) {
+	if !m.inScope(pr) || !m.inPane(id, pr) {
 		return false
 	}
 	if m.category != 0 && !m.categoryMatches(m.category, id, pr, preview) {
@@ -130,7 +130,7 @@ func (m *model) hiddenDrafts(id paneID) int {
 	}
 	count := 0
 	for i := range m.source(id) {
-		if pr := &m.source(id)[i]; pr.Draft && m.inRepositoryScope(pr) {
+		if pr := &m.source(id)[i]; pr.Draft && m.inRepositoryScope(pr) && m.inPane(id, pr) {
 			count++
 		}
 	}
