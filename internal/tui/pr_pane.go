@@ -294,6 +294,13 @@ func (m *model) paneTitle(id paneID, single bool) string {
 		}
 		title = fmt.Sprintf("%s (%d of %d)", name, len(m.panes[id].visible), total)
 	}
+	// Like the change summary, the waiting count is dropped when it does not
+	// fit.
+	if waiting := m.waitingCount(id); waiting > 0 {
+		if suffix := fmt.Sprintf(" · %d waiting on others", waiting); 2+lipgloss.Width(title)+lipgloss.Width(suffix) <= m.width {
+			title += suffix
+		}
+	}
 	if single {
 		title += " · tab: other list"
 	}
@@ -306,6 +313,21 @@ func (m *model) paneTitle(id paneID, single bool) string {
 		return "  " + lipgloss.NewStyle().Faint(true).Render(title)
 	}
 	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6")).Render("▸ " + title)
+}
+
+// waitingCount counts the reviewed pull requests a pane shows that wait on
+// someone other than the viewer.
+func (m *model) waitingCount(id paneID) int {
+	if id != paneReview {
+		return 0
+	}
+	count := 0
+	for _, index := range m.panes[id].visible {
+		if m.source(id)[index].ReviewStatus.Waiting() {
+			count++
+		}
+	}
+	return count
 }
 
 // changeSummary counts a pane's marked rows in the current scope.

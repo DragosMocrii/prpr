@@ -209,6 +209,9 @@ func main() {
 	case !strings.HasPrefix(args, "api graphql"):
 		fmt.Fprintln(os.Stderr, "demo gh: unsupported command:", args)
 		os.Exit(1)
+	case strings.Contains(args, "reviewed-by:@me"):
+		// The demo has no pull requests the viewer already reviewed.
+		data = []any{map[string]any{"data": map[string]any{"search": page(nil, true)}}}
 	case strings.Contains(args, "rateLimit"):
 		data = map[string]any{"data": map[string]any{"rateLimit": map[string]any{
 			"limit": 5000, "remaining": 4874, "resetAt": now.Add(41 * time.Minute).Format(time.RFC3339)}}}

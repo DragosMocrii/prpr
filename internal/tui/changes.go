@@ -109,7 +109,8 @@ func (c *paneChanges) update(list []github.PullRequest) {
 // moves with the clock.
 func cellChanges(old, pr *github.PullRequest) changedCells {
 	var cells changedCells
-	if old.Title != pr.Title {
+	// The review status is shown before the name.
+	if old.Title != pr.Title || old.ReviewStatus != pr.ReviewStatus {
 		cells |= cellName
 	}
 	if old.Draft != pr.Draft {

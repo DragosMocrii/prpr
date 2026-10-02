@@ -41,11 +41,16 @@ type PullRequest struct {
 	Comments int
 	// Bots follows the client's configured bots; nil when none are configured.
 	Bots []BotReview
+	// ReviewStatus places a review-pane pull request; zero for a pending
+	// request and for authored pull requests.
+	ReviewStatus ReviewStatus
 }
 
 type Snapshot struct {
-	Login          string
-	PullRequests   []PullRequest
+	Login        string
+	PullRequests []PullRequest
+	// ReviewRequests lists pending direct review requests, then pull requests
+	// the viewer reviewed after such a request (see [ReviewStatus]).
 	ReviewRequests []PullRequest
 	// Preview marks a fast first look from [Client.Preview]: merge state, waiting
 	// time, checks, reviews, and bots are unknown and left empty.
@@ -79,7 +84,7 @@ const pageSize = 25
 // pullRequestFields are selected for both lists. Nested connections select no
 // pageInfo, so gh --paginate follows only the outer connection.
 func pullRequestFields(bots bool) string {
-	extra, head := "", "\n            statusCheckRollup { state }"
+	extra, head := "", "\n            committedDate\n            statusCheckRollup { state }"
 	if bots {
 		extra, head = botFields, headCheckFields
 	}
@@ -125,15 +130,21 @@ const reviewSearch = "is:pr is:open user-review-requested:@me archived:false sor
 
 // reviewRequestsQuery lists the reviewSearch results.
 func reviewRequestsQuery(bots bool) string {
+	return searchQuery(reviewSearch, bots, "")
+}
+
+// searchQuery lists a pull request search with the review-pane fields and
+// extra fields.
+func searchQuery(search string, bots bool, extra string) string {
 	return `query($endCursor: String) {
   search(type: ISSUE, first: ` + strconv.Itoa(pageSize) + `, after: $endCursor,
-         query: "` + reviewSearch + `") {
+         query: "` + search + `") {
     nodes {
       ... on PullRequest {` + pullRequestFields(bots) + `
         author { login }
         requestEvents: timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
           nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { ... on User { login } } } }
-        }
+        }` + extra + `
       }
     }
     pageInfo { hasNextPage endCursor }
@@ -239,6 +250,10 @@ type pullRequestNode struct {
 			} `json:"requestedReviewer"`
 		} `json:"nodes"`
 	} `json:"requestEvents"`
+	HeadRefOid string `json:"headRefOid"`
+	Activity   struct {
+		Nodes []*activityNode `json:"nodes"`
+	} `json:"activity"`
 	botNodes
 }
 
@@ -326,14 +341,16 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 		}
 		return Snapshot{}, &AuthError{Err: err}
 	}
-	return c.run(ctx, pullRequestsQuery(len(c.bots) > 0), reviewRequestsQuery(len(c.bots) > 0), c.bots)
+	bots := len(c.bots) > 0
+	return c.run(ctx, pullRequestsQuery(bots), reviewRequestsQuery(bots), reviewedQuery(bots, time.Now()), c.bots)
 }
 
 // Preview fetches both lists with only the fields GitHub answers quickly, for
 // showing rows while [Client.Fetch] is still running. It skips the
-// authentication check; Fetch reports authentication failures.
+// authentication check, which Fetch reports, and reviewed pull requests,
+// which need the fields Preview leaves out to be placed.
 func (c *Client) Preview(ctx context.Context) (Snapshot, error) {
-	snapshot, err := c.run(ctx, previewPullRequestsQuery(), previewReviewRequestsQuery(), nil)
+	snapshot, err := c.run(ctx, previewPullRequestsQuery(), previewReviewRequestsQuery(), "", nil)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -346,21 +363,31 @@ func (c *Client) Preview(ctx context.Context) (Snapshot, error) {
 	return snapshot, nil
 }
 
-// run fetches both lists with the given queries.
-func (c *Client) run(ctx context.Context, pullRequests, reviewRequests string, bots []Bot) (Snapshot, error) {
-	// The lists are independent, so both queries run at once.
+// run fetches both lists with the given queries, and the pull requests the
+// viewer reviewed unless reviewed is empty. Every query must succeed.
+func (c *Client) run(ctx context.Context, pullRequests, reviewRequests, reviewed string, bots []Bot) (Snapshot, error) {
+	// The lists are independent, so the queries run at once.
 	type output struct {
 		data []byte
 		err  error
 	}
-	reviews := make(chan output, 1)
-	go func() {
-		data, err := c.output(ctx, "GitHub review request query failed", "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+reviewRequests)
-		reviews <- output{data, err}
-	}()
+	search := func(message, query string) chan output {
+		result := make(chan output, 1)
+		if query == "" {
+			result <- output{}
+			return result
+		}
+		go func() {
+			data, err := c.output(ctx, message, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+query)
+			result <- output{data, err}
+		}()
+		return result
+	}
+	reviews := search("GitHub review request query failed", reviewRequests)
+	reviewedOutput := search("GitHub reviewed pull request query failed", reviewed)
 
 	data, err := c.output(ctx, "GitHub pull request query failed", "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+pullRequests)
-	review := <-reviews
+	review, past := <-reviews, <-reviewedOutput
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -375,6 +402,17 @@ func (c *Client) run(ctx context.Context, pullRequests, reviewRequests string, b
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if reviewed == "" {
+		return snapshot, nil
+	}
+	if past.err != nil {
+		return Snapshot{}, past.err
+	}
+	done, err := decodeReviewedPages(past.data, snapshot.Login, bots)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snapshot.ReviewRequests = mergeReviews(snapshot.ReviewRequests, done)
 	return snapshot, nil
 }
 
@@ -549,12 +587,35 @@ func decodePages(data []byte, bots []Bot) (Snapshot, error) {
 }
 
 func decodeReviewPages(data []byte, login string, bots []Bot) ([]PullRequest, error) {
+	return decodeSearchPages(data, "review request", func(node *pullRequestNode) (PullRequest, bool) {
+		return node.pullRequest(login, bots), true
+	})
+}
+
+// decodeReviewedPages decodes the reviewed search, keeping the pull requests
+// that directly requested the viewer's review.
+func decodeReviewedPages(data []byte, login string, bots []Bot) ([]PullRequest, error) {
+	return decodeSearchPages(data, "reviewed pull request", func(node *pullRequestNode) (PullRequest, bool) {
+		pr := node.pullRequest("", bots)
+		var head time.Time
+		if commits := node.Commits.Nodes; len(commits) > 0 && commits[0] != nil {
+			head = commits[0].Commit.CommittedDate
+		}
+		status, since, ok := node.reviewedStatus(login, head)
+		pr.ReviewStatus, pr.WaitingSince = status, since
+		return pr, ok
+	})
+}
+
+// decodeSearchPages decodes a pull request search; convert turns each node
+// into a pull request or skips it.
+func decodeSearchPages(data []byte, name string, convert func(*pullRequestNode) (PullRequest, bool)) ([]PullRequest, error) {
 	var pages []json.RawMessage
 	if err := json.Unmarshal(data, &pages); err != nil {
-		return nil, fmt.Errorf("decode GitHub review request response: %w", err)
+		return nil, fmt.Errorf("decode GitHub %s response: %w", name, err)
 	}
 	if len(pages) == 0 {
-		return nil, errors.New("decode GitHub review request response: no pages returned")
+		return nil, fmt.Errorf("decode GitHub %s response: no pages returned", name)
 	}
 
 	var prs []PullRequest
@@ -568,20 +629,22 @@ func decodeReviewPages(data []byte, login string, bots []Bot) ([]PullRequest, er
 			Errors []json.RawMessage `json:"errors"`
 		}
 		if err := json.Unmarshal(pageData, &page); err != nil {
-			return nil, fmt.Errorf("decode GitHub review request page %d: %w", i+1, err)
+			return nil, fmt.Errorf("decode GitHub %s page %d: %w", name, i+1, err)
 		}
 		if len(page.Errors) != 0 {
-			return nil, fmt.Errorf("GitHub review request page %d returned GraphQL errors: %s", i+1, strings.Join(rawMessages(page.Errors), "; "))
+			return nil, fmt.Errorf("GitHub %s page %d returned GraphQL errors: %s", name, i+1, strings.Join(rawMessages(page.Errors), "; "))
 		}
 		if page.Data.Search == nil {
-			return nil, fmt.Errorf("GitHub review request page %d has no search connection", i+1)
+			return nil, fmt.Errorf("GitHub %s page %d has no search connection", name, i+1)
 		}
 		for _, node := range page.Data.Search.Nodes {
 			// Search can return non-pull-request nodes, which decode empty.
 			if node == nil || node.URL == "" {
 				continue
 			}
-			prs = append(prs, node.pullRequest(login, bots))
+			if pr, ok := convert(node); ok {
+				prs = append(prs, pr)
+			}
 		}
 	}
 	return prs, nil

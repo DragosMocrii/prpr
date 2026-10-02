@@ -124,6 +124,9 @@ const (
 	reverseOff = "\x1b[27m"
 	goneOn     = "\x1b[2;9m"
 	goneOff    = "\x1b[22;29m"
+	// waitingOn marks a reviewed pull request that waits on someone else.
+	waitingOn  = "\x1b[2;3m"
+	waitingOff = "\x1b[22;23m"
 )
 
 func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
@@ -147,6 +150,11 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		name := singleLine(pr.Title)
 		if all && !layout.repositoryColumn {
 			name = singleLine(pr.Repository) + " — " + name
+		}
+		if review {
+			if status := reviewStatusTag(pr.ReviewStatus); status != "" {
+				name = status + " · " + name
+			}
 		}
 		state := "open"
 		if pr.Draft {
@@ -175,14 +183,66 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			}
 			cells = append(cells, changed(stat.cell, stat.text(pr, now)))
 		}
-		if gone {
+		switch {
+		case gone:
 			for i := 1; i < len(cells); i++ {
 				cells[i] = restyle(cells[i], goneOn, goneOff)
+			}
+		case review && pr.ReviewStatus.Waiting():
+			for i := 1; i < len(cells); i++ {
+				cells[i] = restyle(cells[i], waitingOn, waitingOff)
 			}
 		}
 		rows = append(rows, cells)
 	}
 	return rows
+}
+
+// reviewStatusTag names where a reviewed pull request stands in a word or
+// two, colored when it needs the viewer again; it is empty for a pending
+// review request.
+func reviewStatusTag(status github.ReviewStatus) string {
+	switch status {
+	case github.ReviewNewCommits:
+		return coloredIcon("new commits", "3")
+	case github.ReviewAuthorReplied:
+		return coloredIcon("replied", "3")
+	case github.ReviewDismissed:
+		return coloredIcon("dismissed", "3")
+	case github.ReviewNewActivity:
+		return coloredIcon("activity", "3")
+	case github.ReviewWaitingOnAuthor:
+		return "waiting"
+	case github.ReviewApproved:
+		return "approved"
+	case github.ReviewBackInDraft:
+		return "waiting"
+	default:
+		return ""
+	}
+}
+
+// reviewStatusText names where a reviewed pull request stands, for
+// notifications; it is empty for a pending review request.
+func reviewStatusText(status github.ReviewStatus) string {
+	switch status {
+	case github.ReviewNewCommits:
+		return "new commits"
+	case github.ReviewAuthorReplied:
+		return "author replied"
+	case github.ReviewDismissed:
+		return "review dismissed"
+	case github.ReviewNewActivity:
+		return "new activity"
+	case github.ReviewWaitingOnAuthor:
+		return "waiting on author"
+	case github.ReviewApproved:
+		return "you approved"
+	case github.ReviewBackInDraft:
+		return "back in draft"
+	default:
+		return ""
+	}
 }
 
 // pendingText fills a cell that a preview does not know yet.

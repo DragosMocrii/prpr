@@ -68,7 +68,7 @@ func (m *model) detailsBody(width int) (*github.PullRequest, []string) {
 	var body []string
 	if gone {
 		faint := lipgloss.NewStyle().Faint(true)
-		for _, line := range wrapWords("This pull request left the list: it was merged or closed, or the review request was withdrawn. These details are from the last refresh that listed it.", width) {
+		for _, line := range wrapWords("This pull request left the list: it was merged or closed, the review request was withdrawn, or a pull request you reviewed went 30 days without an update. These details are from the last refresh that listed it.", width) {
 			body = append(body, faint.Render(line))
 		}
 		body = append(body, "")
@@ -296,6 +296,9 @@ func botDetail(review github.BotReview) string {
 }
 
 func waitingDetail(pr *github.PullRequest, review bool, now time.Time) string {
+	if review && pr.ReviewStatus != github.ReviewRequested {
+		return reviewedDetail(pr, now)
+	}
 	switch {
 	case pr.WaitingSince.IsZero() && pr.Draft:
 		return "Draft, not waiting for review."
@@ -305,6 +308,28 @@ func waitingDetail(pr *github.PullRequest, review bool, now time.Time) string {
 		return "Review requested " + ageText(pr.WaitingSince, now) + " ago, " + dateText(pr.WaitingSince) + "."
 	default:
 		return ageText(pr.WaitingSince, now) + ", ready for review since " + dateText(pr.WaitingSince) + "."
+	}
+}
+
+// reviewedDetail says where a pull request the viewer reviewed stands, and
+// since when.
+func reviewedDetail(pr *github.PullRequest, now time.Time) string {
+	since := ageText(pr.WaitingSince, now) + " ago, " + dateText(pr.WaitingSince)
+	switch pr.ReviewStatus {
+	case github.ReviewNewCommits:
+		return "New commits since your review, " + since + "."
+	case github.ReviewAuthorReplied:
+		return "The author replied after your review, " + since + "."
+	case github.ReviewDismissed:
+		return "Your review was dismissed; you last reviewed " + since + "."
+	case github.ReviewNewActivity:
+		return "More activity since your review than prpr reads; updated " + since + "."
+	case github.ReviewApproved:
+		return "You approved " + since + "; waiting on the author to merge."
+	case github.ReviewBackInDraft:
+		return "Back in draft since your review, " + since + "."
+	default:
+		return "You reviewed " + since + "; waiting on the author."
 	}
 }
 

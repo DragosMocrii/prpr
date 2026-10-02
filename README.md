@@ -130,13 +130,13 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
 
-Repository filtering applies to both lists: the active account's authored open pull requests, and open pull requests requesting the account's review (`user-review-requested:@me`, which excludes requests to the account's teams). **My PRs** lists pull requests GitHub would merge now (`✓`) first, then the oldest created first; **Review requested** keeps the most recently updated first. Both show draft status. The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no matching pull requests in either list remains selectable and shows empty scoped lists. Repository and All selections are saved separately for each GitHub account.
+Repository filtering applies to both lists: the active account's authored open pull requests, and open pull requests requesting the account's review (`user-review-requested:@me`, which excludes requests to the account's teams). **My PRs** lists pull requests GitHub would merge now (`✓`) first, then the oldest created first; **Review requested** keeps the most recently updated first, with pull requests you already reviewed after them (see [After your review](#after-your-review)). Both show draft status. The picker browses repositories associated with the account and repositories in the current PR list; a valid `owner/repo` lookup checks other repositories through GitHub. A repository with no matching pull requests in either list remains selectable and shows empty scoped lists. Repository and All selections are saved separately for each GitHub account.
 
 The pull request table shows draft/open state and whether GitHub would allow a merge now, branch protection included: `✓` ready (optional checks may still be failing), `●` blocked by required reviews or checks, `↓` behind the base branch, `✗` conflicts, `–` draft, and `?` not yet computed. The review list shows the PR author instead of merge status. 
 
 Both lists also show statistics columns, which narrow terminals drop in this order: Size, Comments, Review, CI, Bots, Age.
 
-- **Age**: how long the PR has waited. In **My PRs** it counts from when the PR was last marked ready for review, or from when it was opened if it was never a draft; drafts show `—`. In **Review requested** it counts from the latest review request naming you directly, and falls back to the ready-for-review time when that request is not found. Ages are computed when the lists load, refresh, resize, or change scope, so between refreshes they show the age as of the last update.
+- **Age**: how long the PR has waited. In **My PRs** it counts from when the PR was last marked ready for review, or from when it was opened if it was never a draft; drafts show `—`. In **Review requested** it counts from the latest review request naming you directly, and falls back to the ready-for-review time when that request is not found; for a pull request you already reviewed, it counts from your latest review or comment, or from the change that needs you again. Ages are computed when the lists load, refresh, resize, or change scope, so between refreshes they show the age as of the last update.
 - **CI**: the head commit's check rollup — passing, failing, pending, or `–` when there are no checks.
 - **Review**: the review decision (approved, changes requested, review required, or `–` when none applies) followed by the number of current approvals.
 - **Comments**: the number of conversation comments, bots included. Code review comments are not counted.
@@ -159,7 +159,7 @@ The line under the title counts pull requests by status, each with the number ke
 1 ✓ 2 ready to merge · 2 ✗ 1 changes requested · 3 ✗ 1 failing CI · 4 ✗ 1 conflicts · 5 ✗ 3 bot threads · 6 ● 3 awaiting your review · 7 ? 1 status unknown
 ```
 
-1–5 cover **My PRs**: ready to merge (the green `✓`), changes requested, failing checks, conflicts, and unresolved bot threads. 6 counts every review request, and 7 counts pull requests in either list whose merge status GitHub has not computed yet. Unknown is its own category; it is never counted as ready or healthy, and null review decisions or check results are never counted as changes requested or failing. Categories with no pull requests are left out, and the numbers never change. There is no priority score.
+1–5 cover **My PRs**: ready to merge (the green `✓`), changes requested, failing checks, conflicts, and unresolved bot threads. 6 counts review requests and reviewed pull requests that need you again, but not those waiting on others, and 7 counts pull requests in either list whose merge status GitHub has not computed yet. Unknown is its own category; it is never counted as ready or healthy, and null review decisions or check results are never counted as changes requested or failing. Categories with no pull requests are left out, and the numbers never change. There is no priority score.
 
 Pressing a number shows only that category, focuses its list, and highlights it in the summary; pressing it again or Esc shows everything. It replaces the `D`/`F`/`M` quick filter and combines with search and the repository filter. Counts follow the repository filter but not the search or quick filter, and leave out gone rows. While the quick first look is loading, only conflicts are counted. Narrow terminals shorten the labels, and terminals under 14 lines drop the summary.
 
@@ -186,9 +186,18 @@ After each refresh, the column at the left of each list marks what changed since
 - `+`: the pull request is new in this list.
 - `•`: a shown column changed; the changed cells are drawn in reverse video. Age is never compared.
 - `·`: GitHub reports new activity, such as a code review comment, but no shown column changed.
-- `−`: the pull request left the list (merged, closed, or the review request was withdrawn). It stays as a dimmed, struck-through row at the bottom of the list, and its link still opens it.
+- `−`: the pull request left the list (merged, closed, the review request was withdrawn, or a pull request you reviewed went 30 days without an update). It stays as a dimmed, struck-through row at the bottom of the list, and its link still opens it.
 
 Marks pile up across refreshes until you look: a row's mark clears when the cursor leaves it, and a gone row is removed the same way. `x` clears them all, and is the only way to clear a list's last remaining row. Each list's title counts its new, changed, and gone rows when that fits. A failed refresh does not reset the comparison, and switching GitHub accounts starts over. Changes are kept in memory only.
+
+### After your review
+
+GitHub withdraws a review request as soon as you submit a review, even a single comment, so the PR would leave **Review requested**. prpr keeps it listed while it is open: it also searches `reviewed-by:@me -author:@me` for pull requests updated in the last 30 days, and keeps those where a review was once requested from you directly (not only from your team). They follow the pending requests, and each shows where it stands before its name:
+
+- `new commits`, `replied`, `dismissed`, or `activity` (highlighted) when it needs you again: the head commit is not one you reviewed, the author commented or replied after your latest review or comment, your latest review was dismissed, or so much happened since that prpr does not find your review among the 50 latest reviews and comments it reads. These come before the waiting ones.
+- `waiting` or `approved`, drawn dim and italic, when it waits on the author: you commented, requested changes, or approved, or the author turned it back into a draft. The list title counts them, and attention category 6 leaves them out.
+
+Only the author's replies count; other reviewers and bots do not. When the author requests your review again, the row is a review request again.
 
 ### GitHub accounts
 
@@ -213,7 +222,7 @@ A watchlist is a named group of repositories, such as "My services" or "Open sou
 Notifications are off unless prpr starts with `--notify`; `n` turns them on or off for the session, and the title shows `notify` while they are on. After each refresh, prpr sends one desktop notification if, since the previous refresh:
 
 - one of your pull requests became ready to merge (`✓`), its CI started failing, or a reviewer requested changes;
-- a new review request arrived.
+- a new review request arrived, or a pull request you reviewed needs you again (`new commits`, `replied`, `dismissed`, `activity`). Starting to wait on the author never alerts.
 
 Only changes alert, not the current state: the first load, a switch to another GitHub account, and pull requests you just opened never do, and a failed refresh is skipped. A merge state that GitHub briefly reports as unknown is compared with the last known one. Pull requests outside the repository filter are ignored; search and quick filters are not. A notification names one pull request with its title, or the first two and a count of the rest, and the same text appears in the status line until the next key press.
 

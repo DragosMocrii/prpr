@@ -35,8 +35,9 @@ func checksFailing(state string) bool {
 }
 
 // alerts compares a full fetch with the change baseline of each pane, before
-// the baseline is replaced. Only pull requests listed in both fetches alert,
-// except review requests, which alert when they arrive. readiness is each
+// the baseline is replaced. Only authored pull requests listed in both
+// fetches alert; a review row alerts when it arrives or stops waiting on
+// others, but never when it starts waiting. readiness is each
 // authored pull request's last known merge readiness: an unknown state keeps
 // it, so a state that GitHub recomputes does not alert again. alerts updates
 // it whether or not notifications are on.
@@ -77,15 +78,23 @@ func (m *model) alerts() []prAlert {
 	}
 	m.readiness = readiness
 
-	requested := make(map[prKey]bool)
+	reviews := make(map[prKey]*github.PullRequest)
 	for i := range m.changes[paneReview].baseline {
-		requested[keyOf(&m.changes[paneReview].baseline[i])] = true
+		reviews[keyOf(&m.changes[paneReview].baseline[i])] = &m.changes[paneReview].baseline[i]
 	}
 	for i := range m.snapshot.ReviewRequests {
 		pr := &m.snapshot.ReviewRequests[i]
-		if !requested[keyOf(pr)] && m.inScope(pr) {
-			found = append(found, prAlert{pr, []string{"review requested"}})
+		old, listed := reviews[keyOf(pr)]
+		// A review row alerts when it starts needing the viewer: it arrives, or
+		// it stops waiting on others.
+		if pr.ReviewStatus.Waiting() || (listed && !old.ReviewStatus.Waiting()) || !m.inScope(pr) {
+			continue
 		}
+		kind := "review requested"
+		if text := reviewStatusText(pr.ReviewStatus); text != "" {
+			kind = text
+		}
+		found = append(found, prAlert{pr, []string{kind}})
 	}
 	return found
 }
@@ -159,7 +168,7 @@ func (m *model) handleDesktopNotified(msg desktopNotifiedMsg) {
 func (m *model) toggleNotify() {
 	m.notify = !m.notify
 	if m.notify {
-		m.setNotice("Notifications on: alerts when a PR turns ready, fails CI, gets changes requested, or requests your review")
+		m.setNotice("Notifications on: alerts when a PR turns ready, fails CI, gets changes requested, requests your review, or needs you again after your review")
 	} else {
 		m.setNotice("Notifications off")
 	}
