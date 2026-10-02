@@ -91,10 +91,10 @@ func (m *model) paneLayout(id paneID) tableLayout {
 	if layout.repositoryColumn {
 		columns = append(columns, table.Column{Title: "Repository", Width: repositoryWidth})
 	}
+	columns = append(columns, table.Column{Title: "Number", Width: maxNumberWidth})
 	nameColumn := len(columns)
 	columns = append(columns,
 		table.Column{Title: "PR name"},
-		table.Column{Title: "Number", Width: maxNumberWidth},
 		table.Column{Title: "State", Width: 5},
 		table.Column{Title: lastTitle, Width: lastWidth},
 	)
@@ -166,7 +166,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		if layout.repositoryColumn {
 			cells = append(cells, singleLine(pr.Repository))
 		}
-		cells = append(cells, changed(cellName, name), prNumberLink(pr.Number, pr.URL),
+		cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(cellName, name),
 			changed(cellState, state), changed(lastCell, last))
 		for _, stat := range layout.stats {
 			if preview && stat.detail {

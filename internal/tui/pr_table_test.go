@@ -41,11 +41,11 @@ func TestTableFilterPreservesPRIdentityAndClickableNumber(t *testing.T) {
 		t.Fatalf("selected PR = %+v, %v", selected, ok)
 	}
 	row := m.panes[paneMine].table.Rows()[1]
-	if !strings.Contains(row[2], "\x1b]8;;https://github.com/acme/a/pull/2\x07") || !strings.HasSuffix(row[2], "\x1b]8;;\x07") {
-		t.Fatalf("number hyperlink missing target/reset: %q", row[2])
+	if !strings.Contains(row[1], "\x1b]8;;https://github.com/acme/a/pull/2\x07") || !strings.HasSuffix(row[1], "\x1b]8;;\x07") {
+		t.Fatalf("number hyperlink missing target/reset: %q", row[1])
 	}
-	if strings.Contains(row[3]+row[4], "\x1b]8;") {
-		t.Fatalf("hyperlink leaked into following cells: %q %q", row[3], row[4])
+	if strings.Contains(row[2]+row[3]+row[4], "\x1b]8;") {
+		t.Fatalf("hyperlink leaked into following cells: %q %q %q", row[2], row[3], row[4])
 	}
 	if row[3] != "open" || ansi.Strip(row[4]) != "?" {
 		t.Fatalf("state/unknown merge cells = %q %q", row[3], row[4])
@@ -71,7 +71,7 @@ func TestAllTableShowsRepositoryIdentityAndIndependentStatuses(t *testing.T) {
 		{Number: 3, Repository: "acme/c", Title: "unknown", Mergeable: "new-value"},
 	})
 	columns := m.panes[paneMine].table.Columns()
-	if len(columns) < 5 || columns[1].Title != "Repository" || columns[2].Title != "PR name" || columns[5].Title != "Merge" {
+	if len(columns) < 5 || columns[1].Title != "Repository" || columns[2].Title != "Number" || columns[3].Title != "PR name" || columns[5].Title != "Merge" {
 		t.Fatalf("All table columns = %+v", columns)
 	}
 	rows := m.panes[paneMine].table.Rows()
@@ -80,7 +80,7 @@ func TestAllTableShowsRepositoryIdentityAndIndependentStatuses(t *testing.T) {
 	}
 	m.width = 79
 	m.rebuildPRTable(true)
-	if m.panes[paneMine].table.Columns()[1].Title == "Repository" || !strings.HasPrefix(m.panes[paneMine].table.Rows()[0][1], "acme/a — ") {
+	if m.panes[paneMine].table.Columns()[1].Title == "Repository" || !strings.HasPrefix(m.panes[paneMine].table.Rows()[0][2], "acme/a — ") {
 		t.Fatalf("narrow All table lost repository identity: cols %+v row %+v", m.panes[paneMine].table.Columns(), m.panes[paneMine].table.Rows()[0])
 	}
 }
@@ -309,7 +309,7 @@ func TestStatisticsColumnsDropInPriorityOrderAsWidthShrinks(t *testing.T) {
 		if len(got) > previous || strings.Join(got, ",") != strings.Join([]string{"Age", "CI", "Review", "Size"}[:len(got)], ",") {
 			t.Fatalf("width %d statistics columns = %v", width, got)
 		}
-		if name := m.panes[paneMine].table.Columns()[2].Width; len(got) > 0 && name < minStatsNameWidth {
+		if name := m.panes[paneMine].table.Columns()[3].Width; len(got) > 0 && name < minStatsNameWidth {
 			t.Fatalf("width %d squeezed PR name to %d", width, name)
 		}
 		previous = len(got)
