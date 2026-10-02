@@ -83,7 +83,9 @@ func (m *model) syncKeys() {
 	k := &m.keys
 	idle := !m.loading && !m.loginActive
 	ready := idle && m.err == nil && m.picker == nil
-	scopeChoice := ready && !m.scopeChosen && m.snapshot.Login != ""
+	// A preview lets the scope be chosen before the details arrive.
+	previewing := m.loading && !m.loginActive && m.snapshot.Preview && m.err == nil && m.picker == nil
+	scopeChoice := (ready || previewing) && !m.scopeChosen && m.snapshot.Login != ""
 	browsing := ready && m.scopeChosen && m.snapshot.Login != ""
 	// Rows kept on screen during a refresh stay navigable.
 	viewing := !m.loginActive && m.err == nil && m.picker == nil && m.scopeChosen && m.snapshot.Login != ""

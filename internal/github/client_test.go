@@ -311,11 +311,23 @@ func TestDecodeRateLimitRejectsInvalidResponses(t *testing.T) {
 }
 
 func TestReviewRequestsQueryExcludesTeamRequests(t *testing.T) {
-	for _, bots := range []bool{false, true} {
-		query := reviewRequestsQuery(bots)
+	for _, query := range []string{reviewRequestsQuery(false), reviewRequestsQuery(true), previewReviewRequestsQuery()} {
 		if !strings.Contains(query, `"is:pr is:open user-review-requested:@me archived:false sort:updated-desc"`) ||
 			strings.Contains(query, " review-requested:") {
 			t.Errorf("review query does not ask for direct requests only:\n%s", query)
 		}
+	}
+}
+
+func TestPreviewQueriesSelectOnlyFastFields(t *testing.T) {
+	for _, query := range []string{previewPullRequestsQuery(), previewReviewRequestsQuery()} {
+		for _, slow := range []string{"mergeStateStatus", "reviewDecision", "timelineItems", "statusCheckRollup", "commits", "latestOpinionatedReviews"} {
+			if strings.Contains(query, slow) {
+				t.Errorf("preview query selects %s:\n%s", slow, query)
+			}
+		}
+	}
+	if !strings.Contains(previewPullRequestsQuery(), "orderBy: {field: UPDATED_AT, direction: DESC}") {
+		t.Error("preview query does not keep updated-descending order")
 	}
 }

@@ -26,15 +26,17 @@ const (
 )
 
 type model struct {
-	ctx                 context.Context
-	client              *github.Client
-	preferences         *preferences.Store
-	cancel              context.CancelFunc
-	snapshot            github.Snapshot
-	selectedRepository  string
-	filterLogin         string
-	panes               [2]prPane
-	changes             [2]paneChanges
+	ctx                context.Context
+	client             *github.Client
+	preferences        *preferences.Store
+	cancel             context.CancelFunc
+	snapshot           github.Snapshot
+	selectedRepository string
+	filterLogin        string
+	panes              [2]prPane
+	changes            [2]paneChanges
+	// changesLogin is the account the change baseline belongs to.
+	changesLogin        string
 	focus               paneID
 	keys                keyMap
 	help                help.Model
@@ -75,6 +77,14 @@ type model struct {
 type fetchFinishedMsg struct {
 	snapshot github.Snapshot
 	err      error
+}
+
+// previewMsg carries a fast first look at both lists for the fetch of that
+// generation.
+type previewMsg struct {
+	generation uint64
+	snapshot   github.Snapshot
+	err        error
 }
 
 type loginFinishedMsg struct{ err error }
@@ -123,10 +133,20 @@ func (m *model) startFetch() tea.Cmd {
 	m.refreshDue = time.Time{}
 	m.err = nil
 	client, ctx := m.client, m.ctx
-	return tea.Batch(func() tea.Msg {
+	cmds := []tea.Cmd{func() tea.Msg {
 		snapshot, err := client.Fetch(ctx)
 		return fetchFinishedMsg{snapshot: snapshot, err: err}
-	}, m.spinner.Tick)
+	}, m.spinner.Tick}
+	// With no rows on screen, a preview shows rows while the full fetch runs.
+	// A refresh keeps the full rows already shown instead.
+	if m.snapshot.Login == "" {
+		generation := m.refreshGeneration
+		cmds = append(cmds, func() tea.Msg {
+			snapshot, err := client.Preview(ctx)
+			return previewMsg{generation: generation, snapshot: snapshot, err: err}
+		})
+	}
+	return tea.Batch(cmds...)
 }
 
 // scheduleAutoRefresh starts the auto-refresh timer for the current fetch
@@ -234,6 +254,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
+			// The picker can be open when the scope is chosen from a preview.
+			m.closeRepositoryPicker()
 			m.snapshot = github.Snapshot{}
 			// Change tracking keeps its baseline, so the next success is
 			// compared with the last good lists.
@@ -248,45 +270,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		} else {
-			accountChanged := !strings.EqualFold(m.filterLogin, msg.snapshot.Login)
-			if accountChanged {
-				if m.filterLogin != "" {
-					m.preferenceErr = nil
-				}
-				m.filterLogin = msg.snapshot.Login
-				if repository, found := m.preferences.Lookup(msg.snapshot.Login); found {
-					m.selectedRepository = repository
-					m.scopeChosen = true
-				} else {
-					m.selectedRepository = ""
-					m.scopeChosen = false
-					m.scopeChoiceCursor = 0
-				}
-			}
-			m.keepingSelection(func() {
-				m.snapshot = msg.snapshot
-				m.err = nil
-				for _, id := range paneIDs {
-					if accountChanged {
-						m.changes[id].reset(m.source(id))
-					} else {
-						m.changes[id].update(m.source(id))
-					}
-				}
-				m.rebuildVisiblePRs()
-			})
-			if accountChanged {
-				focus := paneMine
-				if len(m.panes[paneMine].visible) == 0 && len(m.panes[paneReview].visible) > 0 {
-					focus = paneReview
-				}
-				m.setFocus(focus)
-			}
+			m.applySnapshot(msg.snapshot)
 		}
 		if m.err == nil {
 			return m, tea.Batch(m.scheduleAutoRefresh(), m.resumeQuota())
 		}
 		return m, m.scheduleAutoRefresh()
+	case previewMsg:
+		// A preview is dropped once its fetch has finished or been replaced,
+		// and when it fails: the full fetch reports errors.
+		if msg.err == nil && msg.generation == m.refreshGeneration && m.loading && m.snapshot.Login == "" {
+			m.applySnapshot(msg.snapshot)
+		}
 	case loginFinishedMsg:
 		m.loginActive = false
 		m.loading = false
@@ -463,6 +458,64 @@ func (m *model) rebuildVisiblePRs() {
 		m.rebuildGone(id)
 	}
 	m.rebuildPRTable(true)
+}
+
+// applySnapshot shows a fetched or previewed snapshot. A new account restores
+// its saved scope or prompts for one. Only full snapshots are compared for
+// change marks; a preview leaves the baseline alone.
+func (m *model) applySnapshot(snapshot github.Snapshot) {
+	accountChanged := !strings.EqualFold(m.filterLogin, snapshot.Login)
+	if accountChanged {
+		if m.filterLogin != "" {
+			m.preferenceErr = nil
+		}
+		m.filterLogin = snapshot.Login
+		if repository, found := m.preferences.Lookup(snapshot.Login); found {
+			m.selectedRepository = repository
+			m.scopeChosen = true
+		} else {
+			m.selectedRepository = ""
+			m.scopeChosen = false
+			m.scopeChoiceCursor = 0
+		}
+	}
+	// A preview cannot sort ready pull requests first, so a cursor still on
+	// its first row stays on the first row once the details arrive.
+	var atTop [2]bool
+	for _, id := range paneIDs {
+		atTop[id] = m.snapshot.Preview && !snapshot.Preview && m.panes[id].table.Cursor() == 0
+	}
+	defer func() {
+		for _, id := range paneIDs {
+			if atTop[id] {
+				moveCursor(&m.panes[id].table, 0)
+				m.syncPages(id)
+			}
+		}
+	}()
+	m.keepingSelection(func() {
+		m.snapshot = snapshot
+		m.err = nil
+		if !snapshot.Preview {
+			reset := !strings.EqualFold(m.changesLogin, snapshot.Login)
+			m.changesLogin = snapshot.Login
+			for _, id := range paneIDs {
+				if reset {
+					m.changes[id].reset(m.source(id))
+				} else {
+					m.changes[id].update(m.source(id))
+				}
+			}
+		}
+		m.rebuildVisiblePRs()
+	})
+	if accountChanged {
+		focus := paneMine
+		if len(m.panes[paneMine].visible) == 0 && len(m.panes[paneReview].visible) > 0 {
+			focus = paneReview
+		}
+		m.setFocus(focus)
+	}
 }
 
 // keepingSelection runs rebuild, then reselects each pane's pull request if
@@ -684,6 +737,9 @@ func (m *model) titleLine(title, countdown string) string {
 	indicator := countdown
 	if m.refreshing() {
 		indicator = m.spinner.View() + " Refreshing"
+		if m.snapshot.Preview {
+			indicator = m.spinner.View() + " Loading details"
+		}
 	}
 	if indicator == "" {
 		return title

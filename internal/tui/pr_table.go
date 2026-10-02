@@ -152,7 +152,12 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		if pr.Draft {
 			state = "draft"
 		}
+		// A preview has no merge state, but conflicts are already known.
+		preview := m.snapshot.Preview && !gone
 		last, lastCell := mergeIcon(pr.Draft, pr.Mergeable, pr.MergeState), cellMerge
+		if preview && pr.Mergeable != "CONFLICTING" {
+			last = pendingText
+		}
 		if review {
 			last, lastCell = singleLine(pr.Author), cellAuthor
 		}
@@ -164,6 +169,10 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		cells = append(cells, changed(cellName, name), prNumberLink(pr.Number, pr.URL),
 			changed(cellState, state), changed(lastCell, last))
 		for _, stat := range layout.stats {
+			if preview && stat.detail {
+				cells = append(cells, pendingText)
+				continue
+			}
 			cells = append(cells, changed(stat.cell, stat.text(pr, now)))
 		}
 		if gone {
@@ -175,6 +184,9 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 	}
 	return rows
 }
+
+// pendingText fills a cell that a preview does not know yet.
+var pendingText = lipgloss.NewStyle().Faint(true).Render("…")
 
 // markText is a row's change marker.
 func markText(kind markKind, gone bool) string {
@@ -213,16 +225,18 @@ type statColumn struct {
 	cell changedCells
 	// bots columns are shown only when review bots are configured.
 	bots bool
+	// detail columns are unknown in a preview.
+	detail bool
 }
 
 // statColumns are listed in the order they are dropped last to first as the
 // terminal narrows.
 var statColumns = []statColumn{
-	{"Age", 4, func(pr *github.PullRequest, now time.Time) string { return ageText(pr.WaitingSince, now) }, 0, false},
-	{"Bots", 4, func(pr *github.PullRequest, _ time.Time) string { return botsText(pr.Bots) }, cellBots, true},
-	{"CI", 2, func(pr *github.PullRequest, _ time.Time) string { return checksIcon(pr.Checks) }, cellCI, false},
-	{"Review", 6, func(pr *github.PullRequest, _ time.Time) string { return reviewText(pr.ReviewDecision, pr.Approvals) }, cellReview, false},
-	{"Size", 11, func(pr *github.PullRequest, _ time.Time) string { return sizeText(pr.Additions, pr.Deletions) }, cellSize, false},
+	{"Age", 4, func(pr *github.PullRequest, now time.Time) string { return ageText(pr.WaitingSince, now) }, 0, false, true},
+	{"Bots", 4, func(pr *github.PullRequest, _ time.Time) string { return botsText(pr.Bots) }, cellBots, true, true},
+	{"CI", 2, func(pr *github.PullRequest, _ time.Time) string { return checksIcon(pr.Checks) }, cellCI, false, true},
+	{"Review", 6, func(pr *github.PullRequest, _ time.Time) string { return reviewText(pr.ReviewDecision, pr.Approvals) }, cellReview, false, true},
+	{"Size", 11, func(pr *github.PullRequest, _ time.Time) string { return sizeText(pr.Additions, pr.Deletions) }, cellSize, false, false},
 }
 
 // remainingWidth is the width left for the zero-width name column; each

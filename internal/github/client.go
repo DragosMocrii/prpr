@@ -44,6 +44,9 @@ type Snapshot struct {
 	Login          string
 	PullRequests   []PullRequest
 	ReviewRequests []PullRequest
+	// Preview marks a fast first look from [Client.Preview]: merge state, waiting
+	// time, checks, reviews, and bots are unknown and left empty.
+	Preview bool
 }
 
 type Client struct {
@@ -105,18 +108,66 @@ func pullRequestsQuery(bots bool) string {
 }`
 }
 
-// reviewRequestsQuery lists open pull requests that request a review from the
+// reviewSearch finds open pull requests that request a review from the
 // viewer directly; requests to the viewer's teams are excluded.
+const reviewSearch = "is:pr is:open user-review-requested:@me archived:false sort:updated-desc"
+
+// reviewRequestsQuery lists the reviewSearch results.
 func reviewRequestsQuery(bots bool) string {
 	return `query($endCursor: String) {
   search(type: ISSUE, first: ` + strconv.Itoa(pageSize) + `, after: $endCursor,
-         query: "is:pr is:open user-review-requested:@me archived:false sort:updated-desc") {
+         query: "` + reviewSearch + `") {
     nodes {
       ... on PullRequest {` + pullRequestFields(bots) + `
         author { login }
         requestEvents: timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
           nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { ... on User { login } } } }
         }
+      }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}`
+}
+
+// previewPageSize is larger than pageSize: preview fields resolve quickly.
+const previewPageSize = 100
+
+// previewFields are the fields GitHub answers quickly. mergeStateStatus is
+// left out: it takes several times longer than all of these together.
+const previewFields = `
+        number
+        title
+        url
+        isDraft
+        mergeable
+        updatedAt
+        createdAt
+        additions
+        deletions
+        repository { nameWithOwner }`
+
+func previewPullRequestsQuery() string {
+	return `query($endCursor: String) {
+  viewer {
+    login
+    pullRequests(first: ` + strconv.Itoa(previewPageSize) + `, after: $endCursor, states: [OPEN],
+                 orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes {` + previewFields + `
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}`
+}
+
+func previewReviewRequestsQuery() string {
+	return `query($endCursor: String) {
+  search(type: ISSUE, first: ` + strconv.Itoa(previewPageSize) + `, after: $endCursor,
+         query: "` + reviewSearch + `") {
+    nodes {
+      ... on PullRequest {` + previewFields + `
+        author { login }
       }
     }
     pageInfo { hasNextPage endCursor }
@@ -251,7 +302,28 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	if _, err := auth.Output(); err != nil {
 		return Snapshot{}, &AuthError{Err: commandError("GitHub authentication check failed", err)}
 	}
+	return c.run(ctx, pullRequestsQuery(len(c.bots) > 0), reviewRequestsQuery(len(c.bots) > 0), c.bots)
+}
 
+// Preview fetches both lists with only the fields GitHub answers quickly, for
+// showing rows while [Client.Fetch] is still running. It skips the
+// authentication check; Fetch reports authentication failures.
+func (c *Client) Preview(ctx context.Context) (Snapshot, error) {
+	snapshot, err := c.run(ctx, previewPullRequestsQuery(), previewReviewRequestsQuery(), nil)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snapshot.Preview = true
+	for _, list := range [][]PullRequest{snapshot.PullRequests, snapshot.ReviewRequests} {
+		for i := range list {
+			list[i].WaitingSince = time.Time{}
+		}
+	}
+	return snapshot, nil
+}
+
+// run fetches both lists with the given queries.
+func (c *Client) run(ctx context.Context, pullRequests, reviewRequests string, bots []Bot) (Snapshot, error) {
 	// The lists are independent, so both queries run at once.
 	type output struct {
 		data []byte
@@ -259,25 +331,25 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	}
 	reviews := make(chan output, 1)
 	go func() {
-		review := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+reviewRequestsQuery(len(c.bots) > 0))
+		review := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+reviewRequests)
 		data, err := review.Output()
 		reviews <- output{data, err}
 	}()
 
-	api := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+pullRequestsQuery(len(c.bots) > 0))
+	api := exec.CommandContext(ctx, c.path, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+pullRequests)
 	data, err := api.Output()
 	review := <-reviews
 	if err != nil {
 		return Snapshot{}, commandError("GitHub pull request query failed", err)
 	}
-	snapshot, err := decodePages(data, c.bots)
+	snapshot, err := decodePages(data, bots)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	if review.err != nil {
 		return Snapshot{}, commandError("GitHub review request query failed", review.err)
 	}
-	snapshot.ReviewRequests, err = decodeReviewPages(review.data, snapshot.Login, c.bots)
+	snapshot.ReviewRequests, err = decodeReviewPages(review.data, snapshot.Login, bots)
 	if err != nil {
 		return Snapshot{}, err
 	}
