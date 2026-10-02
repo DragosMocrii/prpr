@@ -96,7 +96,7 @@ prpr --bots 'Rabbit=coderabbitai'
 prpr --bots ''
 ```
 
-`--notify` starts with desktop notifications on; see [Notifications](#notifications). `--icons nerd` draws Nerd Font icons; see [Icons](#icons).
+`--notify` starts with desktop notifications on; see [Notifications](#notifications). `--icons nerd` draws Nerd Font icons; see [Icons](#icons). `--title=false` leaves the terminal title alone; see [Terminal title](#terminal-title).
 
 Bot reporting costs more GraphQL quota, mostly to read review threads: about 28 points per 100 pull requests listed, against about 3 without bots.
 
@@ -225,6 +225,17 @@ prpr draws its symbols with Unicode characters that common fonts include. With a
 Nerd Font icons replace the merge, CI, review, and bot symbols, the State column's `open`/`draft`, the reviewed pull requests' `waiting`, `new commits`, and other words, the pin, bell, and `★` in titles and the picker, and the statistics column headers, and give each attention category its own icon (merge, x-circle, checklist, compare, robot, code review, question). These columns get narrower, which leaves more of the terminal for PR names. Colors and the change marks stay the same, and the details screen, notifications, and help keep their words.
 
 In the VS Code terminal, set `terminal.integrated.fontFamily` to an installed Nerd Font, such as `'JetBrainsMono Nerd Font Mono'`. In a dev container or over SSH, the font is installed where VS Code or the terminal runs, not where prpr runs. The Mono variants keep every icon one cell wide.
+
+### Terminal title
+
+prpr sets the terminal title, which most terminals show on the tab or window:
+
+- `⠋ prpr · loading` or `⠋ prpr · refreshing`, with a spinner, while lists load;
+- `prpr · 3 need you` when pull requests in the repository filter are ready to merge, have changes requested or failing CI, or await your review (attention categories 1–3 and 6), else `prpr`;
+- `prpr · sign-in needed` or `prpr · error` when a refresh fails;
+- `● prpr: <alert>` alternating with `○`, when a refresh finds the changes that [Notifications](#notifications) describe, whether or not notifications are on. The flashing stops when the terminal window gains focus, on a key press or click, or after 5 minutes, and is skipped while the terminal reports that it has focus. Terminals that do not report focus flash until a key press or the time limit.
+
+The VS Code terminal shows the title on its tab only with `"terminal.integrated.tabs.title": "${process} ${sequence}"` (or `"${sequence}"`) in VS Code's settings; inside tmux, enable `set -g set-titles on`, and `set -g focus-events on` so focus stops the flashing. prpr clears the title on exit; terminals do not let it restore the previous one, but most shells set their own at the next prompt. `--title=false` turns all of this off, including focus reports.
 
 ### Notifications
 

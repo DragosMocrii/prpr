@@ -100,3 +100,12 @@ func TestIconsFlagOverridesTheEnvironment(t *testing.T) {
 		t.Error("an unknown PRPR_ICONS value was accepted")
 	}
 }
+
+func TestTitleIsOnUnlessTurnedOff(t *testing.T) {
+	if opts, err := parseFlags(nil, io.Discard, noEnv); err != nil || !opts.title {
+		t.Fatalf("default title = %t, %v", opts.title, err)
+	}
+	if opts, err := parseFlags([]string{"--title=false"}, io.Discard, noEnv); err != nil || opts.title {
+		t.Fatalf("--title=false = %t, %v", opts.title, err)
+	}
+}

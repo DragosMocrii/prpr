@@ -98,6 +98,15 @@ type model struct {
 	readiness map[prKey]bool
 	// icons draws status symbols: unicodeIcons or nerdIcons.
 	icons *iconSet
+	// setTitle sets the terminal title. flashText is an alert the title
+	// flashes until flashUntil, the terminal gains focus, or a key or click;
+	// ticks from an older flashGeneration are dropped.
+	setTitle        bool
+	terminalFocus   terminalFocus
+	flashText       string
+	flashOn         bool
+	flashUntil      time.Time
+	flashGeneration uint64
 	// desktopNotify posts through the system notifier; nil means OSC 9.
 	desktopNotify notifier.Func
 	// pinnedAccount is the GitHub CLI account prpr uses, or "" for gh's
@@ -142,8 +151,9 @@ type countdownTickMsg struct{ generation uint64 }
 
 // New returns the app model. A positive refreshInterval refetches both lists
 // that long after each fetch finishes; notify starts with notifications on.
-// icons names the icon set for this run; empty uses the saved one.
-func New(ctx context.Context, client *github.Client, preferences *preferences.Store, refreshInterval time.Duration, notify bool, icons string) tea.Model {
+// icons names the icon set for this run; empty uses the saved one. title
+// sets the terminal title.
+func New(ctx context.Context, client *github.Client, preferences *preferences.Store, refreshInterval time.Duration, notify bool, icons string, title bool) tea.Model {
 	appCtx, cancel := context.WithCancel(ctx)
 	m := newModel(appCtx, client, preferences)
 	m.cancel = cancel
@@ -152,6 +162,7 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m.openBrowser = client.OpenInBrowser
 	m.notify = notify
 	m.icons = startIcons(icons, preferences)
+	m.setTitle = title
 	m.desktopNotify = notifier.Desktop()
 	m.listAccounts = client.Accounts
 	m.useAccount = client.UseAccount
@@ -377,6 +388,12 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleTokenChecked(msg)
 	case desktopNotifiedMsg:
 		m.handleDesktopNotified(msg)
+	case flashTickMsg:
+		return m, m.handleFlashTick(msg)
+	case tea.FocusMsg:
+		m.handleFocus(focusIn)
+	case tea.BlurMsg:
+		m.handleFocus(focusOut)
 	case tea.PasteMsg:
 		if m.picker != nil {
 			return m, m.picker.paste(msg.Content, m.pickerViewportHeight())
@@ -385,8 +402,12 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.updateSearch(msg)
 		}
 	case tea.KeyPressMsg:
+		m.stopFlash()
 		return m, m.handleKey(msg)
 	case tea.MouseClickMsg, tea.MouseWheelMsg, tea.MouseMotionMsg:
+		if _, click := msg.(tea.MouseClickMsg); click {
+			m.stopFlash()
+		}
 		m.handleMouse(msg.(tea.MouseMsg))
 	}
 	return m, nil
@@ -673,7 +694,10 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 		}
 		m.setFocus(focus)
 	}
-	return m.notifyAlerts(alerts)
+	if len(alerts) == 0 {
+		return nil
+	}
+	return tea.Batch(m.notifyAlerts(alerts), m.startFlash(alertText(alerts)))
 }
 
 // keepingSelection runs rebuild, then reselects each pane's pull request if
@@ -817,6 +841,8 @@ func (m *model) View() tea.View {
 	if list && m.mouse {
 		view.MouseMode = tea.MouseModeAllMotion
 	}
+	view.WindowTitle = m.windowTitle()
+	view.ReportFocus = m.setTitle
 	return view
 }
 

@@ -58,6 +58,7 @@ type options struct {
 	notify  bool
 	// icons is the icon set chosen for this run; empty uses the saved one.
 	icons   string
+	title   bool
 	version bool
 }
 
@@ -71,6 +72,7 @@ func parseFlags(args []string, output io.Writer, getenv func(string) string) (op
 	bots := flags.String("bots", github.DefaultBots, "review bots as comma-separated Name=login or Name=login:check entries; empty hides the Bots column")
 	notify := flags.Bool("notify", false, "send a desktop notification when a PR turns ready to merge, fails CI, gets changes requested, or requests your review; n toggles it")
 	icons := flags.String("icons", "", "icon set: nerd for Nerd Font icons or unicode; default PRPR_ICONS, else the saved choice, else unicode; i toggles and saves it")
+	title := flags.Bool("title", true, "show refreshes, alerts, and how many PRs need you in the terminal title; --title=false leaves the title alone")
 	if err := flags.Parse(args); err != nil {
 		return options{}, reportedError{err}
 	}
@@ -93,7 +95,7 @@ func parseFlags(args []string, output io.Writer, getenv func(string) string) (op
 			return options{}, fmt.Errorf("PRPR_ICONS: %w", err)
 		}
 	}
-	return options{refresh: *refresh, bots: parsed, notify: *notify, icons: iconSet, version: *showVersion}, nil
+	return options{refresh: *refresh, bots: parsed, notify: *notify, icons: iconSet, title: *title, version: *showVersion}, nil
 }
 
 func run() error {
@@ -129,6 +131,6 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, err = tea.NewProgram(tui.New(ctx, client, store, opts.refresh, opts.notify, opts.icons)).Run()
+	_, err = tea.NewProgram(tui.New(ctx, client, store, opts.refresh, opts.notify, opts.icons, opts.title)).Run()
 	return err
 }
