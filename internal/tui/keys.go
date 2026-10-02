@@ -26,6 +26,7 @@ type keyMap struct {
 	QuickFailing    key.Binding
 	QuickReady      key.Binding
 	ClearFilters    key.Binding
+	Categories      key.Binding
 	Open            key.Binding
 	CopyURL         key.Binding
 	Mouse           key.Binding
@@ -78,6 +79,7 @@ func defaultKeyMap() keyMap {
 		QuickFailing:    key.NewBinding(key.WithKeys("F"), key.WithHelp("F", "failing CI")),
 		QuickReady:      key.NewBinding(key.WithKeys("M"), key.WithHelp("M", "ready to merge")),
 		ClearFilters:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filters")),
+		Categories:      key.NewBinding(key.WithKeys("1", "2", "3", "4", "5", "6", "7"), key.WithHelp("1–7", "summary category")),
 		Open:            key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open")),
 		CopyURL:         key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy URL")),
 		Mouse:           key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mouse on")),
@@ -141,6 +143,7 @@ func (m *model) syncKeys() {
 		binding.SetEnabled(listing)
 	}
 	k.ClearFilters.SetEnabled(listing && m.filtersActive())
+	k.Categories.SetEnabled(listing && m.summaryShown())
 	k.Back.SetEnabled(details)
 	k.Open.SetEnabled(rows)
 	k.CopyURL.SetEnabled(rows)
@@ -211,7 +214,8 @@ func (k keyMap) listHelp() helpKeys {
 			{k.Pages.PrevPage, k.Pages.NextPage},
 			{k.NextPane, k.PrevPane},
 			{k.Details, k.Open, k.CopyURL},
-			{k.Search, k.QuickDrafts, k.QuickFailing, k.QuickReady, k.ClearFilters},
+			{k.Search, k.Categories, k.ClearFilters},
+			{k.QuickDrafts, k.QuickFailing, k.QuickReady},
 			{k.PickRepository, k.AllRepositories, k.Refresh, k.ClearMarks},
 			{k.Mouse, k.Help, k.Quit},
 		},
@@ -250,5 +254,9 @@ func (m *model) fullHelpFits(keys helpKeys) bool {
 	for _, column := range keys.full {
 		rows = max(rows, len(column))
 	}
-	return m.height-7 >= rows
+	chrome := 7
+	if m.summaryShown() {
+		chrome++
+	}
+	return m.height-chrome >= rows
 }

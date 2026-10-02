@@ -39,7 +39,7 @@ func (q quickFilter) label() string {
 
 // filtersActive reports whether a search or quick filter hides rows.
 func (m *model) filtersActive() bool {
-	return strings.TrimSpace(m.search) != "" || m.quick != quickNone
+	return strings.TrimSpace(m.search) != "" || m.quick != quickNone || m.category != 0
 }
 
 // filterText names the active search and quick filter for the title line.
@@ -51,14 +51,21 @@ func (m *model) filterText() string {
 	if m.quick != quickNone {
 		parts = append(parts, m.quick.label())
 	}
+	if m.category != 0 {
+		parts = append(parts, attentionCategories[m.category-1].label)
+	}
 	return strings.Join(parts, " · ")
 }
 
-// shown reports whether a pull request passes the repository scope, the
-// search, and the quick filter. A preview row's CI and merge state are
-// unknown, so it never matches the failing or ready filters.
-func (m *model) shown(pr *github.PullRequest, preview bool) bool {
+// shown reports whether a pull request in pane id passes the repository
+// scope, the search, the quick filter, and the attention category. A preview
+// row's CI and merge state are unknown, so it never matches the failing or
+// ready filters.
+func (m *model) shown(id paneID, pr *github.PullRequest, preview bool) bool {
 	if !m.inScope(pr) {
+		return false
+	}
+	if m.category != 0 && !categoryMatches(m.category, id, pr, preview) {
 		return false
 	}
 	switch m.quick {
@@ -103,6 +110,7 @@ func (m *model) toggleQuick(q quickFilter) {
 		m.quick = quickNone
 	} else {
 		m.quick = q
+		m.category = 0
 	}
 	m.applyFilters()
 }
@@ -110,6 +118,7 @@ func (m *model) toggleQuick(q quickFilter) {
 func (m *model) clearFilters() {
 	m.search = ""
 	m.quick = quickNone
+	m.category = 0
 	m.applyFilters()
 }
 

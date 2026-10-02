@@ -83,8 +83,10 @@ type model struct {
 	details bool
 	// search and quick filter both lists; searching is the search input while
 	// it is edited, and searchBefore the search that Esc restores.
-	search       string
-	quick        quickFilter
+	search string
+	quick  quickFilter
+	// category is the attention category shown, numbered from 1; 0 is none.
+	category     int
 	searching    *textinput.Model
 	searchBefore string
 }
@@ -386,6 +388,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleQuick(quickFailing)
 	case key.Matches(msg, k.QuickReady):
 		m.toggleQuick(quickReady)
+	case key.Matches(msg, k.Categories):
+		m.toggleCategory(int(msg.String()[0] - '0'))
 	case key.Matches(msg, k.ClearFilters):
 		m.clearFilters()
 	case key.Matches(msg, k.Open):
@@ -501,7 +505,7 @@ func (m *model) rebuildVisiblePRs() {
 		pane.visible = pane.visible[:0]
 		source := m.source(id)
 		for index, pr := range source {
-			if m.shown(&pr, m.snapshot.Preview) {
+			if m.shown(id, &pr, m.snapshot.Preview) {
 				pane.visible = append(pane.visible, index)
 			}
 		}
@@ -618,7 +622,7 @@ func (m *model) rebuildGone(id paneID) {
 	pane := &m.panes[id]
 	pane.gone = pane.gone[:0]
 	for index := range m.changes[id].gone {
-		if m.shown(&m.changes[id].gone[index], false) {
+		if m.shown(id, &m.changes[id].gone[index], false) {
 			pane.gone = append(pane.gone, index)
 		}
 	}
@@ -758,6 +762,9 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 		title += " · auto " + intervalText(m.refreshInterval)
 	}
 	lines := []string{m.titleLine(title, m.countdownText())}
+	if m.summaryShown() {
+		lines = append(lines, m.summaryLine())
+	}
 	layout := m.layoutPanes()
 	for _, id := range paneIDs {
 		if layout.single && id != m.focus {

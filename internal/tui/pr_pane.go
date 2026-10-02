@@ -59,9 +59,13 @@ type paneLayout struct {
 }
 
 // listChromeHeight counts list lines outside the panes: the title, the
-// selected URL, the status line, and the help.
+// summary when shown, the selected URL, the status line, and the help.
 func (m *model) listChromeHeight() int {
-	return 3 + m.listHelpHeight()
+	height := 3 + m.listHelpHeight()
+	if m.summaryShown() {
+		height++
+	}
+	return height
 }
 
 func (m *model) layoutPanes() paneLayout {

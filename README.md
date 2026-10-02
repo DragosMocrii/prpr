@@ -111,7 +111,8 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - Tab / Shift+Tab: switch between **My PRs** and **Review requested**. Each list keeps its own selection and scroll position; navigation keys move only the focused list.
 - `/`: search both lists; see [Search and quick filters](#search-and-quick-filters).
 - `D` / `F` / `M`: show only drafts, PRs with failing CI, or PRs ready to merge; press again to show all.
-- Esc: clear the search and quick filter.
+- `1`–`7`: show one attention category from the summary line; press again to show all. See [Attention summary](#attention-summary).
+- Esc: clear the search, quick filter, and attention category.
 - Enter: show the selected pull request's details; Esc or Enter goes back. See [Details](#details).
 - `?`: show or hide all key bindings.
 - `p`: find and select a repository to filter both lists; choose `All repositories` to clear the filter.
@@ -146,13 +147,25 @@ Both lists also show statistics columns, which narrow terminals drop in this ord
 
   The line under the table lists each bot's state for the selected pull request when it fits beside the URL. Findings a bot writes only in a summary comment are not counted, and only the 20 most recent review threads are read. The head commit is dated by when it was committed, not pushed, so a commit pushed long after it was made can leave an earlier bot review showing `✓` instead of `✓*`.
 
+### Attention summary
+
+The line under the title counts pull requests by status, each with the number key that shows them:
+
+```text
+1 ✓ 2 ready to merge · 2 ✗ 1 changes requested · 3 ✗ 1 failing CI · 4 ✗ 1 conflicts · 5 ✗ 3 bot threads · 6 ● 3 awaiting your review · 7 ? 1 status unknown
+```
+
+1–5 cover **My PRs**: ready to merge (the green `✓`), changes requested, failing checks, conflicts, and unresolved bot threads. 6 counts every review request, and 7 counts pull requests in either list whose merge status GitHub has not computed yet. Unknown is its own category; it is never counted as ready or healthy, and null review decisions or check results are never counted as changes requested or failing. Categories with no pull requests are left out, and the numbers never change. There is no priority score.
+
+Pressing a number shows only that category, focuses its list, and highlights it in the summary; pressing it again or Esc shows everything. It replaces the `D`/`F`/`M` quick filter and combines with search and the repository filter. Counts follow the repository filter but not the search or quick filter, and leave out gone rows. While the quick first look is loading, only conflicts are counted. Narrow terminals shorten the labels, and terminals under 14 lines drop the summary.
+
 ### Search and quick filters
 
 `/` opens a search line in place of the status line. Both lists narrow as you type to pull requests whose title, repository, author, or `#number` contains every word typed, ignoring case: `412` and `#41` both find #412. Enter keeps the search and returns to the list; Esc while typing restores the previous search.
 
 The quick filters show only drafts (`D`), pull requests whose checks failed (`F`), or pull requests GitHub would merge now (`M`, the same rule as the green `✓`). One is active at a time; pressing its key again turns it off. While the quick first look is loading, CI and merge states are unknown, so `F` and `M` match nothing until the details arrive.
 
-Search and quick filters combine with the repository filter and apply to both lists, gone rows included. The title line names every active filter, list titles count shown rows against all rows in scope (`My PRs (3 of 12)`), and Esc on the list clears the search and quick filter; `c` still clears only the repository filter. Filters are kept in memory only.
+Search and quick filters combine with the repository filter and apply to both lists, gone rows included. The title line names every active filter, list titles count shown rows against all rows in scope (`My PRs (3 of 12)`), and Esc on the list clears the search, quick filter, and attention category; `c` still clears only the repository filter. Filters are kept in memory only.
 
 ### Details
 

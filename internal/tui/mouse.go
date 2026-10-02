@@ -37,11 +37,14 @@ func (m *model) toggleMouse() {
 }
 
 // hitTest maps a screen line of the list screen to a pane. It follows
-// listLines: the title line, then each drawn pane's title and its table or
-// empty line.
+// listLines: the title line and the summary when shown, then each drawn
+// pane's title and its table or empty line.
 func (m *model) hitTest(y int) (paneHit, bool) {
 	layout := m.layoutPanes()
 	top := 1
+	if m.summaryShown() {
+		top++
+	}
 	for _, id := range paneIDs {
 		if layout.single && id != m.focus {
 			continue
