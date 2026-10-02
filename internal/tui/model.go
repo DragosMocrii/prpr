@@ -76,6 +76,8 @@ type model struct {
 	quotaPaused     bool
 	// bots shows the Bots column and the selected PR's bot breakdown.
 	bots bool
+	// legend is whether the icon legend panel is open; it is saved.
+	legend bool
 	// mouse is mouse mode: hover, click, and wheel input instead of the
 	// terminal's own selection. pointer is where the mouse was last seen.
 	mouse   bool
@@ -173,6 +175,7 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m.openBrowser = client.OpenInBrowser
 	m.notify = notify
 	m.icons = startIcons(icons, preferences)
+	m.legend = preferences.Legend()
 	m.rules = preferences.Rules()
 	client.SetNeeds(m.rules.Needs())
 	if err := preferences.RulesErr(); err != nil {
@@ -553,6 +556,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleNotify()
 	case key.Matches(msg, k.Icons):
 		m.toggleIcons()
+	case key.Matches(msg, k.Legend):
+		m.toggleLegend()
 	case key.Matches(msg, k.Rules):
 		return m.openRules()
 	case key.Matches(msg, k.Help):
@@ -1007,6 +1012,9 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 	} else if m.notify {
 		title += " · notify"
 	}
+	if m.legendHidden() {
+		title += " · legend needs a taller terminal"
+	}
 	lines := []string{m.titleLine(title, m.countdownText())}
 	if m.summaryShown() {
 		lines = append(lines, m.summaryLine())
@@ -1023,6 +1031,7 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 		}
 		lines = append(lines, m.tableLines(id)...)
 	}
+	lines = append(lines, m.legendLines()...)
 	selected := ""
 	if pr, ok := m.selectedPR(); ok {
 		selected = singleLine(pr.URL)
@@ -1041,7 +1050,7 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 		fixed = strings.TrimLeft(fixed+"  "+m.preferenceErr.Error(), " ")
 	} else if m.notice != "" {
 		fixed = strings.TrimLeft(fixed+"  "+m.notice, " ")
-	} else if !(layout.single && m.focus != paneMine) && rowCount(&m.panes[paneMine]) > 0 {
+	} else if !(layout.single && m.focus != paneMine) && rowCount(&m.panes[paneMine]) > 0 && len(m.legendLines()) == 0 {
 		legend = m.icons.legend(m.rules.Customized())
 	}
 	if m.searching != nil {

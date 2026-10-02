@@ -32,6 +32,7 @@ type keyMap struct {
 	Mouse           key.Binding
 	Notify          key.Binding
 	Icons           key.Binding
+	Legend          key.Binding
 	Rules           key.Binding
 	RulesCancel     key.Binding
 	Account         key.Binding
@@ -104,6 +105,7 @@ func defaultKeyMap() keyMap {
 		Mouse:           key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mouse on")),
 		Notify:          key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "notify on")),
 		Icons:           key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "nerd icons")),
+		Legend:          key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "show legend")),
 		Rules:           key.NewBinding(key.WithKeys(","), key.WithHelp(",", "ready rules")),
 		RulesCancel:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel without saving")),
 		Account:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "account")),
@@ -196,6 +198,12 @@ func (m *model) syncKeys() {
 	}
 	k.Notify.SetEnabled(listing)
 	k.Icons.SetEnabled(listing)
+	k.Legend.SetEnabled(listing)
+	if m.legend {
+		k.Legend.SetHelp("L", "hide legend")
+	} else {
+		k.Legend.SetHelp("L", "show legend")
+	}
 	k.Rules.SetEnabled(listing && m.rulesEditor == nil)
 	if m.icons.nerd {
 		k.Icons.SetHelp("i", "unicode icons")
@@ -294,12 +302,12 @@ func (k keyMap) errorHelp() helpKeys {
 func (k keyMap) listHelp() helpKeys {
 	t := k.Table
 	return helpKeys{
-		short: []key.Binding{t.LineUp, t.LineDown, k.ClearFilters, k.Details, k.Search, k.NextPane, k.PickRepository, k.Refresh, k.Help, k.Quit, k.Mouse, k.ClearMarks, k.Open},
+		short: []key.Binding{t.LineUp, t.LineDown, k.ClearFilters, k.Details, k.Search, k.NextPane, k.PickRepository, k.Refresh, k.Help, k.Quit, k.Mouse, k.ClearMarks, k.Open, k.Legend},
 		full: [][]key.Binding{
 			{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom},
 			{t.PageUp, t.PageDown, t.HalfPageUp, t.HalfPageDown},
 			{k.Pages.PrevPage, k.Pages.NextPage, k.Icons, k.Rules},
-			{k.NextPane, k.PrevPane, k.Account},
+			{k.NextPane, k.PrevPane, k.Account, k.Legend},
 			{k.Details, k.Open, k.CopyURL},
 			{k.Search, k.Categories, k.ClearFilters},
 			{k.QuickDrafts, k.QuickFailing, k.QuickReady},

@@ -56,6 +56,8 @@ type Store struct {
 	pinned string
 	// icons is the saved icon set name, or "" for none saved.
 	icons string
+	// legend is whether the icon legend panel is open.
+	legend bool
 	// rules are the saved ready-to-merge rules, or the defaults. Saved
 	// rules that cannot be read are kept as rulesRaw, written back
 	// unchanged until rules are saved, with rulesErr saying why.
@@ -71,16 +73,17 @@ const appKey = "app"
 type appJSON struct {
 	Account string          `json:"account,omitempty"`
 	Icons   string          `json:"icons,omitempty"`
+	Legend  bool            `json:"legend,omitempty"`
 	Ready   json.RawMessage `json:"ready,omitempty"`
 }
 
 func (a appJSON) empty() bool {
-	return a.Account == "" && a.Icons == "" && len(a.Ready) == 0
+	return a.Account == "" && a.Icons == "" && !a.Legend && len(a.Ready) == 0
 }
 
 // app is the app settings as saved.
 func (s *Store) app() appJSON {
-	return appJSON{Account: s.pinned, Icons: s.icons, Ready: s.rulesRaw}
+	return appJSON{Account: s.pinned, Icons: s.icons, Legend: s.legend, Ready: s.rulesRaw}
 }
 
 // accountJSON is an account's value when it has watchlists or a watchlist
@@ -118,7 +121,7 @@ func Open(path string) (*Store, error) {
 			if app.Icons != "" && !ValidIcons(app.Icons) {
 				return nil, fmt.Errorf("decode preferences %q: %q has an unknown icon set %q", path, appKey, app.Icons)
 			}
-			store.pinned, store.icons = app.Account, app.Icons
+			store.pinned, store.icons, store.legend = app.Account, app.Icons, app.Legend
 			// Rules that cannot be read leave the defaults in use and the
 			// rest of the preferences readable.
 			if len(app.Ready) != 0 {
@@ -278,6 +281,20 @@ func (s *Store) SaveIcons(name string) error {
 		return err
 	}
 	s.icons = name
+	return nil
+}
+
+// Legend reports whether the icon legend panel was left open.
+func (s *Store) Legend() bool { return s.legend }
+
+// SaveLegend saves whether the icon legend panel is open.
+func (s *Store) SaveLegend(open bool) error {
+	app := s.app()
+	app.Legend = open
+	if err := s.writeAll(s.accounts, app); err != nil {
+		return err
+	}
+	s.legend = open
 	return nil
 }
 
