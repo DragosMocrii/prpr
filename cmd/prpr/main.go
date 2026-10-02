@@ -55,6 +55,7 @@ type options struct {
 	// refresh is the auto-refresh interval; zero turns it off.
 	refresh time.Duration
 	bots    []github.Bot
+	queues  []github.Queue
 	notify  bool
 	// icons is the icon set chosen for this run; empty uses the saved one.
 	icons   string
@@ -70,6 +71,7 @@ func parseFlags(args []string, output io.Writer, getenv func(string) string) (op
 	refresh := flags.Duration("refresh", 5*time.Minute, "refresh both lists this long after each fetch, e.g. 90s or 10m; 0 turns it off")
 	showVersion := flags.Bool("version", false, "print the version and exit")
 	bots := flags.String("bots", github.DefaultBots, "review bots as comma-separated Name=login or Name=login:check entries; empty hides the Bots column")
+	queues := flags.String("queues", github.DefaultQueues, "merge queues to read, comma-separated: trunk, github; empty turns the Merge queue pane off")
 	notify := flags.Bool("notify", false, "send a desktop notification when a PR turns ready to merge, fails CI, gets changes requested, or requests your review; n toggles it")
 	icons := flags.String("icons", "", "icon set: nerd for Nerd Font icons or unicode; default PRPR_ICONS, else the saved choice, else unicode; i toggles and saves it")
 	title := flags.Bool("title", true, "show refreshes, alerts, and how many PRs need you in the terminal title; --title=false leaves the title alone")
@@ -81,6 +83,10 @@ func parseFlags(args []string, output io.Writer, getenv func(string) string) (op
 	}
 	if *refresh < 0 || (*refresh > 0 && *refresh < minRefreshInterval) {
 		return options{}, fmt.Errorf("--refresh must be 0 (off) or at least %s", minRefreshInterval)
+	}
+	parsedQueues, err := github.ParseQueues(*queues)
+	if err != nil {
+		return options{}, fmt.Errorf("--queues: %w", err)
 	}
 	parsed, err := github.ParseBots(*bots)
 	if err != nil {
@@ -95,7 +101,7 @@ func parseFlags(args []string, output io.Writer, getenv func(string) string) (op
 			return options{}, fmt.Errorf("PRPR_ICONS: %w", err)
 		}
 	}
-	return options{refresh: *refresh, bots: parsed, notify: *notify, icons: iconSet, title: *title, version: *showVersion}, nil
+	return options{refresh: *refresh, bots: parsed, queues: parsedQueues, notify: *notify, icons: iconSet, title: *title, version: *showVersion}, nil
 }
 
 func run() error {
@@ -117,6 +123,7 @@ func run() error {
 		}
 		return err
 	}
+	client.SetQueues(opts.queues)
 
 	configDir, err := os.UserConfigDir()
 	if err != nil {

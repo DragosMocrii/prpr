@@ -3,6 +3,7 @@ package github
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func trunkComment(line string) []queueComment {
@@ -107,5 +108,64 @@ func TestQueueStatesInQueue(t *testing.T) {
 		if s.InQueue() {
 			t.Errorf("%d in queue", s)
 		}
+	}
+}
+
+func TestParseQueues(t *testing.T) {
+	got, err := ParseQueues(" trunk , github ")
+	if err != nil || len(got) != 2 || got[0] != QueueTrunk || got[1] != QueueGitHub {
+		t.Fatalf("ParseQueues = %v, %v", got, err)
+	}
+	if got, err := ParseQueues(""); err != nil || got != nil {
+		t.Fatalf("empty = %v, %v", got, err)
+	}
+	for _, bad := range []string{"bors", "trunk,trunk", "trunk,"} {
+		if _, err := ParseQueues(bad); err == nil {
+			t.Errorf("ParseQueues(%q) accepted", bad)
+		}
+	}
+}
+
+func TestQueueFieldsOnlyWhenEnabled(t *testing.T) {
+	plain := pullRequestsQuery(false, Needs{}, nil)
+	if strings.Contains(plain, "mergeQueueEntry") || strings.Contains(plain, "queueComments") {
+		t.Fatal("queue fields selected with no queues")
+	}
+	if q := pullRequestsQuery(false, Needs{}, []Queue{QueueGitHub}); !strings.Contains(q, "mergeQueueEntry") || strings.Contains(q, "queueComments") {
+		t.Fatal("github queue fields wrong")
+	}
+	if q := pullRequestsQuery(false, Needs{}, []Queue{QueueTrunk}); strings.Contains(q, "mergeQueueEntry") || !strings.Contains(q, "queueComments: comments(first: 10)") {
+		t.Fatal("trunk queue fields wrong")
+	}
+	for _, q := range []string{reviewRequestsQuery(false), previewPullRequestsQuery(), reviewedQuery(false, time.Now())} {
+		if strings.Contains(q, "mergeQueueEntry") || strings.Contains(q, "queueComments") {
+			t.Fatal("a non-authored or preview query selects queue fields")
+		}
+	}
+}
+
+func TestDecodeQueueEntries(t *testing.T) {
+	page := `[{"data":{"viewer":{"login":"pat","pullRequests":{"nodes":[
+	  {"number":1,"title":"queued by GitHub","url":"https://github.com/acme/api/pull/1","repository":{"nameWithOwner":"acme/api"},
+	   "mergeQueueEntry":{"state":"AWAITING_CHECKS","position":2},
+	   "queueComments":{"nodes":[{"author":{"login":"trunk-io"},"body":"<!-- Trunk Merge -->\n👍 Pull request will be merged soon"}]}},
+	  {"number":2,"title":"queued by Trunk","url":"https://github.com/acme/api/pull/2","repository":{"nameWithOwner":"acme/api"},
+	   "mergeQueueEntry":null,
+	   "queueComments":{"nodes":[null,{"author":null,"body":"x"},{"author":{"login":"trunk-io"},"body":"<!-- Trunk Merge -->\n🧪 Running tests on this pull request (testing on PR [#9](https://www.github.com/acme/api/pull/9))"}]}},
+	  {"number":3,"title":"plain","url":"https://github.com/acme/api/pull/3","repository":{"nameWithOwner":"acme/api"}}
+	],"pageInfo":{"hasNextPage":false}}}}}]`
+	snapshot, err := decodePages([]byte(page), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prs := snapshot.PullRequests
+	if q := prs[0].Queue; q == nil || q.Provider != "GitHub" || q.State != QueueTesting || q.Detail != "position 2" {
+		t.Fatalf("GitHub's queue must win: %+v", q)
+	}
+	if q := prs[1].Queue; q == nil || q.Provider != "Trunk" || q.State != QueueTesting || q.Detail != "testing on #9" {
+		t.Fatalf("Trunk entry = %+v", q)
+	}
+	if prs[2].Queue != nil {
+		t.Fatalf("plain PR has entry %+v", prs[2].Queue)
 	}
 }

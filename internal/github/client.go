@@ -64,6 +64,9 @@ type PullRequest struct {
 	// RequiredNotPassed names the required checks that have not passed.
 	RequiredChecks    string
 	RequiredNotPassed []string
+	// Queue is a merge queue's word on an authored pull request, read only
+	// in a full fetch with queues enabled; nil when no queue holds it.
+	Queue *QueueEntry
 }
 
 type Snapshot struct {
@@ -89,6 +92,8 @@ type Client struct {
 	token secret
 	// needs are the rule fields fetches select.
 	needs Needs
+	// queues are the merge queues fetches read.
+	queues []Queue
 }
 
 type AuthError struct {
@@ -132,13 +137,13 @@ func pullRequestFields(bots bool) string {
         } } }` + extra
 }
 
-func pullRequestsQuery(bots bool, needs Needs) string {
+func pullRequestsQuery(bots bool, needs Needs, queues []Queue) string {
 	return `query($endCursor: String) {
   viewer {
     login
     pullRequests(first: ` + strconv.Itoa(pageSize) + `, after: $endCursor, states: [OPEN],
                  orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes {` + pullRequestFields(bots) + needsFields(needs) + `
+      nodes {` + pullRequestFields(bots) + needsFields(needs) + queueFields(queues) + `
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -278,6 +283,7 @@ type pullRequestNode struct {
 	} `json:"activity"`
 	botNodes
 	needsNodes
+	queueNodes
 }
 
 // pullRequest converts a node. A non-empty login selects the latest direct
@@ -340,6 +346,7 @@ func (node *pullRequestNode) pullRequest(login string, bots []Bot) PullRequest {
 		}
 	}
 	node.applyNeeds(&pr)
+	pr.Queue = node.queueEntry()
 	return pr
 }
 
@@ -371,7 +378,7 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 		return Snapshot{}, &AuthError{Err: err}
 	}
 	bots, needs := len(c.bots) > 0, c.currentNeeds()
-	snapshot, err := c.run(ctx, pullRequestsQuery(bots, needs), reviewRequestsQuery(bots), reviewedQuery(bots, time.Now()), c.bots)
+	snapshot, err := c.run(ctx, pullRequestsQuery(bots, needs, c.currentQueues()), reviewRequestsQuery(bots), reviewedQuery(bots, time.Now()), c.bots)
 	if err != nil || !needs.RequiredChecks {
 		return snapshot, err
 	}

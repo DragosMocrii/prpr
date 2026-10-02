@@ -37,12 +37,12 @@ func TestParseBots(t *testing.T) {
 }
 
 func TestPullRequestQueriesSelectBotFieldsOnlyWhenConfigured(t *testing.T) {
-	for _, query := range []string{pullRequestsQuery(false, Needs{}), reviewRequestsQuery(false)} {
+	for _, query := range []string{pullRequestsQuery(false, Needs{}, nil), reviewRequestsQuery(false)} {
 		if strings.Contains(query, "reviewThreads") || strings.Contains(query, "contexts") {
 			t.Errorf("query without bots selects bot fields:\n%s", query)
 		}
 	}
-	for _, query := range []string{pullRequestsQuery(true, Needs{}), reviewRequestsQuery(true)} {
+	for _, query := range []string{pullRequestsQuery(true, Needs{}, nil), reviewRequestsQuery(true)} {
 		if !strings.Contains(query, "reviewThreads") || !strings.Contains(query, "contexts") {
 			t.Errorf("query with bots lacks bot fields:\n%s", query)
 		}

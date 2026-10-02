@@ -4,8 +4,11 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/DragosMocrii/prpr/internal/github"
 )
 
 func TestParseFlagsRefreshInterval(t *testing.T) {
@@ -33,6 +36,7 @@ func TestParseFlagsRejectsInvalidRefresh(t *testing.T) {
 		{"--refresh", "5"},
 		{"extra"},
 		{"--bots", "Claude"},
+		{"--queues=bors"},
 	} {
 		if _, err := parseFlags(args, io.Discard, noEnv); err == nil {
 			t.Errorf("parseFlags(%q) succeeded", args)
@@ -55,6 +59,20 @@ func TestParseFlagsBots(t *testing.T) {
 	opts, err = parseFlags([]string{"--bots="}, io.Discard, noEnv)
 	if err != nil || opts.bots != nil {
 		t.Fatalf("empty bots = %+v, %v", opts.bots, err)
+	}
+}
+
+func TestParseFlagsQueues(t *testing.T) {
+	opts, err := parseFlags(nil, io.Discard, noEnv)
+	if err != nil || len(opts.queues) != 2 || opts.queues[0] != github.QueueTrunk || opts.queues[1] != github.QueueGitHub {
+		t.Fatalf("default queues = %+v, %v", opts.queues, err)
+	}
+	opts, err = parseFlags([]string{"--queues="}, io.Discard, noEnv)
+	if err != nil || opts.queues != nil {
+		t.Fatalf("empty queues = %+v, %v", opts.queues, err)
+	}
+	if _, err := parseFlags([]string{"--queues=bors"}, io.Discard, noEnv); err == nil || !strings.Contains(err.Error(), "--queues") {
+		t.Fatalf("bad queues error = %v", err)
 	}
 }
 

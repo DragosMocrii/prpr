@@ -1,8 +1,10 @@
 package github
 
 import (
+	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -193,4 +195,102 @@ func githubQueueEntry(state string, position int) *QueueEntry {
 		entry.Detail = "position " + strconv.Itoa(position)
 	}
 	return entry
+}
+
+// Queue names a merge queue prpr can read.
+type Queue string
+
+const (
+	QueueTrunk  Queue = "trunk"
+	QueueGitHub Queue = "github"
+)
+
+// DefaultQueues reads both queues.
+const DefaultQueues = "trunk,github"
+
+// ParseQueues reads comma-separated queue names; empty reads none.
+func ParseQueues(value string) ([]Queue, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	var queues []Queue
+	for _, entry := range strings.Split(value, ",") {
+		queue := Queue(strings.ToLower(strings.TrimSpace(entry)))
+		if queue != QueueTrunk && queue != QueueGitHub {
+			return nil, fmt.Errorf("queue %q: want trunk or github", strings.TrimSpace(entry))
+		}
+		if slices.Contains(queues, queue) {
+			return nil, fmt.Errorf("queue %q is listed twice", queue)
+		}
+		queues = append(queues, queue)
+	}
+	return queues, nil
+}
+
+// trunkComments is how many conversation comments are read for Trunk's,
+// which is almost always the first.
+const trunkComments = 10
+
+// queueFields are the authored query's fields for queues.
+func queueFields(queues []Queue) string {
+	var fields string
+	if slices.Contains(queues, QueueGitHub) {
+		fields += `
+        mergeQueueEntry { state position }`
+	}
+	if slices.Contains(queues, QueueTrunk) {
+		fields += `
+        queueComments: comments(first: ` + strconv.Itoa(trunkComments) + `) { nodes { author { login } body } }`
+	}
+	return fields
+}
+
+// queueNodes decode queueFields; a field not selected stays nil.
+type queueNodes struct {
+	MergeQueueEntry *struct {
+		State    string `json:"state"`
+		Position int    `json:"position"`
+	} `json:"mergeQueueEntry"`
+	QueueComments *struct {
+		Nodes []*struct {
+			Author *struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			Body string `json:"body"`
+		} `json:"nodes"`
+	} `json:"queueComments"`
+}
+
+// queueEntry asks GitHub's queue first, so a stale Trunk comment never
+// overrides it.
+func (n *queueNodes) queueEntry() *QueueEntry {
+	if entry := n.MergeQueueEntry; entry != nil {
+		if found := githubQueueEntry(entry.State, entry.Position); found != nil {
+			return found
+		}
+	}
+	if n.QueueComments == nil {
+		return nil
+	}
+	var comments []queueComment
+	for _, node := range n.QueueComments.Nodes {
+		if node == nil || node.Author == nil {
+			continue
+		}
+		comments = append(comments, queueComment{Author: node.Author.Login, Body: node.Body})
+	}
+	return trunkEntry(comments)
+}
+
+// SetQueues chooses the merge queues later fetches read.
+func (c *Client) SetQueues(queues []Queue) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.queues = queues
+}
+
+func (c *Client) currentQueues() []Queue {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.queues
 }

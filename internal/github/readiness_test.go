@@ -10,13 +10,13 @@ import (
 )
 
 func TestAuthoredQuerySelectsRuleFieldsOnlyWhenNeeded(t *testing.T) {
-	plain := pullRequestsQuery(false, Needs{})
+	plain := pullRequestsQuery(false, Needs{}, nil)
 	for _, field := range []string{"codeOwnerRequests", "openThreads", "\n        id"} {
 		if strings.Contains(plain, field) {
 			t.Errorf("query without needs selects %q", field)
 		}
 	}
-	all := pullRequestsQuery(false, Needs{CodeOwners: true, Threads: true, RequiredChecks: true})
+	all := pullRequestsQuery(false, Needs{CodeOwners: true, Threads: true, RequiredChecks: true}, nil)
 	for _, field := range []string{"codeOwnerRequests: reviewRequests", "asCodeOwner", "openThreads: reviewThreads", "\n        id"} {
 		if !strings.Contains(all, field) {
 			t.Errorf("query with needs lacks %q", field)
