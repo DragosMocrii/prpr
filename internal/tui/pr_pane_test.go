@@ -76,6 +76,36 @@ func TestBothPanesRenderWithOwnRowsAndColumns(t *testing.T) {
 	}
 }
 
+func TestMyPRsLeadWithMergeAndReviewRowsEndWithTheAuthor(t *testing.T) {
+	m := newPaneModel(t, 140, 24, manyPRs(3), reviewPRs(2))
+	titles := func(id paneID) []string {
+		var got []string
+		for _, column := range m.panes[id].table.Columns() {
+			got = append(got, column.Title)
+		}
+		return got
+	}
+	for _, nerd := range []bool{false, true} {
+		if m.icons.nerd != nerd {
+			pressI(m)
+		}
+		for _, width := range []int{140, 79} {
+			m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+			mine, review := titles(paneMine), titles(paneReview)
+			if mine[0] != "" || mine[1] != m.icons.header("Merge") {
+				t.Errorf("nerd %t, width %d: My PRs columns = %q, want Merge after the mark", nerd, width, mine)
+			}
+			if author := slices.Index(review, "Author"); author != columnIndex(m.panes[paneReview].table.Columns(), m.icons.header("State"))+1 {
+				t.Errorf("nerd %t, width %d: review columns = %q, want Author after State", nerd, width, review)
+			}
+			cell := ansi.Strip(m.panes[paneMine].table.Rows()[0][1])
+			if want := ansi.Strip(m.mergeCell(&m.snapshot.PullRequests[m.panes[paneMine].visible[0]])); cell != want {
+				t.Errorf("nerd %t, width %d: first My PRs cell %q, want the merge cell %q", nerd, width, cell, want)
+			}
+		}
+	}
+}
+
 func TestEmptyReviewPaneShowsEmptyLineAndGivesRowsToOtherPane(t *testing.T) {
 	m := newPaneModel(t, 80, 24, manyPRs(30), nil)
 	both := newPaneModel(t, 80, 24, manyPRs(30), reviewPRs(30))

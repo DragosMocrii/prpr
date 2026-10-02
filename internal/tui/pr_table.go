@@ -93,6 +93,11 @@ func (m *model) paneLayout(id paneID) tableLayout {
 	}
 	columns := make([]table.Column, 0, 6+len(statColumns))
 	columns = append(columns, table.Column{Title: "", Width: 1})
+	// My PRs leads with Merge, so readiness is seen first; the review list
+	// ends with its author instead.
+	if !review {
+		columns = append(columns, table.Column{Title: lastTitle, Width: lastWidth})
+	}
 	if layout.repositoryColumn {
 		columns = append(columns, table.Column{Title: "Repository", Width: repositoryWidth})
 	}
@@ -101,8 +106,10 @@ func (m *model) paneLayout(id paneID) tableLayout {
 	columns = append(columns,
 		table.Column{Title: "PR name"},
 		table.Column{Title: ic.header("State"), Width: stateWidth},
-		table.Column{Title: lastTitle, Width: lastWidth},
 	)
+	if review {
+		columns = append(columns, table.Column{Title: lastTitle, Width: lastWidth})
+	}
 	nameWidth := remainingWidth(width, columns)
 	// Statistics columns are added in priority order while the name keeps room.
 	for _, stat := range statColumns {
@@ -176,11 +183,16 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		}
 		cells := make(table.Row, 0, len(layout.columns))
 		cells = append(cells, markText(mark.kind, gone))
+		if !review {
+			cells = append(cells, changed(lastCell, last))
+		}
 		if layout.repositoryColumn {
 			cells = append(cells, singleLine(pr.Repository))
 		}
-		cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(cellName, name),
-			changed(cellState, state), changed(lastCell, last))
+		cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(cellName, name), changed(cellState, state))
+		if review {
+			cells = append(cells, changed(lastCell, last))
+		}
 		for _, stat := range layout.stats {
 			if preview && stat.detail {
 				cells = append(cells, pendingText)

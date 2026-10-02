@@ -61,7 +61,7 @@ func TestBotsColumnDropsBeforeAgeButAfterOtherStatistics(t *testing.T) {
 		m.rebuildPRTable(false)
 		columns := m.panes[paneMine].table.Columns()
 		var got []string
-		for _, column := range columns[columnIndex(columns, "Merge")+1:] {
+		for _, column := range columns[columnIndex(columns, "State")+1:] {
 			got = append(got, column.Title)
 		}
 		if len(got) > previous || strings.Join(got, ",") != strings.Join(want[:len(got)], ",") {
