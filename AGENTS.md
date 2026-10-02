@@ -6,9 +6,10 @@
 
 - `cmd/prpr/main.go` wires configuration, the GitHub client, and the Bubble Tea program.
 - `internal/github` invokes `gh` and decodes GitHub API responses; `bots.go` parses the bot list and derives each bot's review state.
-- `internal/preferences` stores per-account repository scope.
+- `internal/preferences` stores each account's scope (one repository, a watchlist, or All) and its watchlists.
 - `internal/tui/model.go` owns app transitions and scope state.
 - `internal/tui/repository_picker.go` owns repository-picker input and requests.
+- `internal/tui/watchlists.go` owns watchlist editing in the picker: marks, the name input, and saving, renaming, and deleting watchlists.
 - `internal/tui/pr_pane.go` owns the two pull-request panes: focus, layout, per-pane selection, and the page indicator.
 - `internal/tui/quota.go` owns rate-limit polling and the status line.
 - `internal/tui/changes.go` owns change tracking between refreshes: row marks, changed cells, and gone pull requests.
@@ -44,7 +45,8 @@ Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package 
 - Do not store GitHub tokens. Runtime GitHub access goes through the user's active `gh` account.
 - Preserve the authored, open pull-request query, pagination, updated-descending fetch order, and draft status. **My PRs** is displayed ready-to-merge first (the same rule that colors the Merge column green), then oldest `createdAt` first, ties in fetch order; **Review requested** is displayed in fetch order.
 - Preserve the review-request query `is:pr is:open user-review-requested:@me archived:false sort:updated-desc`. Both lists are fetched and replaced together.
-- A missing saved account choice is different from a saved empty repository value: missing prompts for a choice; empty means the user explicitly chose All repositories. Restoring a saved choice must not write preferences. `chooseRepository` is the explicit commit-and-save path.
+- A missing saved account choice is different from a saved empty repository value: missing prompts for a choice; empty means the user explicitly chose All repositories. Restoring a saved choice must not write preferences. `chooseScope` (and `chooseRepository`) is the explicit commit-and-save path.
+- A watchlist is a name (trimmed, at most 40 characters, unique ignoring case) and a non-empty set of exact `owner/repo` names. An account's value stays a plain repository string unless it has watchlists or a watchlist scope; then it is an object with `repository` or `watchlist` and `watchlists`, and an object with neither has no saved scope. A saved scope naming a missing watchlist prompts again. Deleting the watchlist in scope saves All; renaming it keeps the scope on it. Replacing another watchlist by name needs a second Enter, and deleting one a second Ctrl+D.
 - Preference-save failures are nonfatal: keep the in-session selection and show the warning.
 - With no rows on screen, a fetch also runs `Client.Preview`, which selects only fast fields (no `mergeStateStatus`, timeline, checks, reviews, or bots). Its rows show `…` for unknown cells and are dropped when the fetch finishes, fails, or was replaced. Previews never become the change baseline. Refreshes do not preview.
 - Keep both panes' previous rows visible during a refresh only while the refresh indicator is shown, and clear them when a fetch fails; do not show stale results as current.

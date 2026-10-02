@@ -40,6 +40,7 @@ type keyMap struct {
 	Pages           paginator.KeyMap
 	Picker          pickerKeyMap
 	SearchInput     searchKeyMap
+	WatchlistName   searchKeyMap
 }
 
 type searchKeyMap struct {
@@ -56,6 +57,9 @@ type pickerKeyMap struct {
 	Cancel key.Binding
 	Clear  key.Binding
 	Retry  key.Binding
+	Mark   key.Binding
+	Edit   key.Binding
+	Delete key.Binding
 	Quit   key.Binding
 }
 
@@ -102,6 +106,15 @@ func defaultKeyMap() keyMap {
 			Cancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 			Clear:  key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear")),
 			Retry:  key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "retry")),
+			Mark:   key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "mark")),
+			Edit:   key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "edit list")),
+			Delete: key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "delete list")),
+			Quit:   key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+		},
+		WatchlistName: searchKeyMap{
+			Apply:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save list")),
+			Cancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+			Clear:  key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear")),
 			Quit:   key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 		},
 		SearchInput: searchKeyMap{
@@ -185,14 +198,39 @@ func (m *model) syncKeys() {
 	}
 
 	picking := m.picker != nil
-	editable := picking && !m.picker.lookup
+	naming := picking && m.picker.naming != nil
+	editable := picking && !m.picker.lookup && !naming
+	marking := picking && len(m.picker.marked) > 0
+	busy := picking && m.picker.busy
+	var candidate repositoryCandidate
+	if picking && len(m.picker.candidates) > 0 {
+		candidate = m.picker.selectedCandidate()
+	}
 	k.Picker.Up.SetEnabled(editable)
 	k.Picker.Down.SetEnabled(editable)
-	k.Picker.Apply.SetEnabled(picking && !m.picker.busy)
-	k.Picker.Cancel.SetEnabled(picking)
+	// Marks can be named while the repository list still loads.
+	k.Picker.Apply.SetEnabled(editable && (!busy || marking))
+	if marking {
+		k.Picker.Apply.SetHelp("enter", "name list")
+	} else {
+		k.Picker.Apply.SetHelp("enter", "apply")
+	}
+	k.Picker.Cancel.SetEnabled(picking && !naming)
+	if marking {
+		k.Picker.Cancel.SetHelp("esc", "clear marks")
+	} else {
+		k.Picker.Cancel.SetHelp("esc", "cancel")
+	}
 	k.Picker.Clear.SetEnabled(editable)
-	k.Picker.Retry.SetEnabled(picking && !m.picker.busy)
+	k.Picker.Retry.SetEnabled(picking && !busy && !naming)
+	k.Picker.Mark.SetEnabled(editable && (candidate.kind == knownRepositoryCandidate ||
+		(candidate.kind == lookupRepositoryCandidate && !busy)))
+	k.Picker.Edit.SetEnabled(editable && candidate.kind == watchlistCandidate)
+	k.Picker.Delete.SetEnabled(editable && candidate.kind == watchlistCandidate)
 	k.Picker.Quit.SetEnabled(picking)
+	for _, binding := range []*key.Binding{&k.WatchlistName.Apply, &k.WatchlistName.Cancel, &k.WatchlistName.Clear, &k.WatchlistName.Quit} {
+		binding.SetEnabled(naming)
+	}
 }
 
 // helpKeys adapts a screen's bindings to help.KeyMap.
@@ -242,7 +280,12 @@ func (k keyMap) searchHelp() helpKeys {
 
 func (k keyMap) pickerHelp() helpKeys {
 	p := k.Picker
-	return helpKeys{short: []key.Binding{p.Up, p.Down, p.Apply, p.Cancel, p.Clear, p.Retry, p.Quit}}
+	return helpKeys{short: []key.Binding{p.Up, p.Down, p.Apply, p.Mark, p.Edit, p.Delete, p.Cancel, p.Clear, p.Retry, p.Quit}}
+}
+
+func (k keyMap) watchlistNameHelp() helpKeys {
+	n := k.WatchlistName
+	return helpKeys{short: []key.Binding{n.Apply, n.Cancel, n.Clear, n.Quit}}
 }
 
 // bound reports whether msg is one of the bindings' keys, enabled or not.

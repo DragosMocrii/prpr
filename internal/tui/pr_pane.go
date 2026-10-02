@@ -343,7 +343,9 @@ func (m *model) emptyPaneLine(id paneID) string {
 	if m.filtersActive() {
 		return "  No pull requests match the filters; esc clears them."
 	}
-	if m.selectedRepository != "" {
+	if m.watchlist.Name != "" {
+		text += " in " + singleLine(m.watchlist.Name)
+	} else if m.selectedRepository != "" {
 		text += " in " + singleLine(m.selectedRepository)
 	}
 	return "  " + text + "."

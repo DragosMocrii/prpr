@@ -56,7 +56,7 @@ func TestPickerSelectsRepositoryAndAllRepositories(t *testing.T) {
 	if m.picker != nil || m.selectedRepository != "acme/b" || len(m.panes[paneMine].visible) != 1 {
 		t.Fatalf("repository selection did not apply: picker %v filter %q visible %v", m.picker, m.selectedRepository, m.panes[paneMine].visible)
 	}
-	if got, found := m.preferences.Lookup("alice"); !found || got != "acme/b" {
+	if got, found := m.preferences.Lookup("alice"); !found || got != (preferences.Scope{Repository: "acme/b"}) {
 		t.Fatalf("known repository choice not persisted: %q, %v", got, found)
 	}
 	openPicker(m)
@@ -69,7 +69,7 @@ func TestPickerSelectsRepositoryAndAllRepositories(t *testing.T) {
 	if m.selectedRepository != "" || len(m.panes[paneMine].visible) != 2 {
 		t.Fatalf("All repositories selection = %q with %v visible", m.selectedRepository, m.panes[paneMine].visible)
 	}
-	if got, found := m.preferences.Lookup("alice"); !found || got != "" {
+	if got, found := m.preferences.Lookup("alice"); !found || got != (preferences.Scope{Repository: ""}) {
 		t.Fatalf("All choice not persisted: %q, %v", got, found)
 	}
 }
@@ -123,7 +123,7 @@ func TestPickerDirectLookupFailureThenCanonicalSuccess(t *testing.T) {
 	if m.picker == nil || m.selectedRepository != "acme/b" || m.picker.busy || m.picker.diagnostic == "" {
 		t.Fatalf("failed lookup changed filter or lost diagnostic: picker %+v filter %q", m.picker, m.selectedRepository)
 	}
-	if got, found := m.preferences.Lookup("alice"); !found || got != "" {
+	if got, found := m.preferences.Lookup("alice"); !found || got != (preferences.Scope{Repository: ""}) {
 		t.Fatalf("failed lookup changed persisted choice: %q, %v", got, found)
 	}
 	press(m, tea.Key{Code: tea.KeyEnter})
@@ -131,7 +131,7 @@ func TestPickerDirectLookupFailureThenCanonicalSuccess(t *testing.T) {
 	if m.picker != nil || m.selectedRepository != "Public/Other" || len(m.panes[paneMine].visible) != 0 {
 		t.Fatalf("canonical lookup result not applied: picker %v filter %q visible %v", m.picker, m.selectedRepository, m.panes[paneMine].visible)
 	}
-	if got, found := m.preferences.Lookup("alice"); !found || got != "Public/Other" {
+	if got, found := m.preferences.Lookup("alice"); !found || got != (preferences.Scope{Repository: "Public/Other"}) {
 		t.Fatalf("canonical lookup choice not saved: %q, %v", got, found)
 	}
 }
@@ -157,7 +157,7 @@ func TestPickerIgnoresLateResultsAfterCloseAndReopen(t *testing.T) {
 	if m.selectedRepository != "" || m.repositoryRequestID == currentID || m.picker == nil {
 		t.Fatalf("stale lookup affected reopened picker: filter %q id %d picker %v", m.selectedRepository, m.repositoryRequestID, m.picker)
 	}
-	if got, found := m.preferences.Lookup("alice"); !found || got != "" {
+	if got, found := m.preferences.Lookup("alice"); !found || got != (preferences.Scope{Repository: ""}) {
 		t.Fatalf("stale lookup changed persisted choice: %q, %v", got, found)
 	}
 }

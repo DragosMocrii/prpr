@@ -29,6 +29,10 @@ func testModel(store *preferences.Store, width, height int) *model {
 	return m
 }
 
+func (m *model) applyRepository(repository string) {
+	m.applyScope(preferences.Scope{Repository: repository})
+}
+
 func updateSnapshot(m *model, login string, prs ...github.PullRequest) {
 	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: login, PullRequests: prs}})
 }
@@ -70,7 +74,7 @@ func TestExplicitAllPersistsAndSuppressesPromptAfterReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, found := reopened.Lookup("ALICE"); !found || got != "" {
+	if got, found := reopened.Lookup("ALICE"); !found || got != (preferences.Scope{Repository: ""}) {
 		t.Fatalf("saved explicit All = %q, %v", got, found)
 	}
 	next := testModel(reopened, 80, 24)
@@ -96,7 +100,7 @@ func TestAccountSwitchRestoresSavedScopeOrPrompts(t *testing.T) {
 		t.Fatalf("unconfigured Bob inherited Alice state: chosen %t repo %q warning %v", m.scopeChosen, m.selectedRepository, m.preferenceErr)
 	}
 	m.chooseRepository("")
-	if got, found := store.Lookup("bob"); !found || got != "" {
+	if got, found := store.Lookup("bob"); !found || got != (preferences.Scope{Repository: ""}) {
 		t.Fatalf("Bob's explicit All choice was not saved: %q, %v", got, found)
 	}
 	updateSnapshot(m, "ALICE", github.PullRequest{Number: 4, Repository: "acme/a"})
@@ -130,7 +134,7 @@ func TestClearFilterPersistsAll(t *testing.T) {
 	if !m.scopeChosen || m.selectedRepository != "" || len(m.panes[paneMine].visible) != 1 {
 		t.Fatalf("clear filter state = chosen %t repo %q visible %v", m.scopeChosen, m.selectedRepository, m.panes[paneMine].visible)
 	}
-	if got, found := store.Lookup("alice"); !found || got != "" {
+	if got, found := store.Lookup("alice"); !found || got != (preferences.Scope{Repository: ""}) {
 		t.Fatalf("clear filter was not persisted: %q, %v", got, found)
 	}
 }
@@ -173,7 +177,7 @@ func TestFailedRefreshDoesNotExposeStaleRows(t *testing.T) {
 	if len(m.snapshot.PullRequests) != 0 || m.snapshot.Login != "" || m.loading || m.err == nil {
 		t.Fatalf("failed refresh retained or hid stale state: %+v", m)
 	}
-	if got, found := store.Lookup("alice"); !found || got != "" {
+	if got, found := store.Lookup("alice"); !found || got != (preferences.Scope{Repository: ""}) {
 		t.Fatalf("failed refresh changed saved choice: %q, %v", got, found)
 	}
 }

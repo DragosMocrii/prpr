@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -12,12 +13,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/DragosMocrii/prpr/internal/github"
+	"github.com/DragosMocrii/prpr/internal/preferences"
 )
 
 type repositoryCandidateKind uint8
 
 const (
 	allRepositoriesCandidate repositoryCandidateKind = iota
+	watchlistCandidate
 	knownRepositoryCandidate
 	lookupRepositoryCandidate
 )
@@ -26,6 +29,8 @@ type repositoryCandidate struct {
 	kind       repositoryCandidateKind
 	label      string
 	repository string
+	// watchlist names a watchlist candidate's watchlist.
+	watchlist string
 }
 
 type repositoryPicker struct {
@@ -38,6 +43,20 @@ type repositoryPicker struct {
 	lookup       bool
 	diagnostic   string
 	cancel       context.CancelFunc
+	// watchlists are the account's saved watchlists.
+	watchlists []preferences.Watchlist
+	// marked holds the repositories marked for a watchlist, by lowercase
+	// name. editing names the watchlist they were loaded from, if any.
+	marked  map[string]string
+	editing string
+	// markLookup marks the looked-up repository instead of choosing it.
+	markLookup bool
+	// naming is the watchlist name input while it is open. confirmReplace
+	// and confirmDelete name the watchlist that the next Enter replaces or
+	// the next Ctrl+D deletes.
+	naming         *textinput.Model
+	confirmReplace string
+	confirmDelete  string
 }
 
 type repositoryListFinishedMsg struct {
@@ -65,6 +84,7 @@ func (m *model) openRepositoryPicker() tea.Cmd {
 		picker.repositories = append(picker.repositories, pr.Repository)
 	}
 	picker.repositories = sortedRepositoryNames(picker.repositories)
+	picker.watchlists = m.preferences.Watchlists(m.snapshot.Login)
 	m.picker = picker
 	picker.rebuildCandidates()
 	return tea.Batch(picker.input.Focus(), m.startRepositoryList())
@@ -100,10 +120,13 @@ func (m *model) startRepositoryList() tea.Cmd {
 	}, m.spinner.Tick)
 }
 
-func (m *model) startRepositoryLookup(repository string) tea.Cmd {
+// startRepositoryLookup checks access to a repository, then chooses it, or
+// marks it for a watchlist when mark is set.
+func (m *model) startRepositoryLookup(repository string, mark bool) tea.Cmd {
 	if m.picker == nil || m.picker.busy {
 		return nil
 	}
+	m.picker.markLookup = mark
 	m.picker.cancelCurrent()
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.picker.cancel = cancel
@@ -163,6 +186,13 @@ func (m *model) handleRepositoryLookupFinished(msg repositoryLookupFinishedMsg) 
 		m.picker.diagnostic = msg.err.Error()
 		return m.picker.input.Focus()
 	}
+	if m.picker.markLookup {
+		m.picker.repositories = sortedRepositoryNames(append(m.picker.repositories, msg.repository))
+		m.picker.setMark(msg.repository, true)
+		m.picker.setQuery("")
+		m.picker.clamp(m.pickerViewportHeight())
+		return m.picker.input.Focus()
+	}
 	m.closeRepositoryPicker()
 	m.chooseRepository(msg.repository)
 	return nil
@@ -193,6 +223,16 @@ func (p *repositoryPicker) rebuildCandidates() {
 	trimmed := strings.TrimSpace(p.query())
 	matching := 0
 	exact := false
+	for _, watchlist := range p.watchlists {
+		if strings.Contains(strings.ToLower(watchlist.Name), strings.ToLower(trimmed)) {
+			p.candidates = append(p.candidates, repositoryCandidate{
+				kind:      watchlistCandidate,
+				label:     "★ " + watchlist.Name + " · " + plural(len(watchlist.Repositories), "repo"),
+				watchlist: watchlist.Name,
+			})
+			matching++
+		}
+	}
 	for _, name := range p.repositories {
 		if strings.Contains(strings.ToLower(name), strings.ToLower(trimmed)) {
 			p.candidates = append(p.candidates, repositoryCandidate{kind: knownRepositoryCandidate, label: name, repository: name})
@@ -252,6 +292,12 @@ func (p *repositoryPicker) paste(content string, visible int) tea.Cmd {
 		}
 		return r
 	}, content)
+	if p.naming != nil {
+		var cmd tea.Cmd
+		*p.naming, cmd = p.naming.Update(tea.PasteMsg{Content: content})
+		p.confirmReplace = ""
+		return cmd
+	}
 	return p.updateInput(tea.PasteMsg{Content: content}, visible)
 }
 
@@ -304,7 +350,11 @@ func (m *model) repositoryPickerLines() []string {
 	p := m.picker
 	visible := m.pickerViewportHeight()
 	p.clamp(visible)
-	lines := []string{"Select repository", p.input.View()}
+	input := p.input.View()
+	if p.naming != nil {
+		input = p.naming.View()
+	}
+	lines := []string{"Select repository or watchlist", input}
 	end := p.offset + visible
 	if end > len(p.candidates) {
 		end = len(p.candidates)
@@ -314,7 +364,15 @@ func (m *model) repositoryPickerLines() []string {
 		if i == p.cursor {
 			marker = "> "
 		}
-		lines = append(lines, marker+singleLine(p.candidates[i].label))
+		candidate := p.candidates[i]
+		if len(p.marked) > 0 && candidate.kind == knownRepositoryCandidate {
+			if p.isMarked(candidate.repository) {
+				marker += "[x] "
+			} else {
+				marker += "[ ] "
+			}
+		}
+		lines = append(lines, marker+singleLine(candidate.label))
 	}
 	status := "Repositories you can access; enter owner/repo for others."
 	switch {
@@ -324,10 +382,21 @@ func (m *model) repositoryPickerLines() []string {
 		status = m.spinner.View() + " Loading repositories..."
 	case p.diagnostic != "":
 		status = singleLine(p.diagnostic)
+	case p.naming != nil:
+		status = "Name the watchlist of " + plural(len(p.marked), "repo") + "."
+	case p.editing != "":
+		status = "Editing " + p.editing + ": " + strconv.Itoa(len(p.marked)) + " marked; enter saves, esc discards changes."
+	case len(p.marked) > 0:
+		status = strconv.Itoa(len(p.marked)) + " marked; enter names the watchlist, esc clears marks."
+	case len(p.watchlists) == 0:
+		status = "Repositories you can access; enter owner/repo for others, space marks repositories for a watchlist."
 	case strings.TrimSpace(p.query()) != "" && len(p.candidates) == 1:
 		status = "No matching repositories. Enter owner/repo to check another repository."
 	}
 	lines = append(lines, status)
+	if p.naming != nil {
+		return append(lines, m.helpLines(keyMap.watchlistNameHelp)...)
+	}
 	return append(lines, m.helpLines(keyMap.pickerHelp)...)
 }
 

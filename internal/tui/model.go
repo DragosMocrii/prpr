@@ -34,9 +34,11 @@ type model struct {
 	cancel             context.CancelFunc
 	snapshot           github.Snapshot
 	selectedRepository string
-	filterLogin        string
-	panes              [2]prPane
-	changes            [2]paneChanges
+	// watchlist is the watchlist scope; its empty name means none.
+	watchlist   preferences.Watchlist
+	filterLogin string
+	panes       [2]prPane
+	changes     [2]paneChanges
 	// changesLogin is the account the change baseline belongs to.
 	changesLogin        string
 	focus               paneID
@@ -476,10 +478,31 @@ func (m *model) leaveRow(id paneID, row int) {
 func (m *model) updateRepositoryPicker(msg tea.KeyPressMsg) tea.Cmd {
 	p := m.picker
 	k := m.keys.Picker
+	if p.naming != nil {
+		return m.updateWatchlistName(msg)
+	}
+	// Any other key cancels a pending delete.
+	if p.confirmDelete != "" && !key.Matches(msg, k.Delete) {
+		p.confirmDelete, p.diagnostic = "", ""
+	}
 	switch {
 	case key.Matches(msg, k.Cancel):
+		if len(p.marked) > 0 {
+			p.clearMarks()
+			return nil
+		}
 		m.closeRepositoryPicker()
 		return nil
+	case key.Matches(msg, k.Mark):
+		return m.markCandidate()
+	case key.Matches(msg, k.Edit):
+		m.editWatchlist()
+		return nil
+	case key.Matches(msg, k.Delete):
+		m.deleteWatchlist()
+		return nil
+	case key.Matches(msg, k.Apply) && len(p.marked) > 0:
+		return m.openWatchlistName()
 	case key.Matches(msg, k.Retry):
 		return m.startRepositoryList()
 	case key.Matches(msg, k.Apply):
@@ -488,11 +511,14 @@ func (m *model) updateRepositoryPicker(msg tea.KeyPressMsg) tea.Cmd {
 		case allRepositoriesCandidate:
 			m.closeRepositoryPicker()
 			m.chooseRepository("")
+		case watchlistCandidate:
+			m.closeRepositoryPicker()
+			m.chooseScope(preferences.Scope{Watchlist: candidate.watchlist})
 		case knownRepositoryCandidate:
 			m.closeRepositoryPicker()
 			m.chooseRepository(candidate.repository)
 		case lookupRepositoryCandidate:
-			return m.startRepositoryLookup(candidate.repository)
+			return m.startRepositoryLookup(candidate.repository, false)
 		}
 		return nil
 	case key.Matches(msg, k.Up):
@@ -507,7 +533,7 @@ func (m *model) updateRepositoryPicker(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	// Picker keys that are disabled right now must not fall through to text input.
-	if bound(msg, k.Apply, k.Retry, k.Up, k.Down, k.Clear) {
+	if bound(msg, k.Apply, k.Retry, k.Up, k.Down, k.Clear, k.Mark, k.Edit, k.Delete) {
 		return nil
 	}
 	return p.updateInput(msg, m.pickerViewportHeight())
@@ -542,11 +568,11 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 			m.preferenceErr = nil
 		}
 		m.filterLogin = snapshot.Login
-		if repository, found := m.preferences.Lookup(snapshot.Login); found {
-			m.selectedRepository = repository
+		if scope, found := m.preferences.Lookup(snapshot.Login); found {
+			m.setScope(snapshot.Login, scope)
 			m.scopeChosen = true
 		} else {
-			m.selectedRepository = ""
+			m.setScope(snapshot.Login, preferences.Scope{})
 			m.scopeChosen = false
 			m.scopeChoiceCursor = 0
 		}
@@ -637,7 +663,39 @@ func sortMine(visible []int, source []github.PullRequest) {
 }
 
 func (m *model) inScope(pr *github.PullRequest) bool {
+	if m.watchlist.Name != "" {
+		return slices.ContainsFunc(m.watchlist.Repositories, func(repository string) bool {
+			return strings.EqualFold(pr.Repository, repository)
+		})
+	}
 	return m.selectedRepository == "" || strings.EqualFold(pr.Repository, m.selectedRepository)
+}
+
+// setScope shows one repository, a watchlist of login's, or All
+// repositories. A watchlist that no longer exists shows All.
+func (m *model) setScope(login string, scope preferences.Scope) {
+	m.selectedRepository = scope.Repository
+	m.watchlist = preferences.Watchlist{}
+	if scope.Watchlist == "" {
+		return
+	}
+	for _, watchlist := range m.preferences.Watchlists(login) {
+		if strings.EqualFold(watchlist.Name, scope.Watchlist) {
+			m.watchlist = watchlist
+		}
+	}
+}
+
+// scopeLabel names the scope in the title.
+func (m *model) scopeLabel() string {
+	switch {
+	case m.watchlist.Name != "":
+		return "★ " + singleLine(m.watchlist.Name)
+	case m.selectedRepository != "":
+		return singleLine(m.selectedRepository)
+	default:
+		return "All repositories"
+	}
 }
 
 // rebuildGone lists a pane's gone pull requests in the current scope.
@@ -651,15 +709,21 @@ func (m *model) rebuildGone(id paneID) {
 	}
 }
 
-func (m *model) applyRepository(repository string) {
-	m.selectedRepository = repository
+// applyScope shows a scope for this session without saving it.
+func (m *model) applyScope(scope preferences.Scope) {
+	m.setScope(m.snapshot.Login, scope)
 	m.rebuildVisiblePRs()
 }
 
 func (m *model) chooseRepository(repository string) {
-	m.applyRepository(repository)
+	m.chooseScope(preferences.Scope{Repository: repository})
+}
+
+// chooseScope applies a scope and saves it for the account.
+func (m *model) chooseScope(scope preferences.Scope) {
+	m.applyScope(scope)
 	m.scopeChosen = true
-	if err := m.preferences.Save(m.snapshot.Login, repository); err != nil {
+	if err := m.preferences.SaveScope(m.snapshot.Login, scope); err != nil {
 		m.preferenceErr = fmt.Errorf("Selection not saved: %w", err)
 		return
 	}
@@ -773,11 +837,7 @@ func (m *model) listLines() []string {
 
 // listLinesWith draws the list with the given screen's help.
 func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
-	scope := "All repositories"
-	if m.selectedRepository != "" {
-		scope = singleLine(m.selectedRepository)
-	}
-	title := fmt.Sprintf("prpr — @%s — %s", m.snapshot.Login, scope)
+	title := fmt.Sprintf("prpr — @%s — %s", m.snapshot.Login, m.scopeLabel())
 	if filters := m.filterText(); filters != "" {
 		title += " · " + filters
 	}
