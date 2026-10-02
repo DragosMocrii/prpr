@@ -34,7 +34,7 @@ Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package 
 ## Contracts to preserve
 
 - Do not store GitHub tokens. Runtime GitHub access goes through the user's active `gh` account.
-- Preserve the authored, open pull-request query, pagination, updated-descending ordering, and draft status.
+- Preserve the authored, open pull-request query, pagination, updated-descending fetch order, and draft status. **My PRs** is displayed ready-to-merge first (the same rule that colors the Merge column green), then oldest `createdAt` first, ties in fetch order; **Review requested** is displayed in fetch order.
 - Preserve the review-request query `is:pr is:open user-review-requested:@me archived:false sort:updated-desc`. Both lists are fetched and replaced together.
 - A missing saved account choice is different from a saved empty repository value: missing prompts for a choice; empty means the user explicitly chose All repositories. Restoring a saved choice must not write preferences. `chooseRepository` is the explicit commit-and-save path.
 - Preference-save failures are nonfatal: keep the in-session selection and show the warning.

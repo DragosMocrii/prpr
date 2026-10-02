@@ -385,10 +385,21 @@ func safePullRequestURL(rawURL string) bool {
 		parsed.User == nil && strings.EqualFold(parsed.Host, parsed.Hostname())
 }
 
-// mergeIcon is green only when GitHub reports the pull request can be merged
-// under branch protection; conflicts win over every other state. Drafts are
+// mergeReady reports whether GitHub would merge the pull request now, branch
+// protection included. Conflicts win over every other state, and drafts are
 // read from isDraft, since GitHub deprecated the DRAFT merge state.
+func mergeReady(draft bool, mergeable, state string) bool {
+	if mergeable == "CONFLICTING" || state == "DIRTY" || draft {
+		return false
+	}
+	return state == "CLEAN" || state == "HAS_HOOKS" || state == "UNSTABLE"
+}
+
+// mergeIcon is green exactly when mergeReady holds.
 func mergeIcon(draft bool, mergeable, state string) string {
+	if mergeReady(draft, mergeable, state) {
+		return coloredIcon("✓", "2")
+	}
 	if mergeable == "CONFLICTING" || state == "DIRTY" {
 		return coloredIcon("✗", "1")
 	}
@@ -396,8 +407,6 @@ func mergeIcon(draft bool, mergeable, state string) string {
 		return "–"
 	}
 	switch state {
-	case "CLEAN", "HAS_HOOKS", "UNSTABLE":
-		return coloredIcon("✓", "2")
 	case "BLOCKED":
 		return coloredIcon("●", "3")
 	case "BEHIND":

@@ -24,6 +24,7 @@ type PullRequest struct {
 	// protection; empty means unknown.
 	MergeState string
 	UpdatedAt  time.Time
+	CreatedAt  time.Time
 	// WaitingSince is when the pull request last became ready for review or,
 	// for a review request, when the viewer was last requested directly. It is
 	// zero for a draft with no direct request.
@@ -188,6 +189,7 @@ func (node *pullRequestNode) pullRequest(login string, bots []Bot) PullRequest {
 		Mergeable:      node.Mergeable,
 		MergeState:     node.MergeState,
 		UpdatedAt:      node.UpdatedAt,
+		CreatedAt:      node.CreatedAt,
 		ReviewDecision: node.ReviewDecision,
 		Additions:      node.Additions,
 		Deletions:      node.Deletions,

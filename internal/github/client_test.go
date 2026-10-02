@@ -9,7 +9,7 @@ import (
 func TestDecodePagesPreservesAllRowsAndOrder(t *testing.T) {
 	data := []byte(`[
 		{"data":{"viewer":{"login":"octocat","pullRequests":{"nodes":[
-			{"number":12,"title":"Newest","url":"https://github.com/acme/one/pull/12","isDraft":true,"mergeable":"MERGEABLE","updatedAt":"2026-06-01T12:00:00Z","repository":{"nameWithOwner":"acme/one"}},
+			{"number":12,"title":"Newest","url":"https://github.com/acme/one/pull/12","isDraft":true,"mergeable":"MERGEABLE","updatedAt":"2026-06-01T12:00:00Z","createdAt":"2026-05-01T09:00:00Z","repository":{"nameWithOwner":"acme/one"}},
 			null,
 			{"number":8,"title":"Second","url":"https://github.com/acme/two/pull/8","isDraft":false,"mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","updatedAt":"2026-05-31T12:00:00Z","repository":{"nameWithOwner":"acme/two"}}
 		],"pageInfo":{"hasNextPage":true,"endCursor":"cursor"}}}}},
@@ -38,6 +38,9 @@ func TestDecodePagesPreservesAllRowsAndOrder(t *testing.T) {
 		if got.Number != expected.Number || got.Title != expected.Title || got.Repository != expected.Repository || got.Draft != expected.Draft || got.Mergeable != expected.Mergeable || got.MergeState != expected.MergeState || !got.UpdatedAt.Equal(expected.UpdatedAt) {
 			t.Errorf("pull request %d = %+v, want %+v", i, got, expected)
 		}
+	}
+	if created := snapshot.PullRequests[0].CreatedAt; !created.Equal(time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)) {
+		t.Errorf("created = %v", created)
 	}
 	if !snapshot.PullRequests[0].Draft || snapshot.PullRequests[0].Mergeable != "MERGEABLE" {
 		t.Fatalf("draft and mergeability were not independent: %+v", snapshot.PullRequests[0])

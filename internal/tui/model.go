@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -450,10 +451,14 @@ func (m *model) rebuildVisiblePRs() {
 	for _, id := range paneIDs {
 		pane := &m.panes[id]
 		pane.visible = pane.visible[:0]
-		for index, pr := range m.source(id) {
+		source := m.source(id)
+		for index, pr := range source {
 			if m.inScope(&pr) {
 				pane.visible = append(pane.visible, index)
 			}
+		}
+		if id == paneMine {
+			sortMine(pane.visible, source)
 		}
 		m.rebuildGone(id)
 	}
@@ -480,6 +485,22 @@ func (m *model) keepingSelection(rebuild func()) {
 			m.selectPR(id, previous[id].repository, previous[id].number)
 		}
 	}
+}
+
+// sortMine orders authored pull requests ready to merge first, then oldest
+// created first. Ties keep the fetched order.
+func sortMine(visible []int, source []github.PullRequest) {
+	slices.SortStableFunc(visible, func(a, b int) int {
+		x, y := &source[a], &source[b]
+		readyX, readyY := mergeReady(x.Draft, x.Mergeable, x.MergeState), mergeReady(y.Draft, y.Mergeable, y.MergeState)
+		if readyX != readyY {
+			if readyX {
+				return -1
+			}
+			return 1
+		}
+		return x.CreatedAt.Compare(y.CreatedAt)
+	})
 }
 
 func (m *model) inScope(pr *github.PullRequest) bool {
