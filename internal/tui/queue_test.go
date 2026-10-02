@@ -148,3 +148,107 @@ func slicesContains(ids []paneID, id paneID) bool {
 	}
 	return false
 }
+
+func TestRemovedPullRequestsAreTaggedInMyPRs(t *testing.T) {
+	mine := manyPRs(3)
+	mine[0].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueRemovedFailed}
+	mine[1].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueRemovedCanceled}
+	m := newPaneModel(t, 140, 30, mine, nil)
+	text := ansi.Strip(strings.Join(m.listLines(), "\n"))
+	if !strings.Contains(text, "queue failed · ") || !strings.Contains(text, "queue canceled · ") || len(m.panes[paneQueue].visible) != 0 {
+		t.Fatalf("removed tags:\n%s", text)
+	}
+}
+
+func TestQueueChangeReversesTheNameInMyPRs(t *testing.T) {
+	m := newPaneModel(t, 140, 30, manyPRs(2), nil)
+	snapshot := m.snapshot
+	snapshot.PullRequests = manyPRs(2)
+	snapshot.PullRequests[0].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueRemovedFailed}
+	m.applySnapshot(snapshot)
+	var found bool
+	for _, row := range m.paneRows(paneMine, m.paneLayout(paneMine)) {
+		for _, cell := range row {
+			if strings.Contains(cell, "queue failed") && strings.Contains(cell, reverseOn) {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("name is not reversed after a queue change")
+	}
+}
+
+func TestQueueRowsCountInNoCategoryAndNotInTheTitle(t *testing.T) {
+	mine := manyPRs(2)
+	for i := range mine {
+		mine[i].Mergeable, mine[i].MergeState = "MERGEABLE", "CLEAN"
+	}
+	mine[1].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueuePassed}
+	m := newPaneModel(t, 140, 30, mine, nil)
+	if got := m.categoryCount(1); got != 1 {
+		t.Fatalf("ready count = %d, want 1 (the queued one is not counted)", got)
+	}
+	if got := m.needYouCount(); got != 1 {
+		t.Fatalf("need you = %d", got)
+	}
+}
+
+func TestRemovalForFailedTestsAlertsAndMovesDoNot(t *testing.T) {
+	m := queueModel(t, 120, 40)
+	snapshot := m.snapshot
+	snapshot.PullRequests = append([]github.PullRequest(nil), snapshot.PullRequests...)
+	pr := snapshot.PullRequests[1]
+	pr.Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueRemovedFailed}
+	snapshot.PullRequests[1] = pr
+	moved := snapshot.PullRequests[0]
+	moved.Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueSubmitted}
+	snapshot.PullRequests[0] = moved
+	m.snapshot = snapshot
+	alerts := m.alerts()
+	if len(alerts) != 1 || alerts[0].pr.Number != pr.Number || !strings.Contains(strings.Join(alerts[0].kinds, ","), "merge queue") {
+		t.Fatalf("alerts = %+v", alerts)
+	}
+}
+
+func TestDetailsShowTheQueue(t *testing.T) {
+	m := queueModel(t, 140, 40)
+	m.setFocus(paneQueue)
+	var queueRow []string
+	pr, _ := m.selectedPR()
+	for _, row := range m.detailRows(pr, false) {
+		if row.label == "Queue" {
+			queueRow = row.values
+		}
+	}
+	if len(queueRow) == 0 || !strings.Contains(queueRow[0], "Trunk") {
+		t.Fatalf("queue row = %q", queueRow)
+	}
+}
+
+func TestMyPRsEmptyLineNamesTheQueue(t *testing.T) {
+	mine := manyPRs(1)
+	mine[0].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueTesting}
+	m := newPaneModel(t, 140, 30, mine, nil)
+	if line := m.emptyPaneLine(paneMine); !strings.Contains(line, "outside the merge queue") {
+		t.Fatalf("line = %q", line)
+	}
+	if line := m.emptyPaneLine(paneReview); strings.Contains(line, "queue") {
+		t.Fatalf("review line = %q", line)
+	}
+}
+
+func TestQueueEmptyingFocusGoesToThePaneWithRows(t *testing.T) {
+	mine := manyPRs(1)
+	mine[0].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueTesting}
+	m := newPaneModel(t, 140, 40, mine, reviewPRs(2))
+	m.setFocus(paneQueue)
+	// The pull request leaves the queue as a hidden draft, so My PRs stays empty.
+	snapshot := m.snapshot
+	snapshot.PullRequests = manyPRs(1)
+	snapshot.PullRequests[0].Draft = true
+	m.applySnapshot(snapshot)
+	if len(m.panes[paneMine].visible) != 0 || m.focus != paneReview {
+		t.Fatalf("focus = %v, want review", m.focus)
+	}
+}

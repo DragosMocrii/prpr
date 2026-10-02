@@ -170,6 +170,13 @@ func (m *model) detailRows(pr *github.PullRequest, gone bool) []detailRowText {
 			add("Ready", lines...)
 		}
 	}
+	if pr.Queue != nil && !review {
+		values := []string{singleLine(pr.Queue.Provider) + ": " + queueDetail(pr.Queue)}
+		if pr.Queue.URL != "" {
+			values = append(values, singleLine(pr.Queue.URL))
+		}
+		add("Queue", values...)
+	}
 	add("CI", pending(checksDetail(pr.Checks)))
 	add("Review", pending(reviewDetail(pr.ReviewDecision, pr.Approvals)))
 	if m.bots {
@@ -189,6 +196,23 @@ func (m *model) detailRows(pr *github.PullRequest, gone bool) []detailRowText {
 	add("Size", fmt.Sprintf("+%d −%d lines", pr.Additions, pr.Deletions))
 	add("Comments", pending(plural(pr.Comments, "conversation comment")))
 	return rows
+}
+
+// queueDetail words a queue entry for the details screen.
+func queueDetail(entry *github.QueueEntry) string {
+	text := map[github.QueueState]string{
+		github.QueueSubmitted: "submitted, waiting for branch rules", github.QueueQueued: "waiting to start tests",
+		github.QueueTesting: "testing", github.QueueFailing: "a required check failed; waiting for other pull requests",
+		github.QueuePassed: "passed; merging soon", github.QueueRemovedFailed: "removed from the queue: tests failed",
+		github.QueueRemovedCanceled: "removed from the queue: canceled",
+	}[entry.State]
+	if text == "" {
+		text = "in the queue; state not recognized"
+	}
+	if entry.Detail != "" {
+		text += " (" + singleLine(entry.Detail) + ")"
+	}
+	return text
 }
 
 // detailRow draws a label beside its values, each value wrapped under the

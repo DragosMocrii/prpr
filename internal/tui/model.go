@@ -718,8 +718,14 @@ func (m *model) rebuildVisiblePRs() {
 		m.rebuildGone(id)
 	}
 	// An emptied queue pane is no longer drawn, so it cannot keep the focus.
-	if !slices.Contains(m.drawnPanes(), m.focus) {
+	if drawn := m.drawnPanes(); !slices.Contains(drawn, m.focus) {
 		m.focus = paneMine
+		for _, id := range drawn {
+			if len(m.panes[id].visible) > 0 {
+				m.focus = id
+				break
+			}
+		}
 		m.applyFocusStyles()
 	}
 	m.rebuildPRTable(true)

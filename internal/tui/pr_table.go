@@ -189,6 +189,15 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 				name = status + " · " + name
 			}
 		}
+		nameCells := cellName
+		if id == paneMine && pr.Queue != nil {
+			if tag := removedQueueTag(ic, pr.Queue.State); tag != "" && ic.nerd {
+				name = tag + " " + name
+			} else if tag != "" {
+				name = tag + " · " + name
+			}
+			nameCells |= cellQueue
+		}
 		if id == paneQueue {
 			cells := table.Row{markText(mark.kind, gone), changed(cellQueue, queueText(ic, pr.Queue.State))}
 			if layout.repositoryColumn {
@@ -221,7 +230,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		if layout.repositoryColumn {
 			cells = append(cells, singleLine(pr.Repository))
 		}
-		cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(cellName, name), changed(cellState, state))
+		cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(nameCells, name), changed(cellState, state))
 		if review {
 			cells = append(cells, changed(lastCell, last))
 		}

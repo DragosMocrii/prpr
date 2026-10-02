@@ -438,6 +438,10 @@ func (m *model) changeSummary(id paneID) string {
 func (m *model) emptyPaneLine(id paneID) string {
 	text := "No open pull requests"
 	switch id {
+	case paneMine:
+		if len(m.panes[paneQueue].visible) > 0 {
+			text = "No open pull requests outside the merge queue"
+		}
 	case paneReview:
 		text = "No review requests"
 	case paneQueue:
