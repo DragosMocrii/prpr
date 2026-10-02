@@ -96,6 +96,8 @@ prpr --bots 'Rabbit=coderabbitai'
 prpr --bots ''
 ```
 
+`--queues` chooses the merge queues to read, `trunk` and `github` by default; see [Merge queue](#merge-queue).
+
 `--notify` starts with desktop notifications on; see [Notifications](#notifications). `--icons nerd` draws Nerd Font icons; see [Icons](#icons). `--title=false` leaves the terminal title alone; see [Terminal title](#terminal-title).
 
 Bot reporting costs more GraphQL quota, mostly to read review threads: about 28 points per 100 pull requests listed, against about 3 without bots.
@@ -110,7 +112,7 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `k` / Up: select the previous pull request.
 - `f` / `b` / Page Down / Page Up / Space: move by a page; `d` / `u`: move by half a page; `g` / `G` / Home / End: jump to the first or last pull request.
 - Left / Right: jump to the previous or next page shown in the page indicator.
-- Tab / Shift+Tab: switch between **My PRs** and **Review requested**. Each list keeps its own selection and scroll position; navigation keys move only the focused list.
+- Tab / Shift+Tab: switch between **My PRs**, **Merge queue** (while it has rows), and **Review requested**. Each list keeps its own selection and scroll position; navigation keys move only the focused list.
 - `/`: search both lists; see [Search and quick filters](#search-and-quick-filters).
 - `D`: show or hide draft pull requests in both lists, and save the choice; see [Drafts](#drafts).
 - `F` / `M`: show only PRs with failing CI, or PRs ready to merge; press again to show all.
@@ -178,6 +180,12 @@ The quick filters show only pull requests whose checks failed (`F`), or pull req
 Both lists hide draft pull requests, including reviewed ones turned back into drafts; closed pull requests are never fetched. A list's title says how many drafts it hides, as in `My PRs (4) · 1 draft hidden`. A list with only hidden drafts says so and that `D` shows them. Press `D` to show drafts alongside the rest, and `D` again to hide them; prpr remembers the choice, and the title line says `drafts shown` while they are. Hidden drafts are left out like pull requests outside the repository filter: attention counts, the terminal title count, and notifications skip them, and a review request on a hidden draft notifies when it leaves draft. Esc clears the search and filters but leaves drafts as they are.
 
 Search and quick filters combine with the repository filter and apply to both lists, gone rows included. The title line names every active filter, list titles count shown rows against all rows in scope (`My PRs (3 of 12)`), and Esc on the list clears the search, quick filter, and attention category; `c` still clears only the repository filter. Filters are kept in memory only.
+
+### Merge queue
+
+Pull requests you have handed to a merge queue move to a **Merge queue** list between **My PRs** and **Review requested**, which appears only while it has rows. prpr reads two queues, both through GitHub: [Trunk](https://trunk.io), from the comment Trunk keeps on each pull request, and GitHub's own merge queue. No Trunk token is needed. Each row shows the state (`submitted`, `queued`, `testing`, `failing`, `passed`, or `?` for wording prpr does not recognize) and a detail such as the pull request Trunk tests on; furthest along comes first (passed, failing, testing, queued, submitted, then `?`). A merged pull request closes and leaves the list as a gone row. When every open pull request of yours is queued, **My PRs** says so.
+
+When Trunk removes a pull request, because its tests failed or someone canceled it, it returns to **My PRs** tagged `queue failed` or `queue canceled` until Trunk's comment changes, and a failed removal sends a notification. Pull requests in the queue count in no attention category and not in the terminal title. `--queues=github` or `--queues=trunk` reads one queue; `--queues=` reads none and hides the list. prpr reads the first 10 comments of each of your open pull requests to find Trunk's, which is almost always the first.
 
 ### Details
 
