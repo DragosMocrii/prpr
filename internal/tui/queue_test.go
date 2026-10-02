@@ -97,6 +97,49 @@ func TestThreePanesFitEverySize(t *testing.T) {
 	}
 }
 
+func TestQueuePaneColumnsAndOrder(t *testing.T) {
+	mine := manyPRs(5)
+	for i, state := range []github.QueueState{github.QueueSubmitted, github.QueuePassed, github.QueueUnknown, github.QueueTesting} {
+		mine[i].Queue = &github.QueueEntry{Provider: "Trunk", State: state, Detail: "d" + string(rune('a'+i))}
+	}
+	m := newPaneModel(t, 140, 40, mine, reviewPRs(1))
+	columns := m.panes[paneQueue].table.Columns()
+	if columns[1].Title != m.icons.header("Queue") || columns[len(columns)-1].Title != "Detail" {
+		t.Fatalf("queue columns = %+v", columns)
+	}
+	var states []string
+	for _, row := range m.panes[paneQueue].table.Rows() {
+		states = append(states, ansi.Strip(row[1]))
+	}
+	if strings.Join(states, ",") != "passed,testing,submitted,?" {
+		t.Fatalf("queue order = %v", states)
+	}
+}
+
+func TestMovingIntoTheQueueIsMarkedChanged(t *testing.T) {
+	m := newPaneModel(t, 120, 40, manyPRs(4), reviewPRs(3))
+	snapshot := m.snapshot
+	snapshot.PullRequests = manyPRs(4)
+	snapshot.PullRequests[0].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueQueued}
+	m.applySnapshot(snapshot)
+	if mark := m.tracker(paneQueue).mark(&m.snapshot.PullRequests[0]); mark.kind != markChanged || mark.cells&cellQueue == 0 {
+		t.Fatalf("moved row mark = %+v, want changed queue cell", mark)
+	}
+}
+
+func TestQueueStateChangeIsMarked(t *testing.T) {
+	m := queueModel(t, 120, 40)
+	snapshot := m.snapshot
+	snapshot.PullRequests = append([]github.PullRequest(nil), snapshot.PullRequests...)
+	pr := snapshot.PullRequests[1]
+	pr.Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueuePassed, Detail: "tested on #9"}
+	snapshot.PullRequests[1] = pr
+	m.applySnapshot(snapshot)
+	if mark := m.tracker(paneQueue).mark(&snapshot.PullRequests[1]); mark.kind != markChanged || mark.cells&cellQueue == 0 {
+		t.Fatalf("mark = %+v", mark)
+	}
+}
+
 func slicesContains(ids []paneID, id paneID) bool {
 	for _, x := range ids {
 		if x == id {

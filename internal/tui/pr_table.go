@@ -83,6 +83,24 @@ func (m *model) paneLayout(id paneID) tableLayout {
 		repositoryWidth = min(28, max(12, width/4))
 	}
 	ic := m.icons
+	if id == paneQueue {
+		queueWidth := 9
+		if ic.nerd {
+			queueWidth = 1
+		}
+		columns := []table.Column{{Title: "", Width: 1}, {Title: ic.header("Queue"), Width: queueWidth}}
+		if layout.repositoryColumn {
+			columns = append(columns, table.Column{Title: "Repository", Width: repositoryWidth})
+		}
+		columns = append(columns, table.Column{Title: "Number", Width: maxNumberWidth})
+		nameColumn := len(columns)
+		columns = append(columns, table.Column{Title: "PR name"}, table.Column{Title: "Detail", Width: min(24, max(10, width/6))})
+		nameWidth := remainingWidth(width, columns)
+		layout.fits = nameWidth >= 8
+		columns[nameColumn].Width = max(8, nameWidth)
+		layout.columns = columns
+		return layout
+	}
 	lastTitle, lastWidth := ic.header("Merge"), 5
 	stateWidth := 5
 	if ic.nerd {
@@ -171,6 +189,20 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 				name = status + " · " + name
 			}
 		}
+		if id == paneQueue {
+			cells := table.Row{markText(mark.kind, gone), changed(cellQueue, queueText(ic, pr.Queue.State))}
+			if layout.repositoryColumn {
+				cells = append(cells, singleLine(pr.Repository))
+			}
+			cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(cellName, name), changed(cellQueue, singleLine(pr.Queue.Detail)))
+			if gone {
+				for i := 1; i < len(cells); i++ {
+					cells[i] = restyle(cells[i], goneOn, goneOff)
+				}
+			}
+			rows = append(rows, cells)
+			continue
+		}
 		state := ic.stateText(pr.Draft)
 		// A preview has no merge state, but conflicts are already known.
 		preview := m.snapshot.Preview && !gone
@@ -245,6 +277,69 @@ func reviewStatusTag(ic *iconSet, status github.ReviewStatus) string {
 		return text
 	}
 	return coloredIcon(text, "3")
+}
+
+// queueText draws a queue state: a colored word, or the Nerd icon.
+func queueText(ic *iconSet, state github.QueueState) string {
+	word, icon, color := "?", ic.unknown, "3"
+	switch state {
+	case github.QueueSubmitted:
+		word, icon, color = "submitted", ic.queueSubmitted, ""
+	case github.QueueQueued:
+		word, icon, color = "queued", ic.queueQueued, ""
+	case github.QueueTesting:
+		word, icon, color = "testing", ic.queueTesting, "3"
+	case github.QueueFailing:
+		word, icon, color = "failing", ic.queueFailing, "1"
+	case github.QueuePassed:
+		word, icon, color = "passed", ic.queuePassed, "2"
+	}
+	text := word
+	if ic.nerd && icon != "" {
+		text = icon
+	}
+	if color == "" {
+		return text
+	}
+	return coloredIcon(text, color)
+}
+
+// queueRank orders the queue pane: furthest along first.
+func queueRank(state github.QueueState) int {
+	switch state {
+	case github.QueuePassed:
+		return 0
+	case github.QueueFailing:
+		return 1
+	case github.QueueTesting:
+		return 2
+	case github.QueueQueued:
+		return 3
+	case github.QueueSubmitted:
+		return 4
+	}
+	return 5
+}
+
+// removedQueueTag marks a pull request the queue removed, shown before the
+// name in My PRs: red when it failed, faint when it was canceled.
+func removedQueueTag(ic *iconSet, state github.QueueState) string {
+	text, color := "", ""
+	switch state {
+	case github.QueueRemovedFailed:
+		text, color = "queue failed", "1"
+	case github.QueueRemovedCanceled:
+		text = "queue canceled"
+	default:
+		return ""
+	}
+	if ic.nerd {
+		text = ic.queueRemoved
+	}
+	if color == "" {
+		return lipgloss.NewStyle().Faint(true).Render(text)
+	}
+	return coloredIcon(text, color)
 }
 
 // reviewStatusText names where a reviewed pull request stands, for

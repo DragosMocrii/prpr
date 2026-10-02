@@ -24,7 +24,10 @@ type iconSet struct {
 	open, draft string
 	// Reviewed pull requests: needing the viewer again, then waiting.
 	newCommits, replied, dismissed, activity, waiting, approved, backInDraft string
-	star, pin, bell                                                          string
+	// Merge queue states, then the tag of a pull request the queue removed;
+	// empty in the Unicode set, which writes words.
+	queueSubmitted, queueQueued, queueTesting, queueFailing, queuePassed, queueRemoved string
+	star, pin, bell                                                                    string
 	// gap separates an icon from a number or mark after it. Nerd Font icons
 	// are often drawn wider than the one cell the terminal gives them, so
 	// whatever follows directly would be drawn over them.
@@ -50,13 +53,20 @@ var nerdIcons = iconSet{
 	open: "", draft: "",
 	newCommits: "", replied: "", dismissed: "", activity: "",
 	waiting: "", approved: "", backInDraft: "",
-	star: "", pin: "", bell: "", gap: " ",
+	queueSubmitted: "\uf4fa", // paper_airplane
+	queueQueued:    "\uf43a", // clock
+	queueTesting:   "\uf499", // beaker
+	queueFailing:   "\uf421", // alert
+	queuePassed:    "\uf49e", // check_circle
+	queueRemoved:   "\uf468", // circle_slash
+	star:           "", pin: "", bell: "", gap: " ",
 	// Ready to merge, changes requested, failing CI, conflicts, bot threads,
 	// awaiting your review, and status unknown.
 	categories: [7]string{"\uf419", "\uf52f", "\uf45e", "\uf47f", "\uf477", "\uf4af", "\uf420"},
 	headers: map[string]string{
 		"State": "", "Merge": "", "Age": "", "Bots": "",
 		"CI": "", "Review": "", "Comments": "", "Size": "",
+		"Queue": "\uf4db", // git_merge_queue
 	},
 }
 

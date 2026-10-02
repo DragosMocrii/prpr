@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,7 +33,7 @@ func (m *model) legendSections() []legendSection {
 	item := legendItem
 	var sections []legendSection
 	if ic.nerd {
-		columns := []string{"State", "Merge", "Age", "Bots", "CI", "Review", "Comments", "Size"}
+		columns := []string{"State", "Merge", "Age", "Bots", "CI", "Review", "Comments", "Size", "Queue"}
 		var items []string
 		for _, column := range columns {
 			if column == "Bots" && !m.bots {
@@ -88,6 +89,16 @@ func (m *model) legendSections() []legendSection {
 			reviewed = append(reviewed, item(reviewStatusTag(ic, status), reviewStatusText(status)))
 		}
 		sections = append(sections, legendSection{"Reviewed", reviewed})
+	}
+	if ic.nerd || slices.Contains(m.drawnPanes(), paneQueue) {
+		sections = append(sections, legendSection{"Queue", []string{
+			item(queueText(ic, github.QueuePassed), "passed, merging soon"),
+			item(queueText(ic, github.QueueFailing), "a check failed"),
+			item(queueText(ic, github.QueueTesting), "testing"),
+			item(queueText(ic, github.QueueQueued), "waiting to test"),
+			item(queueText(ic, github.QueueSubmitted), "submitted"),
+			item(removedQueueTag(ic, github.QueueRemovedFailed), "removed: failed"),
+		}})
 	}
 	sections = append(sections,
 		legendSection{"Marks", []string{

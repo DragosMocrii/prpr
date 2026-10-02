@@ -710,6 +710,11 @@ func (m *model) rebuildVisiblePRs() {
 		if id == paneMine {
 			m.sortMine(pane.visible, source)
 		}
+		if id == paneQueue {
+			slices.SortStableFunc(pane.visible, func(a, b int) int {
+				return queueRank(source[a].Queue.State) - queueRank(source[b].Queue.State)
+			})
+		}
 		m.rebuildGone(id)
 	}
 	// An emptied queue pane is no longer drawn, so it cannot keep the focus.

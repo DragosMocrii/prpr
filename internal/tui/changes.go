@@ -33,6 +33,7 @@ const (
 	cellReview
 	cellComments
 	cellSize
+	cellQueue
 )
 
 type rowMark struct {
@@ -138,7 +139,18 @@ func cellChanges(old, pr *github.PullRequest) changedCells {
 	if old.Additions != pr.Additions || old.Deletions != pr.Deletions {
 		cells |= cellSize
 	}
+	if !sameQueue(old.Queue, pr.Queue) {
+		cells |= cellQueue
+	}
 	return cells
+}
+
+// sameQueue compares what the queue pane and removed tags show.
+func sameQueue(a, b *github.QueueEntry) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.State == b.State && a.Detail == b.Detail
 }
 
 // ruleFieldsChanged compares the fields only rules read, which decide the
