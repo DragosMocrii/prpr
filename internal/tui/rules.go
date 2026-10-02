@@ -164,11 +164,20 @@ const rulesChrome = 6
 func (m *model) showRulesForm(form *huh.Form) tea.Cmd {
 	dark := m.darkBackground
 	form.WithAccessible(false).WithShowHelp(true).
-		WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return huh.ThemeCharm(dark) }))
+		WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return rulesTheme(dark) }))
 	form.SubmitCmd, form.CancelCmd = nil, nil
 	m.rulesEditor.form = form
 	m.sizeRulesForm()
 	return form.Init()
+}
+
+// rulesTheme is the editor's theme for a dark or light background. huh's
+// ThemeCharm (through v2.0.3) passes its colors to lipgloss.LightDark dark
+// first, so it draws near-black options on a dark background; asking for the
+// other background gets the colors it means. When huh fixes that,
+// TestRulesEditorTextContrastsWithTheBackground fails: pass dark as is.
+func rulesTheme(dark bool) *huh.Styles {
+	return huh.ThemeCharm(!dark)
 }
 
 // sizeRulesForm fits the form to the terminal. A form sized once ignores

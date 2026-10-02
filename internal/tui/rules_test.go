@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"image/color"
 	"reflect"
 	"strings"
 	"testing"
@@ -291,6 +292,29 @@ func TestRulesEditorFollowsResizes(t *testing.T) {
 	for _, line := range lines {
 		if ansi.StringWidth(line) > 44 {
 			t.Fatalf("line wider than 44: %q", ansi.Strip(line))
+		}
+	}
+}
+
+func TestRulesEditorTextContrastsWithTheBackground(t *testing.T) {
+	bright := func(c color.Color) bool {
+		r, g, b, _ := c.RGBA()
+		return 0.2126*float64(r)+0.7152*float64(g)+0.0722*float64(b) > 0.5*0xffff
+	}
+	for _, dark := range []bool{true, false} {
+		styles := rulesTheme(dark)
+		for name, fg := range map[string]color.Color{
+			"option":          styles.Focused.Option.GetForeground(),
+			"unselected":      styles.Focused.UnselectedOption.GetForeground(),
+			"placeholder":     styles.Focused.TextInput.Placeholder.GetForeground(),
+			"blurred options": styles.Blurred.UnselectedOption.GetForeground(),
+		} {
+			if bright(fg) != dark {
+				t.Errorf("dark background %t: %s text is bright %t", dark, name, bright(fg))
+			}
+		}
+		if bg := styles.Focused.BlurredButton.GetBackground(); bright(bg) == dark {
+			t.Errorf("dark background %t: blurred button background is bright %t", dark, bright(bg))
 		}
 	}
 }
