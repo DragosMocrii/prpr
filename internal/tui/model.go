@@ -72,6 +72,12 @@ type model struct {
 	// terminal's own selection. pointer is where the mouse was last seen.
 	mouse   bool
 	pointer pointer
+	// openBrowser opens a pull request URL; it is the client's in the app.
+	openBrowser func(context.Context, string) error
+	// notice reports the last open or copy action in the status line until
+	// the next key press. noticeID increments whenever it is set.
+	notice   string
+	noticeID uint64
 }
 
 type fetchFinishedMsg struct {
@@ -101,6 +107,7 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m.cancel = cancel
 	m.refreshInterval = refreshInterval
 	m.bots = len(client.Bots()) > 0
+	m.openBrowser = client.OpenInBrowser
 	return m
 }
 
@@ -290,6 +297,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.startFetch()
+	case browserOpenedMsg:
+		m.handleBrowserOpened(msg)
 	case tea.PasteMsg:
 		if m.picker != nil {
 			return m, m.picker.paste(msg.Content, m.pickerViewportHeight())
@@ -313,6 +322,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.picker != nil {
 		return m.updateRepositoryPicker(msg)
 	}
+	m.notice = ""
 	switch {
 	case key.Matches(msg, k.Quit):
 		m.cancel()
@@ -339,6 +349,10 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			m.rebuildVisiblePRs()
 		})
+	case key.Matches(msg, k.Open):
+		return m.openSelected()
+	case key.Matches(msg, k.CopyURL):
+		return m.copySelected()
 	case key.Matches(msg, k.Mouse):
 		m.toggleMouse()
 	case key.Matches(msg, k.Help):
@@ -723,6 +737,8 @@ func (m *model) listLines() []string {
 	}
 	if m.preferenceErr != nil {
 		fixed = strings.TrimLeft(fixed+"  "+m.preferenceErr.Error(), " ")
+	} else if m.notice != "" {
+		fixed = strings.TrimLeft(fixed+"  "+m.notice, " ")
 	} else if !(layout.single && m.focus != paneMine) && rowCount(&m.panes[paneMine]) > 0 {
 		legend = "✓ ready  ● blocked  ↓ behind  ✗ conflicts  ? unknown"
 	}

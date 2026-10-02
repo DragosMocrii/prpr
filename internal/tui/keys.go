@@ -19,6 +19,8 @@ type keyMap struct {
 	PrevPane        key.Binding
 	Refresh         key.Binding
 	ClearMarks      key.Binding
+	Open            key.Binding
+	CopyURL         key.Binding
 	Mouse           key.Binding
 	Retry           key.Binding
 	Login           key.Binding
@@ -54,6 +56,8 @@ func defaultKeyMap() keyMap {
 		PrevPane:        key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev list")),
 		Refresh:         key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 		ClearMarks:      key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "clear marks")),
+		Open:            key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open")),
+		CopyURL:         key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy URL")),
 		Mouse:           key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mouse on")),
 		Retry:           key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
 		Login:           key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log in to GitHub")),
@@ -101,6 +105,8 @@ func (m *model) syncKeys() {
 	k.PrevPane.SetEnabled(viewing)
 	k.Refresh.SetEnabled(idle && m.err == nil && m.picker == nil)
 	k.ClearMarks.SetEnabled(viewing && m.hasMarks())
+	k.Open.SetEnabled(rows)
+	k.CopyURL.SetEnabled(rows)
 	k.Mouse.SetEnabled(viewing)
 	if m.mouse {
 		k.Mouse.SetHelp("m", "mouse off")
@@ -161,12 +167,13 @@ func (k keyMap) errorHelp() helpKeys {
 func (k keyMap) listHelp() helpKeys {
 	t := k.Table
 	return helpKeys{
-		short: []key.Binding{t.LineUp, t.LineDown, k.NextPane, k.PickRepository, k.AllRepositories, k.Refresh, k.Help, k.Quit, k.Mouse, k.ClearMarks},
+		short: []key.Binding{t.LineUp, t.LineDown, k.NextPane, k.PickRepository, k.AllRepositories, k.Refresh, k.Help, k.Quit, k.Mouse, k.ClearMarks, k.Open},
 		full: [][]key.Binding{
 			{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom},
 			{t.PageUp, t.PageDown, t.HalfPageUp, t.HalfPageDown},
 			{k.Pages.PrevPage, k.Pages.NextPage},
 			{k.NextPane, k.PrevPane},
+			{k.Open, k.CopyURL},
 			{k.PickRepository, k.AllRepositories, k.Refresh, k.ClearMarks},
 			{k.Mouse, k.Help, k.Quit},
 		},

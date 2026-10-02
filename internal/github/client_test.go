@@ -331,3 +331,12 @@ func TestPreviewQueriesSelectOnlyFastFields(t *testing.T) {
 		t.Error("preview query does not keep updated-descending order")
 	}
 }
+
+func TestOpenCommandKeepsTheURLAnArgument(t *testing.T) {
+	c := &Client{path: "gh"}
+	got := c.openCommand(t.Context(), "-https://github.com/acme/a/pull/1").Args
+	want := []string{"gh", "pr", "view", "--web", "--", "-https://github.com/acme/a/pull/1"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("args = %q, want %q", got, want)
+	}
+}

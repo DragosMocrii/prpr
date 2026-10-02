@@ -458,6 +458,20 @@ func (c *Client) LoginCommand(ctx context.Context) *exec.Cmd {
 	return exec.CommandContext(ctx, c.path, "auth", "login", "--hostname", "github.com", "--web")
 }
 
+// OpenInBrowser opens a pull request's page in the browser that gh is
+// configured to use.
+func (c *Client) OpenInBrowser(ctx context.Context, url string) error {
+	if _, err := c.openCommand(ctx, url).Output(); err != nil {
+		return commandError("Could not open the browser", err)
+	}
+	return nil
+}
+
+func (c *Client) openCommand(ctx context.Context, url string) *exec.Cmd {
+	// "--" keeps the URL from being read as a flag.
+	return exec.CommandContext(ctx, c.path, "pr", "view", "--web", "--", url)
+}
+
 func commandError(message string, err error) error {
 	var detail string
 	var exitErr *exec.ExitError

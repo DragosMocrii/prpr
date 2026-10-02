@@ -13,6 +13,7 @@
 - `internal/tui/quota.go` owns rate-limit polling and the status line.
 - `internal/tui/changes.go` owns change tracking between refreshes: row marks, changed cells, and gone pull requests.
 - `internal/tui/mouse.go` owns mouse mode: mapping screen lines to panes and rows, hover, clicks, and the wheel.
+- `internal/tui/open.go` owns opening the selected pull request in the browser and copying its URL, and the status-line notice they set.
 - `internal/tui/pr_table.go` owns pull-request table columns, statistics cells, and links.
 - `internal/tui/keys.go` owns key bindings, their enabled state, and per-screen help.
 - `docs/demo` is a separate Go module that records `docs/demo.gif` against a fake `gh` with made-up data; see CONTRIBUTING.md.
@@ -49,6 +50,7 @@ Running the app requires `gh` on `PATH`, authenticated to `github.com`. Package 
 - Change marks compare each successful fetch with the previous successful one, by repository and number, per pane. They pile up until the cursor leaves the row or `x` clears them; a failed fetch keeps the baseline, and an account switch resets it. Gone rows are the only results shown that are not current, and they must always be dimmed, struck through, and marked `−`. Age is never compared. Change state stays in memory.
 - Mouse mode is off at start, toggled by `m`, and kept in memory only. Only the list screen requests mouse input; other screens leave it to the terminal. Hover never moves the cursor or clears marks; clicks and the wheel move the cursor through the same leave-row rule as keys. Hit testing follows `listLines` and finds a table's first drawn row from its selected row, since Bubbles does not expose its scroll position.
 - Bubbles owns the pull-request table cursor and scrolling. Preserve ANSI/grapheme-aware width behavior and safe OSC 8 hyperlink targets. Cells end their colors with full resets, so row stripes and the selected-row background are re-applied after each reset when the table is drawn.
+- `o` opens the selected row through `gh pr view --web -- <url>`, run asynchronously; `y` copies its URL with OSC 52 (`tea.SetClipboard`). Both act on the focused pane's selected row, gone rows included, and refuse URLs that fail `safePullRequestURL`.
 - The Merge column is green only for a `mergeStateStatus` of `CLEAN`, `HAS_HOOKS`, or `UNSTABLE`. `mergeable` alone says nothing about required reviews or checks. Conflicts win over every other state, drafts come from `isDraft` (the `DRAFT` state is deprecated), and an unknown or missing state is never shown as mergeable.
 - Age is ready-for-review time (last `ReadyForReviewEvent`, else `createdAt`; zero for drafts), or for review requests the latest `ReviewRequestedEvent` naming the viewer with that ready time as fallback. Null review decisions and check rollups are unknown, never approved or passing.
 - Statistics columns drop in reverse priority (Size, Comments, Review, CI, Bots, Age) before squeezing the PR name below `minStatsNameWidth`.
