@@ -30,6 +30,7 @@ type keyMap struct {
 	Open            key.Binding
 	CopyURL         key.Binding
 	Mouse           key.Binding
+	Notify          key.Binding
 	Retry           key.Binding
 	Login           key.Binding
 	Help            key.Binding
@@ -83,6 +84,7 @@ func defaultKeyMap() keyMap {
 		Open:            key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open")),
 		CopyURL:         key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy URL")),
 		Mouse:           key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mouse on")),
+		Notify:          key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "notify on")),
 		Retry:           key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
 		Login:           key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log in to GitHub")),
 		Help:            key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "more")),
@@ -153,6 +155,12 @@ func (m *model) syncKeys() {
 	} else {
 		k.Mouse.SetHelp("m", "mouse on")
 	}
+	k.Notify.SetEnabled(listing)
+	if m.notify {
+		k.Notify.SetHelp("n", "notify off")
+	} else {
+		k.Notify.SetHelp("n", "notify on")
+	}
 	k.Retry.SetEnabled(idle && m.err != nil)
 	k.Login.SetEnabled(idle && m.err != nil)
 	k.Help.SetEnabled(listing)
@@ -217,7 +225,7 @@ func (k keyMap) listHelp() helpKeys {
 			{k.Search, k.Categories, k.ClearFilters},
 			{k.QuickDrafts, k.QuickFailing, k.QuickReady},
 			{k.PickRepository, k.AllRepositories, k.Refresh, k.ClearMarks},
-			{k.Mouse, k.Help, k.Quit},
+			{k.Mouse, k.Notify, k.Help, k.Quit},
 		},
 	}
 }

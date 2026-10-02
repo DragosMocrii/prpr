@@ -55,6 +55,7 @@ type options struct {
 	// refresh is the auto-refresh interval; zero turns it off.
 	refresh time.Duration
 	bots    []github.Bot
+	notify  bool
 	version bool
 }
 
@@ -64,6 +65,7 @@ func parseFlags(args []string, output io.Writer) (options, error) {
 	refresh := flags.Duration("refresh", 5*time.Minute, "refresh both lists this long after each fetch, e.g. 90s or 10m; 0 turns it off")
 	showVersion := flags.Bool("version", false, "print the version and exit")
 	bots := flags.String("bots", github.DefaultBots, "review bots as comma-separated Name=login or Name=login:check entries; empty hides the Bots column")
+	notify := flags.Bool("notify", false, "send a desktop notification when a PR turns ready to merge, fails CI, gets changes requested, or requests your review; n toggles it")
 	if err := flags.Parse(args); err != nil {
 		return options{}, reportedError{err}
 	}
@@ -77,7 +79,7 @@ func parseFlags(args []string, output io.Writer) (options, error) {
 	if err != nil {
 		return options{}, fmt.Errorf("--bots: %w", err)
 	}
-	return options{refresh: *refresh, bots: parsed, version: *showVersion}, nil
+	return options{refresh: *refresh, bots: parsed, notify: *notify, version: *showVersion}, nil
 }
 
 func run() error {
@@ -113,6 +115,6 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, err = tea.NewProgram(tui.New(ctx, client, store, opts.refresh)).Run()
+	_, err = tea.NewProgram(tui.New(ctx, client, store, opts.refresh, opts.notify)).Run()
 	return err
 }

@@ -96,6 +96,8 @@ prpr --bots 'Rabbit=coderabbitai'
 prpr --bots ''
 ```
 
+`--notify` starts with desktop notifications on; see [Notifications](#notifications).
+
 Bot reporting costs more GraphQL quota, mostly to read review threads: about 28 points per 100 pull requests listed, against about 3 without bots.
 
 Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository choice per GitHub account; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice.
@@ -123,6 +125,7 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `y`: copy the selected pull request's URL to the clipboard. The copy is sent as an OSC 52 terminal sequence, so it also works over SSH and in containers, but terminals without OSC 52 support, such as macOS Terminal, ignore it; copy the URL shown below the table instead.
 - `x`: clear every change mark and drop gone rows (shown only while there are marks).
 - `m`: turn mouse mode on or off; see [Mouse](#mouse).
+- `n`: turn notifications on or off; see [Notifications](#notifications).
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
 
@@ -185,6 +188,19 @@ After each refresh, the column at the left of each list marks what changed since
 - `−`: the pull request left the list (merged, closed, or the review request was withdrawn). It stays as a dimmed, struck-through row at the bottom of the list, and its link still opens it.
 
 Marks pile up across refreshes until you look: a row's mark clears when the cursor leaves it, and a gone row is removed the same way. `x` clears them all, and is the only way to clear a list's last remaining row. Each list's title counts its new, changed, and gone rows when that fits. A failed refresh does not reset the comparison, and switching GitHub accounts starts over. Changes are kept in memory only.
+
+### Notifications
+
+Notifications are off unless prpr starts with `--notify`; `n` turns them on or off for the session, and the title shows `notify` while they are on. After each refresh, prpr sends one desktop notification if, since the previous refresh:
+
+- one of your pull requests became ready to merge (`✓`), its CI started failing, or a reviewer requested changes;
+- a new review request arrived.
+
+Only changes alert, not the current state: the first load, a switch to another GitHub account, and pull requests you just opened never do, and a failed refresh is skipped. A merge state that GitHub briefly reports as unknown is compared with the last known one. Pull requests outside the repository filter are ignored; search and quick filters are not. A notification names one pull request with its title, or the first two and a count of the rest, and the same text appears in the status line until the next key press.
+
+Where prpr can reach your desktop, it posts the notification itself: with `osascript` on macOS, unless you are connected over SSH, and with `notify-send` on Linux when a D-Bus session bus is reachable. macOS lists these notifications under Script Editor, so allow notifications for Script Editor in System Settings if none appear. Elsewhere, such as over SSH or in a container, prpr sends an OSC 9 terminal sequence instead, which iTerm2, WezTerm, Ghostty, kitty, and Windows Terminal show as a desktop notification; inside tmux, enable `set -g allow-passthrough on`. If the desktop notifier fails, prpr reports it in the status line and uses OSC 9 for the rest of the session.
+
+Every notification also rings the terminal bell, which is what terminals without OSC 9 support show, including the VS Code terminal in a dev container: VS Code marks the terminal tab with a bell, and plays a sound when `accessibility.signals.terminalBell` is on.
 
 ### Mouse
 

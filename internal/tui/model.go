@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/DragosMocrii/prpr/internal/github"
+	"github.com/DragosMocrii/prpr/internal/notifier"
 	"github.com/DragosMocrii/prpr/internal/preferences"
 )
 
@@ -89,6 +90,12 @@ type model struct {
 	category     int
 	searching    *textinput.Model
 	searchBefore string
+	// notify sends a desktop notification when a refresh finds alerts.
+	// readiness is each authored pull request's last known merge readiness.
+	notify    bool
+	readiness map[prKey]bool
+	// desktopNotify posts through the system notifier; nil means OSC 9.
+	desktopNotify notifier.Func
 }
 
 type fetchFinishedMsg struct {
@@ -111,14 +118,16 @@ type autoRefreshMsg struct{ generation uint64 }
 type countdownTickMsg struct{ generation uint64 }
 
 // New returns the app model. A positive refreshInterval refetches both lists
-// that long after each fetch finishes.
-func New(ctx context.Context, client *github.Client, preferences *preferences.Store, refreshInterval time.Duration) tea.Model {
+// that long after each fetch finishes; notify starts with notifications on.
+func New(ctx context.Context, client *github.Client, preferences *preferences.Store, refreshInterval time.Duration, notify bool) tea.Model {
 	appCtx, cancel := context.WithCancel(ctx)
 	m := newModel(appCtx, client, preferences)
 	m.cancel = cancel
 	m.refreshInterval = refreshInterval
 	m.bots = len(client.Bots()) > 0
 	m.openBrowser = client.OpenInBrowser
+	m.notify = notify
+	m.desktopNotify = notifier.Desktop()
 	return m
 }
 
@@ -298,7 +307,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		} else {
-			m.applySnapshot(msg.snapshot)
+			notify := m.applySnapshot(msg.snapshot)
+			return m, tea.Batch(notify, m.scheduleAutoRefresh(), m.resumeQuota())
 		}
 		if m.err == nil {
 			return m, tea.Batch(m.scheduleAutoRefresh(), m.resumeQuota())
@@ -320,6 +330,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startFetch()
 	case browserOpenedMsg:
 		m.handleBrowserOpened(msg)
+	case desktopNotifiedMsg:
+		m.handleDesktopNotified(msg)
 	case tea.PasteMsg:
 		if m.picker != nil {
 			return m, m.picker.paste(msg.Content, m.pickerViewportHeight())
@@ -398,6 +410,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.copySelected()
 	case key.Matches(msg, k.Mouse):
 		m.toggleMouse()
+	case key.Matches(msg, k.Notify):
+		m.toggleNotify()
 	case key.Matches(msg, k.Help):
 		m.help.ShowAll = !m.help.ShowAll
 		m.rebuildPRTable(false)
@@ -519,8 +533,9 @@ func (m *model) rebuildVisiblePRs() {
 
 // applySnapshot shows a fetched or previewed snapshot. A new account restores
 // its saved scope or prompts for one. Only full snapshots are compared for
-// change marks; a preview leaves the baseline alone.
-func (m *model) applySnapshot(snapshot github.Snapshot) {
+// change marks and alerts; a preview leaves the baseline alone. The returned
+// command sends the notification for the alerts.
+func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 	accountChanged := !strings.EqualFold(m.filterLogin, snapshot.Login)
 	if accountChanged {
 		if m.filterLogin != "" {
@@ -550,12 +565,19 @@ func (m *model) applySnapshot(snapshot github.Snapshot) {
 			}
 		}
 	}()
+	var alerts []prAlert
 	m.keepingSelection(func() {
 		m.snapshot = snapshot
 		m.err = nil
 		if !snapshot.Preview {
 			reset := !strings.EqualFold(m.changesLogin, snapshot.Login)
 			m.changesLogin = snapshot.Login
+			// The first fetch of an account is the baseline: it never alerts.
+			if reset {
+				m.resetReadiness()
+			} else {
+				alerts = m.alerts()
+			}
 			for _, id := range paneIDs {
 				if reset {
 					m.changes[id].reset(m.source(id))
@@ -573,6 +595,7 @@ func (m *model) applySnapshot(snapshot github.Snapshot) {
 		}
 		m.setFocus(focus)
 	}
+	return m.notifyAlerts(alerts)
 }
 
 // keepingSelection runs rebuild, then reselects each pane's pull request if
@@ -760,6 +783,9 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 	}
 	if m.refreshInterval > 0 {
 		title += " · auto " + intervalText(m.refreshInterval)
+	}
+	if m.notify {
+		title += " · notify"
 	}
 	lines := []string{m.titleLine(title, m.countdownText())}
 	if m.summaryShown() {
