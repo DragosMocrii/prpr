@@ -96,11 +96,11 @@ prpr --bots 'Rabbit=coderabbitai'
 prpr --bots ''
 ```
 
-`--notify` starts with desktop notifications on; see [Notifications](#notifications).
+`--notify` starts with desktop notifications on; see [Notifications](#notifications). `--icons nerd` draws Nerd Font icons; see [Icons](#icons).
 
 Bot reporting costs more GraphQL quota, mostly to read review threads: about 28 points per 100 pull requests listed, against about 3 without bots.
 
-Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository or watchlist choice and the watchlists of each GitHub account, and the login of a pinned GitHub CLI account; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice. Accounts without watchlists keep the format earlier versions read; once an account saves a watchlist or an account is pinned, prpr 0.1.16 and older refuse to open the file until it is repaired, and 0.1.17 drops the pinned account the next time it saves.
+Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository or watchlist choice and the watchlists of each GitHub account, the login of a pinned GitHub CLI account, and the icon set chosen with `i`; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice. Accounts without watchlists keep the format earlier versions read; once an account saves a watchlist, an account is pinned, or `i` saves an icon choice, prpr 0.1.16 and older refuse to open the file until it is repaired, 0.1.17 drops the pinned account and icon choice the next time it saves, and 0.1.18 and 0.1.19 drop the icon choice.
 
 If startup reports invalid preferences, back up, repair, or remove only the reported `prpr/preferences.json` file before retrying. Do not remove GitHub CLI credentials to repair app preferences.
 
@@ -127,6 +127,7 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `x`: clear every change mark and drop gone rows (shown only while there are marks).
 - `m`: turn mouse mode on or off; see [Mouse](#mouse).
 - `n`: turn notifications on or off; see [Notifications](#notifications).
+- `i`: switch between Unicode and Nerd Font icons, and save the choice; see [Icons](#icons).
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
 
@@ -216,6 +217,14 @@ A watchlist is a named group of repositories, such as "My services" or "Open sou
 - To create one, press Space on each repository in the picker. Marks stay while you change the search, and Space on `Use owner/repo (check access)` checks that repository, then marks it. Press Enter, type a name of up to 40 characters, and press Enter again to save and show the watchlist. Esc goes back to the marks; Esc on the marks clears them.
 - To change one, press Ctrl+E on it: its repositories are marked, and Enter saves the marks under the name you keep or type. A new name renames it. Taking the name of another watchlist asks for a second Enter, which replaces that one.
 - To delete one, press Ctrl+D on it twice. Deleting the watchlist on screen shows All repositories.
+
+### Icons
+
+prpr draws its symbols with Unicode characters that common fonts include. With a [Nerd Font](https://www.nerdfonts.com/) (version 3 or later) set in your terminal, `i` switches to GitHub's octicons from the font, and saves the choice; `i` again switches back, so if you see empty boxes, your terminal's font has no Nerd Font glyphs. Terminals do not report their font, so prpr cannot detect one. `--icons nerd|unicode` or `PRPR_ICONS=nerd|unicode` picks the set for one run, ahead of the saved choice; `--icons` wins over `PRPR_ICONS`.
+
+Nerd Font icons replace the merge, CI, review, and bot symbols, the State column's `open`/`draft`, the reviewed pull requests' `waiting`, `new commits`, and other words, the pin, bell, and `★` in titles and the picker, and the statistics column headers. These columns get narrower, which leaves more of the terminal for PR names. Colors and the change marks stay the same, and the details screen, notifications, and help keep their words.
+
+In the VS Code terminal, set `terminal.integrated.fontFamily` to an installed Nerd Font, such as `'JetBrainsMono Nerd Font Mono'`. In a dev container or over SSH, the font is installed where VS Code or the terminal runs, not where prpr runs. The Mono variants keep every icon one cell wide.
 
 ### Notifications
 

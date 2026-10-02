@@ -18,7 +18,7 @@ func TestParseFlagsRefreshInterval(t *testing.T) {
 		{[]string{"--refresh=30s"}, 30 * time.Second},
 		{[]string{"-refresh", "1h"}, time.Hour},
 	} {
-		got, err := parseFlags(tc.args, io.Discard)
+		got, err := parseFlags(tc.args, io.Discard, noEnv)
 		if err != nil || got.refresh != tc.want {
 			t.Errorf("parseFlags(%q) = %v, %v; want %v", tc.args, got.refresh, err, tc.want)
 		}
@@ -34,35 +34,69 @@ func TestParseFlagsRejectsInvalidRefresh(t *testing.T) {
 		{"extra"},
 		{"--bots", "Claude"},
 	} {
-		if _, err := parseFlags(args, io.Discard); err == nil {
+		if _, err := parseFlags(args, io.Discard, noEnv); err == nil {
 			t.Errorf("parseFlags(%q) succeeded", args)
 		}
 	}
-	if _, err := parseFlags([]string{"-h"}, io.Discard); !errors.Is(err, flag.ErrHelp) {
+	if _, err := parseFlags([]string{"-h"}, io.Discard, noEnv); !errors.Is(err, flag.ErrHelp) {
 		t.Errorf("-h error = %v, want flag.ErrHelp", err)
 	}
 }
 
 func TestParseFlagsBots(t *testing.T) {
-	opts, err := parseFlags(nil, io.Discard)
+	opts, err := parseFlags(nil, io.Discard, noEnv)
 	if err != nil || len(opts.bots) != 3 {
 		t.Fatalf("default bots = %+v, %v", opts.bots, err)
 	}
-	opts, err = parseFlags([]string{"--bots", "Rabbit=coderabbitai"}, io.Discard)
+	opts, err = parseFlags([]string{"--bots", "Rabbit=coderabbitai"}, io.Discard, noEnv)
 	if err != nil || len(opts.bots) != 1 || opts.bots[0].Name != "Rabbit" {
 		t.Fatalf("custom bots = %+v, %v", opts.bots, err)
 	}
-	opts, err = parseFlags([]string{"--bots="}, io.Discard)
+	opts, err = parseFlags([]string{"--bots="}, io.Discard, noEnv)
 	if err != nil || opts.bots != nil {
 		t.Fatalf("empty bots = %+v, %v", opts.bots, err)
 	}
 }
 
 func TestParseFlagsVersion(t *testing.T) {
-	if opts, err := parseFlags([]string{"--version"}, io.Discard); err != nil || !opts.version {
+	if opts, err := parseFlags([]string{"--version"}, io.Discard, noEnv); err != nil || !opts.version {
 		t.Fatalf("--version = %+v, %v", opts, err)
 	}
-	if opts, err := parseFlags(nil, io.Discard); err != nil || opts.version {
+	if opts, err := parseFlags(nil, io.Discard, noEnv); err != nil || opts.version {
 		t.Fatalf("default = %+v, %v", opts, err)
+	}
+}
+
+func noEnv(string) string { return "" }
+
+func TestIconsFlagOverridesTheEnvironment(t *testing.T) {
+	env := func(value string) func(string) string {
+		return func(name string) string {
+			if name == "PRPR_ICONS" {
+				return value
+			}
+			return ""
+		}
+	}
+	for _, tc := range []struct {
+		args []string
+		env  string
+		want string
+	}{
+		{nil, "", ""},
+		{nil, "nerd", "nerd"},
+		{[]string{"--icons", "unicode"}, "nerd", "unicode"},
+		{[]string{"--icons=nerd"}, "", "nerd"},
+	} {
+		opts, err := parseFlags(tc.args, io.Discard, env(tc.env))
+		if err != nil || opts.icons != tc.want {
+			t.Errorf("parseFlags(%q) with PRPR_ICONS=%q = %q, %v; want %q", tc.args, tc.env, opts.icons, err, tc.want)
+		}
+	}
+	if _, err := parseFlags([]string{"--icons", "emoji"}, io.Discard, noEnv); err == nil {
+		t.Error("an unknown --icons value was accepted")
+	}
+	if _, err := parseFlags(nil, io.Discard, env("fancy")); err == nil {
+		t.Error("an unknown PRPR_ICONS value was accepted")
 	}
 }

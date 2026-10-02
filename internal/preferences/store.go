@@ -53,6 +53,8 @@ type Store struct {
 	accounts map[string]account
 	// pinned is the GitHub CLI account prpr uses, or "" for gh's active one.
 	pinned string
+	// icons is the saved icon set name, or "" for none saved.
+	icons string
 }
 
 // appKey holds settings that belong to the app rather than to an account.
@@ -61,6 +63,12 @@ const appKey = "app"
 
 type appJSON struct {
 	Account string `json:"account,omitempty"`
+	Icons   string `json:"icons,omitempty"`
+}
+
+// app is the app settings as saved.
+func (s *Store) app() appJSON {
+	return appJSON{Account: s.pinned, Icons: s.icons}
 }
 
 // accountJSON is an account's value when it has watchlists or a watchlist
@@ -95,7 +103,10 @@ func Open(path string) (*Store, error) {
 			if err := json.Unmarshal(value, &app); err != nil || !validLogin(app.Account) && app.Account != "" {
 				return nil, fmt.Errorf("decode preferences %q: %q must be an object with a valid GitHub login as account", path, appKey)
 			}
-			store.pinned = app.Account
+			if app.Icons != "" && !ValidIcons(app.Icons) {
+				return nil, fmt.Errorf("decode preferences %q: %q has an unknown icon set %q", path, appKey, app.Icons)
+			}
+			store.pinned, store.icons = app.Account, app.Icons
 			continue
 		}
 		decoded, err := decodeAccount(value)
@@ -218,10 +229,34 @@ func (s *Store) SavePinnedAccount(login string) error {
 	if login != "" && !validLogin(login) {
 		return fmt.Errorf("save preferences %q: invalid GitHub login %q", s.path, login)
 	}
-	if err := s.writeAll(s.accounts, login); err != nil {
+	app := s.app()
+	app.Account = login
+	if err := s.writeAll(s.accounts, app); err != nil {
 		return err
 	}
 	s.pinned = login
+	return nil
+}
+
+// ValidIcons reports whether name is an icon set prpr draws.
+func ValidIcons(name string) bool {
+	return name == "unicode" || name == "nerd"
+}
+
+// Icons returns the saved icon set name, or "" when none is saved.
+func (s *Store) Icons() string { return s.icons }
+
+// SaveIcons saves the icon set prpr draws.
+func (s *Store) SaveIcons(name string) error {
+	if !ValidIcons(name) {
+		return fmt.Errorf("save preferences %q: unknown icon set %q", s.path, name)
+	}
+	app := s.app()
+	app.Icons = name
+	if err := s.writeAll(s.accounts, app); err != nil {
+		return err
+	}
+	s.icons = name
 	return nil
 }
 
@@ -331,21 +366,21 @@ func (s *Store) change(login string, edit func(*account) error) error {
 		accounts[k] = v
 	}
 	accounts[key] = edited
-	if err := s.writeAll(accounts, s.pinned); err != nil {
+	if err := s.writeAll(accounts, s.app()); err != nil {
 		return err
 	}
 	s.accounts = accounts
 	return nil
 }
 
-// writeAll writes every account and the pinned account.
-func (s *Store) writeAll(accounts map[string]account, pinned string) error {
+// writeAll writes every account and the app settings.
+func (s *Store) writeAll(accounts map[string]account, app appJSON) error {
 	encoded := make(map[string]any, len(accounts)+1)
 	for k, v := range accounts {
 		encoded[k] = v.encode()
 	}
-	if pinned != "" {
-		encoded[appKey] = appJSON{Account: pinned}
+	if app != (appJSON{}) {
+		encoded[appKey] = app
 	}
 	data, err := json.MarshalIndent(encoded, "", "  ")
 	if err != nil {

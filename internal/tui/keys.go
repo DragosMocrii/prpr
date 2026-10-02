@@ -31,6 +31,7 @@ type keyMap struct {
 	CopyURL         key.Binding
 	Mouse           key.Binding
 	Notify          key.Binding
+	Icons           key.Binding
 	Account         key.Binding
 	Retry           key.Binding
 	Login           key.Binding
@@ -100,6 +101,7 @@ func defaultKeyMap() keyMap {
 		CopyURL:         key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy URL")),
 		Mouse:           key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mouse on")),
 		Notify:          key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "notify on")),
+		Icons:           key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "nerd icons")),
 		Account:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "account")),
 		Retry:           key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
 		Login:           key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log in to GitHub")),
@@ -189,6 +191,12 @@ func (m *model) syncKeys() {
 		k.Mouse.SetHelp("m", "mouse on")
 	}
 	k.Notify.SetEnabled(listing)
+	k.Icons.SetEnabled(listing)
+	if m.icons.nerd {
+		k.Icons.SetHelp("i", "unicode icons")
+	} else {
+		k.Icons.SetHelp("i", "nerd icons")
+	}
 	k.Account.SetEnabled(m.switchAccounts && idle && m.picker == nil && m.accounts == nil && !details)
 	choosing := m.accounts != nil
 	k.AccountPicker.Up.SetEnabled(choosing)
@@ -285,7 +293,7 @@ func (k keyMap) listHelp() helpKeys {
 		full: [][]key.Binding{
 			{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom},
 			{t.PageUp, t.PageDown, t.HalfPageUp, t.HalfPageDown},
-			{k.Pages.PrevPage, k.Pages.NextPage},
+			{k.Pages.PrevPage, k.Pages.NextPage, k.Icons},
 			{k.NextPane, k.PrevPane, k.Account},
 			{k.Details, k.Open, k.CopyURL},
 			{k.Search, k.Categories, k.ClearFilters},

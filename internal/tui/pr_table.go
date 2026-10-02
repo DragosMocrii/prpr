@@ -82,7 +82,12 @@ func (m *model) paneLayout(id paneID) tableLayout {
 	if layout.repositoryColumn {
 		repositoryWidth = min(28, max(12, width/4))
 	}
-	lastTitle, lastWidth := "Merge", 5
+	ic := m.icons
+	lastTitle, lastWidth := ic.header("Merge"), 5
+	stateWidth := 5
+	if ic.nerd {
+		lastWidth, stateWidth = 1, 1
+	}
 	if review {
 		lastTitle, lastWidth = "Author", min(16, max(8, width/6))
 	}
@@ -95,7 +100,7 @@ func (m *model) paneLayout(id paneID) tableLayout {
 	nameColumn := len(columns)
 	columns = append(columns,
 		table.Column{Title: "PR name"},
-		table.Column{Title: "State", Width: 5},
+		table.Column{Title: ic.header("State"), Width: stateWidth},
 		table.Column{Title: lastTitle, Width: lastWidth},
 	)
 	nameWidth := remainingWidth(width, columns)
@@ -104,7 +109,7 @@ func (m *model) paneLayout(id paneID) tableLayout {
 		if stat.bots && !m.bots {
 			continue
 		}
-		candidate := append(columns, table.Column{Title: stat.title, Width: stat.width})
+		candidate := append(columns, table.Column{Title: ic.header(stat.title), Width: stat.columnWidth(ic)})
 		if remainingWidth(width, candidate) < minStatsNameWidth {
 			break
 		}
@@ -134,6 +139,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 	review := id == paneReview
 	all := m.selectedRepository == ""
 	now := m.now()
+	ic := m.icons
 	rows := make([]table.Row, 0, rowCount(pane))
 	for row := range rowCount(pane) {
 		pr, gone, ok := m.paneRow(id, row)
@@ -152,17 +158,16 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			name = singleLine(pr.Repository) + " — " + name
 		}
 		if review {
-			if status := reviewStatusTag(pr.ReviewStatus); status != "" {
+			if status := reviewStatusTag(ic, pr.ReviewStatus); status != "" && ic.nerd {
+				name = status + " " + name
+			} else if status != "" {
 				name = status + " · " + name
 			}
 		}
-		state := "open"
-		if pr.Draft {
-			state = "draft"
-		}
+		state := ic.stateText(pr.Draft)
 		// A preview has no merge state, but conflicts are already known.
 		preview := m.snapshot.Preview && !gone
-		last, lastCell := mergeIcon(pr.Draft, pr.Mergeable, pr.MergeState), cellMerge
+		last, lastCell := mergeIcon(ic, pr.Draft, pr.Mergeable, pr.MergeState), cellMerge
 		if preview && pr.Mergeable != "CONFLICTING" {
 			last = pendingText
 		}
@@ -181,7 +186,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 				cells = append(cells, pendingText)
 				continue
 			}
-			cells = append(cells, changed(stat.cell, stat.text(pr, now)))
+			cells = append(cells, changed(stat.cell, stat.text(ic, pr, now)))
 		}
 		switch {
 		case gone:
@@ -199,27 +204,35 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 }
 
 // reviewStatusTag names where a reviewed pull request stands in a word or
-// two, colored when it needs the viewer again; it is empty for a pending
-// review request.
-func reviewStatusTag(status github.ReviewStatus) string {
+// two, or an icon in the Nerd set, colored when it needs the viewer again;
+// it is empty for a pending review request.
+func reviewStatusTag(ic *iconSet, status github.ReviewStatus) string {
+	text, icon := "", ""
 	switch status {
 	case github.ReviewNewCommits:
-		return coloredIcon("new commits", "3")
+		text, icon = "new commits", ic.newCommits
 	case github.ReviewAuthorReplied:
-		return coloredIcon("replied", "3")
+		text, icon = "replied", ic.replied
 	case github.ReviewDismissed:
-		return coloredIcon("dismissed", "3")
+		text, icon = "dismissed", ic.dismissed
 	case github.ReviewNewActivity:
-		return coloredIcon("activity", "3")
+		text, icon = "activity", ic.activity
 	case github.ReviewWaitingOnAuthor:
-		return "waiting"
+		text, icon = "waiting", ic.waiting
 	case github.ReviewApproved:
-		return "approved"
+		text, icon = "approved", ic.approved
 	case github.ReviewBackInDraft:
-		return "waiting"
+		text, icon = "waiting", ic.backInDraft
 	default:
 		return ""
 	}
+	if ic.nerd {
+		text = icon
+	}
+	if status.Waiting() {
+		return text
+	}
+	return coloredIcon(text, "3")
 }
 
 // reviewStatusText names where a reviewed pull request stands, for
@@ -280,7 +293,9 @@ const minStatsNameWidth = 16
 type statColumn struct {
 	title string
 	width int
-	text  func(pr *github.PullRequest, now time.Time) string
+	// nerdWidth replaces width with the Nerd set, whose header is one icon.
+	nerdWidth int
+	text      func(ic *iconSet, pr *github.PullRequest, now time.Time) string
 	// cell is the change bit that highlights this column.
 	cell changedCells
 	// bots columns are shown only when review bots are configured.
@@ -292,12 +307,23 @@ type statColumn struct {
 // statColumns are listed in the order they are dropped last to first as the
 // terminal narrows.
 var statColumns = []statColumn{
-	{"Age", 4, func(pr *github.PullRequest, now time.Time) string { return ageText(pr.WaitingSince, now) }, 0, false, true},
-	{"Bots", 4, func(pr *github.PullRequest, _ time.Time) string { return botsText(pr.Bots) }, cellBots, true, true},
-	{"CI", 2, func(pr *github.PullRequest, _ time.Time) string { return checksIcon(pr.Checks) }, cellCI, false, true},
-	{"Review", 6, func(pr *github.PullRequest, _ time.Time) string { return reviewText(pr.ReviewDecision, pr.Approvals) }, cellReview, false, true},
-	{"Comments", 8, func(pr *github.PullRequest, _ time.Time) string { return strconv.Itoa(pr.Comments) }, cellComments, false, true},
-	{"Size", 11, func(pr *github.PullRequest, _ time.Time) string { return sizeText(pr.Additions, pr.Deletions) }, cellSize, false, false},
+	{"Age", 4, 4, func(_ *iconSet, pr *github.PullRequest, now time.Time) string { return ageText(pr.WaitingSince, now) }, 0, false, true},
+	{"Bots", 4, 4, func(ic *iconSet, pr *github.PullRequest, _ time.Time) string { return botsText(ic, pr.Bots) }, cellBots, true, true},
+	{"CI", 2, 1, func(ic *iconSet, pr *github.PullRequest, _ time.Time) string { return checksIcon(ic, pr.Checks) }, cellCI, false, true},
+	{"Review", 6, 4, func(ic *iconSet, pr *github.PullRequest, _ time.Time) string {
+		return reviewText(ic, pr.ReviewDecision, pr.Approvals)
+	}, cellReview, false, true},
+	{"Comments", 8, 4, func(_ *iconSet, pr *github.PullRequest, _ time.Time) string { return strconv.Itoa(pr.Comments) }, cellComments, false, true},
+	{"Size", 11, 11, func(_ *iconSet, pr *github.PullRequest, _ time.Time) string {
+		return sizeText(pr.Additions, pr.Deletions)
+	}, cellSize, false, false},
+}
+
+func (stat statColumn) columnWidth(ic *iconSet) int {
+	if ic.nerd {
+		return stat.nerdWidth
+	}
+	return stat.width
 }
 
 // remainingWidth is the width left for the zero-width name column; each
@@ -332,41 +358,41 @@ func ageText(since, now time.Time) string {
 	}
 }
 
-func checksIcon(state string) string {
+func checksIcon(ic *iconSet, state string) string {
 	switch state {
 	case "SUCCESS":
-		return coloredIcon("✓", "2")
+		return coloredIcon(ic.passed, "2")
 	case "FAILURE", "ERROR":
-		return coloredIcon("✗", "1")
+		return coloredIcon(ic.failed, "1")
 	case "PENDING", "EXPECTED":
-		return coloredIcon("●", "3")
+		return coloredIcon(ic.pending, "3")
 	default:
-		return "–"
+		return ic.none
 	}
 }
 
 // reviewText shows the review decision followed by the current approval count.
-func reviewText(decision string, approvals int) string {
+func reviewText(ic *iconSet, decision string, approvals int) string {
 	var icon string
 	switch decision {
 	case "APPROVED":
-		icon = coloredIcon("✓", "2")
+		icon = coloredIcon(ic.passed, "2")
 	case "CHANGES_REQUESTED":
-		icon = coloredIcon("✗", "1")
+		icon = coloredIcon(ic.failed, "1")
 	case "REVIEW_REQUIRED":
-		icon = coloredIcon("●", "3")
+		icon = coloredIcon(ic.pending, "3")
 	default:
-		icon = "–"
+		icon = ic.none
 	}
 	if approvals > 0 {
-		icon += strconv.Itoa(approvals)
+		icon += ic.gap + strconv.Itoa(approvals)
 	}
 	return icon
 }
 
 // botsText shows the most attention-worthy bot state; concerns are summed
 // across bots.
-func botsText(reviews []github.BotReview) string {
+func botsText(ic *iconSet, reviews []github.BotReview) string {
 	worst := github.BotReview{}
 	concerns := 0
 	for _, review := range reviews {
@@ -374,31 +400,31 @@ func botsText(reviews []github.BotReview) string {
 		concerns += review.Concerns
 	}
 	worst.Concerns = concerns
-	return botStateText(worst)
+	return botStateText(ic, worst)
 }
 
-func botStateText(review github.BotReview) string {
+func botStateText(ic *iconSet, review github.BotReview) string {
 	switch review.State {
 	case github.BotConcerns:
-		return coloredIcon("✗"+strconv.Itoa(review.Concerns), "1")
+		return coloredIcon(ic.failed+ic.gap+strconv.Itoa(review.Concerns), "1")
 	case github.BotFailed:
-		return coloredIcon("!", "1")
+		return coloredIcon(ic.botFailed, "1")
 	case github.BotRunning:
-		return coloredIcon("◌", "3")
+		return coloredIcon(ic.botRunning, "3")
 	case github.BotStale:
-		return coloredIcon("✓", "2") + "*"
+		return coloredIcon(ic.passed, "2") + ic.gap + "*"
 	case github.BotPassed:
-		return coloredIcon("✓", "2")
+		return coloredIcon(ic.passed, "2")
 	default:
-		return "–"
+		return ic.none
 	}
 }
 
 // botBreakdown lists each configured bot's state for the selected PR.
-func botBreakdown(reviews []github.BotReview) string {
+func botBreakdown(ic *iconSet, reviews []github.BotReview) string {
 	parts := make([]string, len(reviews))
 	for i, review := range reviews {
-		parts[i] = singleLine(review.Name) + " " + botStateText(review)
+		parts[i] = singleLine(review.Name) + " " + botStateText(ic, review)
 	}
 	return strings.Join(parts, " · ")
 }
@@ -471,22 +497,22 @@ func mergeReady(draft bool, mergeable, state string) bool {
 }
 
 // mergeIcon is green exactly when mergeReady holds.
-func mergeIcon(draft bool, mergeable, state string) string {
+func mergeIcon(ic *iconSet, draft bool, mergeable, state string) string {
 	if mergeReady(draft, mergeable, state) {
-		return coloredIcon("✓", "2")
+		return coloredIcon(ic.check, "2")
 	}
 	if mergeable == "CONFLICTING" || state == "DIRTY" {
-		return coloredIcon("✗", "1")
+		return coloredIcon(ic.cross, "1")
 	}
 	if draft {
-		return "–"
+		return ic.none
 	}
 	switch state {
 	case "BLOCKED":
-		return coloredIcon("●", "3")
+		return coloredIcon(ic.pending, "3")
 	case "BEHIND":
-		return coloredIcon("↓", "3")
+		return coloredIcon(ic.behind, "3")
 	default:
-		return coloredIcon("?", "3")
+		return coloredIcon(ic.unknown, "3")
 	}
 }

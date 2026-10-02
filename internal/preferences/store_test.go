@@ -279,3 +279,46 @@ func TestPinnedAccountIsSavedApartFromAccounts(t *testing.T) {
 		}
 	}
 }
+
+func TestIconChoiceIsSavedWithThePinnedAccount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Icons() != "" {
+		t.Fatal("a new store has an icon choice")
+	}
+	if err := store.SavePinnedAccount("alice"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveIcons("nerd"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save("alice", "acme/a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveIcons("emoji"); err == nil {
+		t.Fatal("saved an unknown icon set")
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Icons() != "nerd" || reopened.PinnedAccount() != "alice" {
+		t.Fatalf("icons %q, pinned %q after reopening", reopened.Icons(), reopened.PinnedAccount())
+	}
+	// Unpinning keeps the icon choice.
+	if err := reopened.SavePinnedAccount(""); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := Open(path); err != nil || again.Icons() != "nerd" {
+		t.Fatalf("unpinning lost the icon choice: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"app":{"icons":"emoji"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(path); err == nil {
+		t.Error("opened an unknown icon set")
+	}
+}

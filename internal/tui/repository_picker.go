@@ -34,7 +34,9 @@ type repositoryCandidate struct {
 }
 
 type repositoryPicker struct {
-	input        textinput.Model
+	input textinput.Model
+	// star marks watchlists.
+	star         string
 	repositories []string
 	candidates   []repositoryCandidate
 	cursor       int
@@ -73,7 +75,7 @@ type repositoryLookupFinishedMsg struct {
 
 func (m *model) openRepositoryPicker() tea.Cmd {
 	m.repositoryRequestID++
-	picker := &repositoryPicker{input: textinput.New()}
+	picker := &repositoryPicker{input: textinput.New(), star: m.icons.star}
 	picker.input.Prompt = "Find: "
 	picker.input.Placeholder = "owner/repo"
 	// Terminal paste arrives as tea.PasteMsg; skip the clipboard helper.
@@ -227,7 +229,7 @@ func (p *repositoryPicker) rebuildCandidates() {
 		if strings.Contains(strings.ToLower(watchlist.Name), strings.ToLower(trimmed)) {
 			p.candidates = append(p.candidates, repositoryCandidate{
 				kind:      watchlistCandidate,
-				label:     "★ " + watchlist.Name + " · " + plural(len(watchlist.Repositories), "repo"),
+				label:     p.star + " " + watchlist.Name + " · " + plural(len(watchlist.Repositories), "repo"),
 				watchlist: watchlist.Name,
 			})
 			matching++

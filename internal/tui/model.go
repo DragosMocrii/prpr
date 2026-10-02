@@ -96,6 +96,8 @@ type model struct {
 	// readiness is each authored pull request's last known merge readiness.
 	notify    bool
 	readiness map[prKey]bool
+	// icons draws status symbols: unicodeIcons or nerdIcons.
+	icons *iconSet
 	// desktopNotify posts through the system notifier; nil means OSC 9.
 	desktopNotify notifier.Func
 	// pinnedAccount is the GitHub CLI account prpr uses, or "" for gh's
@@ -140,7 +142,8 @@ type countdownTickMsg struct{ generation uint64 }
 
 // New returns the app model. A positive refreshInterval refetches both lists
 // that long after each fetch finishes; notify starts with notifications on.
-func New(ctx context.Context, client *github.Client, preferences *preferences.Store, refreshInterval time.Duration, notify bool) tea.Model {
+// icons names the icon set for this run; empty uses the saved one.
+func New(ctx context.Context, client *github.Client, preferences *preferences.Store, refreshInterval time.Duration, notify bool, icons string) tea.Model {
 	appCtx, cancel := context.WithCancel(ctx)
 	m := newModel(appCtx, client, preferences)
 	m.cancel = cancel
@@ -148,6 +151,7 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m.bots = len(client.Bots()) > 0
 	m.openBrowser = client.OpenInBrowser
 	m.notify = notify
+	m.icons = startIcons(icons, preferences)
 	m.desktopNotify = notifier.Desktop()
 	m.listAccounts = client.Accounts
 	m.useAccount = client.UseAccount
@@ -172,6 +176,7 @@ func newModel(ctx context.Context, client *github.Client, preferences *preferenc
 		spinner:        spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 		darkBackground: true,
 		now:            time.Now,
+		icons:          &unicodeIcons,
 	}
 	m.panes = [2]prPane{newPRPane(), newPRPane()}
 	m.rebuildPRTable(true)
@@ -457,6 +462,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleMouse()
 	case key.Matches(msg, k.Notify):
 		m.toggleNotify()
+	case key.Matches(msg, k.Icons):
+		m.toggleIcons()
 	case key.Matches(msg, k.Help):
 		m.help.ShowAll = !m.help.ShowAll
 		m.rebuildPRTable(false)
@@ -735,7 +742,7 @@ func (m *model) setScope(login string, scope preferences.Scope) {
 func (m *model) scopeLabel() string {
 	switch {
 	case m.watchlist.Name != "":
-		return "★ " + singleLine(m.watchlist.Name)
+		return m.icons.star + " " + singleLine(m.watchlist.Name)
 	case m.selectedRepository != "":
 		return singleLine(m.selectedRepository)
 	default:
@@ -897,7 +904,9 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 	if m.refreshInterval > 0 {
 		title += " · auto " + intervalText(m.refreshInterval)
 	}
-	if m.notify {
+	if m.notify && m.icons.nerd {
+		title += " · " + m.icons.bell
+	} else if m.notify {
 		title += " · notify"
 	}
 	lines := []string{m.titleLine(title, m.countdownText())}
@@ -920,7 +929,7 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 	if pr, ok := m.selectedPR(); ok {
 		selected = singleLine(pr.URL)
 		// The breakdown is dropped rather than truncated so the URL stays whole.
-		if breakdown := botBreakdown(pr.Bots); m.bots && breakdown != "" &&
+		if breakdown := botBreakdown(m.icons, pr.Bots); m.bots && breakdown != "" &&
 			lipgloss.Width(selected)+2+lipgloss.Width(breakdown) <= m.width {
 			selected += "  " + breakdown
 		}
@@ -935,7 +944,7 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 	} else if m.notice != "" {
 		fixed = strings.TrimLeft(fixed+"  "+m.notice, " ")
 	} else if !(layout.single && m.focus != paneMine) && rowCount(&m.panes[paneMine]) > 0 {
-		legend = "✓ ready  ● blocked  ↓ behind  ✗ conflicts  ? unknown"
+		legend = m.icons.legend()
 	}
 	if m.searching != nil {
 		lines = append(lines, m.searching.View())

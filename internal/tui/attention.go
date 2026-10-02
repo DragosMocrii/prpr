@@ -16,7 +16,7 @@ type attentionCategory struct {
 	label string
 	// short replaces label when the summary does not fit the width.
 	short string
-	icon  string
+	icon  func(ic *iconSet) string
 	// both means the category covers both panes; otherwise pane.
 	both  bool
 	pane  paneID
@@ -30,15 +30,15 @@ func unknownMergeState(pr *github.PullRequest) bool {
 // attentionCategories are numbered from 1 in this order; the numbers never
 // change, so an empty category leaves a gap.
 var attentionCategories = []attentionCategory{
-	{label: "ready to merge", short: "ready", icon: coloredIcon("✓", "2"), pane: paneMine,
+	{label: "ready to merge", short: "ready", icon: func(ic *iconSet) string { return coloredIcon(ic.check, "2") }, pane: paneMine,
 		match: func(pr *github.PullRequest) bool { return mergeReady(pr.Draft, pr.Mergeable, pr.MergeState) }},
-	{label: "changes requested", short: "changes", icon: coloredIcon("✗", "1"), pane: paneMine,
+	{label: "changes requested", short: "changes", icon: func(ic *iconSet) string { return coloredIcon(ic.cross, "1") }, pane: paneMine,
 		match: func(pr *github.PullRequest) bool { return pr.ReviewDecision == "CHANGES_REQUESTED" }},
-	{label: "failing CI", short: "failing", icon: coloredIcon("✗", "1"), pane: paneMine,
+	{label: "failing CI", short: "failing", icon: func(ic *iconSet) string { return coloredIcon(ic.cross, "1") }, pane: paneMine,
 		match: func(pr *github.PullRequest) bool { return pr.Checks == "FAILURE" || pr.Checks == "ERROR" }},
-	{label: "conflicts", short: "conflicts", icon: coloredIcon("✗", "1"), pane: paneMine,
+	{label: "conflicts", short: "conflicts", icon: func(ic *iconSet) string { return coloredIcon(ic.cross, "1") }, pane: paneMine,
 		match: func(pr *github.PullRequest) bool { return pr.Mergeable == "CONFLICTING" || pr.MergeState == "DIRTY" }},
-	{label: "bot threads", short: "bots", icon: coloredIcon("✗", "1"), pane: paneMine,
+	{label: "bot threads", short: "bots", icon: func(ic *iconSet) string { return coloredIcon(ic.cross, "1") }, pane: paneMine,
 		match: func(pr *github.PullRequest) bool {
 			for _, bot := range pr.Bots {
 				if bot.State == github.BotConcerns {
@@ -47,9 +47,9 @@ var attentionCategories = []attentionCategory{
 			}
 			return false
 		}},
-	{label: "awaiting your review", short: "to review", icon: coloredIcon("●", "3"), pane: paneReview,
+	{label: "awaiting your review", short: "to review", icon: func(ic *iconSet) string { return coloredIcon(ic.pending, "3") }, pane: paneReview,
 		match: func(pr *github.PullRequest) bool { return !pr.ReviewStatus.Waiting() }},
-	{label: "status unknown", short: "unknown", icon: coloredIcon("?", "3"), both: true, match: unknownMergeState},
+	{label: "status unknown", short: "unknown", icon: func(ic *iconSet) string { return coloredIcon(ic.unknown, "3") }, both: true, match: unknownMergeState},
 }
 
 // categoryConflicts is the one category a preview already knows.
@@ -119,7 +119,7 @@ func (m *model) summaryText(short bool) string {
 		if short {
 			label = category.short
 		}
-		part := key.Render(strconv.Itoa(number)) + " " + category.icon + " " + strconv.Itoa(count) + " " + label
+		part := key.Render(strconv.Itoa(number)) + " " + category.icon(m.icons) + " " + strconv.Itoa(count) + " " + label
 		if m.category == number {
 			part = restyle(part, reverseOn, reverseOff)
 		}

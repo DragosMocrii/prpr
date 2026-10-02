@@ -114,7 +114,9 @@ func (m *model) chooseAccount(login string) tea.Cmd {
 // accountLabel names the account in titles, marking a pinned one.
 func (m *model) accountLabel() string {
 	label := "@" + singleLine(m.snapshot.Login)
-	if m.pinnedAccount != "" {
+	if m.pinnedAccount != "" && m.icons.nerd {
+		label += " " + m.icons.pin
+	} else if m.pinnedAccount != "" {
 		label += " (pinned)"
 	}
 	return label
