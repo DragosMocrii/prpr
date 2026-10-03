@@ -97,11 +97,6 @@ func (m *model) chooseAccount(login string) tea.Cmd {
 	m.pinnedAccount = login
 	m.useAccount(login)
 	m.accountGeneration++
-	m.refreshGeneration++
-	if m.fetchCancel != nil {
-		m.fetchCancel()
-		m.fetchCancel = nil
-	}
 	m.invalidateQuota()
 	m.lastSuccessAt = time.Time{}
 	if err := m.preferences.SavePinnedAccount(login); err != nil {

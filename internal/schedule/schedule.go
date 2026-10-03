@@ -106,63 +106,44 @@ func (w Window) Active(now time.Time) bool {
 	return false
 }
 
-// NextChange returns the earliest future instant where Active changes. Civil
-// candidates are solved in each UTC-offset interval so DST gaps and folds do
-// not inherit time.Date's arbitrary ambiguous/nonexistent-time choice.
+// NextChange returns the earliest future instant where Active changes, or
+// zero for a disabled window. Candidates are each day's start and end under
+// each UTC offset in force that day, and each zone transition, solved
+// directly so DST gaps and folds do not inherit time.Date's choice. They
+// cover 16 days: a window inside a skipped hour can miss a whole week.
 func (w Window) NextChange(now time.Time) time.Time {
 	if !w.enabled {
 		return time.Time{}
 	}
-	// Search future civil candidates and zone boundaries until one changes the
-	// active predicate; a non-empty weekly mask guarantees a transition soon.
-	for daysAhead := 16; ; daysAhead += 16 {
-		local := now.In(now.Location())
-		lastDate := time.Date(local.Year(), local.Month(), local.Day()+daysAhead, 0, 0, 0, 0, local.Location())
-		searchEnd := lastDate.Add(48 * time.Hour)
-		best := time.Time{}
-		for intervalStart := now; intervalStart.Before(searchEnd); {
-			_, offset := intervalStart.Zone()
-			_, intervalEnd := intervalStart.ZoneBounds()
-			if intervalEnd.IsZero() || intervalEnd.After(searchEnd) {
-				intervalEnd = searchEnd
-			}
-			if !intervalEnd.After(intervalStart) {
-				break
-			}
-			if !intervalEnd.Equal(searchEnd) && isChange(w, intervalEnd) && (best.IsZero() || intervalEnd.Before(best)) {
-				best = intervalEnd
-			}
-			for offsetDays := 0; offsetDays <= daysAhead; offsetDays++ {
-				// Every day is a candidate: an overnight window ends on the day
-				// after a selected one, and isChange rejects the rest.
-				date := time.Date(local.Year(), local.Month(), local.Day()+offsetDays, 0, 0, 0, 0, local.Location())
-				for _, minute := range []int{w.start, w.end} {
-					wall := time.Date(date.Year(), date.Month(), date.Day(), minute/60, minute%60, 0, 0, time.UTC)
-					candidate := wall.Add(-time.Duration(offset) * time.Second)
-					if !candidate.After(now) || candidate.Before(intervalStart) || !candidate.Before(intervalEnd) {
-						continue
-					}
-					back := candidate.In(local.Location())
-					if back.Year() != date.Year() || back.Month() != date.Month() || back.Day() != date.Day() || back.Hour()*60+back.Minute() != minute || back.Second() != 0 {
-						continue
-					}
-					if isChange(w, back) && (best.IsZero() || candidate.Before(best)) {
-						best = candidate
-					}
-				}
-			}
-			if !best.IsZero() && intervalEnd.After(best) {
-				break
-			}
-			if intervalEnd.Equal(searchEnd) {
-				break
-			}
-			intervalStart = intervalEnd
-		}
-		if !best.IsZero() {
-			return best
+	loc := now.Location()
+	best := time.Time{}
+	consider := func(t time.Time) {
+		if t.After(now) && isChange(w, t) && (best.IsZero() || t.Before(best)) {
+			best = t
 		}
 	}
+	for day := 0; day <= 15; day++ {
+		// date names the civil day; time.Date in loc may move a midnight
+		// that a transition skips.
+		date := time.Date(now.Year(), now.Month(), now.Day()+day, 0, 0, 0, 0, time.UTC)
+		dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, loc)
+		dayEnd := time.Date(date.Year(), date.Month(), date.Day()+1, 0, 0, 0, 0, loc)
+		_, before := dayStart.Zone()
+		_, after := dayEnd.Zone()
+		for _, minute := range []int{w.start, w.end} {
+			wall := date.Add(time.Duration(minute) * time.Minute)
+			for _, offset := range []int{before, after} {
+				back := wall.Add(-time.Duration(offset) * time.Second).In(loc)
+				if back.Day() == date.Day() && back.Hour()*60+back.Minute() == minute {
+					consider(back)
+				}
+			}
+		}
+		if _, transition := dayStart.ZoneBounds(); !transition.IsZero() && transition.Before(dayEnd) {
+			consider(transition)
+		}
+	}
+	return best
 }
 
 func isChange(w Window, candidate time.Time) bool {

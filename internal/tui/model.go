@@ -167,31 +167,26 @@ type model struct {
 	// tokenChanged reports whether gh has a new token for the pinned account.
 	tokenChanged func(context.Context) bool
 	// schedule controls when automatic GitHub work and notifications may run.
-	scheduleConfig       schedule.Config
-	scheduleWindow       schedule.Window
-	scheduleErr          error
-	sleeping             bool
-	manualWakeUntil      time.Time
-	scheduleGeneration   uint64
-	scheduleBoundary     time.Time
-	scheduleTimerAt      time.Time
-	scheduleTimerPending bool
-	scheduleLastCheck    time.Time
-	scheduleOffset       int
-	scheduleLocation     *time.Location
-	scheduleInitialized  bool
-	wakeFetchPending     bool
-	activityCtx          context.Context
-	activityCancel       context.CancelFunc
-	activityDeadline     time.Time
-	activityGeneration   uint64
-	fetchCancel          context.CancelFunc
-	fetchQuiet           bool
-	lastSuccessAt        time.Time
-	scheduleEditor       *scheduleEditor
-	quotaCancel          context.CancelFunc
-	quotaGeneration      uint64
-	quotaRunning         bool
+	scheduleConfig     schedule.Config
+	scheduleWindow     schedule.Window
+	scheduleErr        error
+	sleeping           bool
+	manualWakeUntil    time.Time
+	scheduleGeneration uint64
+	// scheduleTimerAt is when the pending schedule tick fires; zero for none.
+	scheduleTimerAt     time.Time
+	scheduleInitialized bool
+	wakeFetchPending    bool
+	activityCtx         context.Context
+	activityCancel      context.CancelFunc
+	activityDeadline    time.Time
+	activityGeneration  uint64
+	fetchCancel         context.CancelFunc
+	fetchQuiet          bool
+	lastSuccessAt       time.Time
+	scheduleEditor      *scheduleEditor
+	quotaCancel         context.CancelFunc
+	quotaGeneration     uint64
 }
 
 type fetchFinishedMsg struct {
@@ -290,28 +285,32 @@ func (m *model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// overlayOpen reports whether the repository picker, the account picker, or
+// a form covers the lists.
+func (m *model) overlayOpen() bool {
+	return m.picker != nil || m.accounts != nil || m.rulesEditor != nil || m.snoozeEditor != nil || m.rerequest != nil || m.scheduleEditor != nil
+}
+
 func (m *model) startFetch() tea.Cmd {
 	m.closeRepositoryPicker()
-	if m.fetchCancel != nil {
-		m.fetchCancel()
-	}
+	m.cancelFetch()
 	m.loading = true
 	m.loginActive = false
 	m.refreshGeneration++
 	m.refreshDue = time.Time{}
 	m.err = nil
 	generation, client, account := m.refreshGeneration, m.client, m.accountGeneration
+	// A quiet fetch while asleep is not bound to the activity deadline.
 	quiet := !m.pollingAllowed()
-	base := m.ctx
-	deadline := time.Time{}
-	if !quiet && m.activityCtx != nil {
-		base = m.activityCtx
-		deadline = m.activityDeadline
+	base, deadline := m.ctx, time.Time{}
+	if !quiet {
+		base, deadline = m.activityContext(), m.activityDeadline
 	}
 	ctx, cancel := context.WithCancel(base)
 	m.fetchCancel, m.fetchQuiet = cancel, quiet
+	live := liveUntil(ctx, deadline, m.now)
 	fetch := func() tea.Msg {
-		if ctx.Err() != nil || !deadline.IsZero() && !m.now().Before(deadline) {
+		if !live() {
 			return fetchFinishedMsg{err: context.Canceled, generation: generation, account: account}
 		}
 		snapshot, err := client.Fetch(ctx)
@@ -320,7 +319,7 @@ func (m *model) startFetch() tea.Cmd {
 	cmds := []tea.Cmd{fetch, m.spinner.Tick}
 	if m.snapshot.Login == "" {
 		cmds = append(cmds, func() tea.Msg {
-			if ctx.Err() != nil || !deadline.IsZero() && !m.now().Before(deadline) {
+			if !live() {
 				return previewMsg{generation: generation, account: account, err: context.Canceled}
 			}
 			snapshot, err := client.Preview(ctx)
@@ -414,7 +413,7 @@ func (m *model) spinning() bool {
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if tick, ok := msg.(scheduleTickMsg); ok && tick.generation == m.scheduleGeneration {
-		m.scheduleTimerPending = false
+		m.scheduleTimerAt = time.Time{}
 	}
 	scheduleCmd := m.reconcileSchedule()
 	model, cmd := m.update(msg)
@@ -434,22 +433,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.picker.clamp(m.pickerViewportHeight())
 		}
 		m.setSearchStyle()
-		if m.rulesEditor != nil {
-			// The form redraws its fields only on a message of its own.
-			m.sizeRulesForm()
-			return m, m.updateRules(msg)
-		}
-		if m.snoozeEditor != nil {
-			m.sizeSnoozeForm()
-			return m, m.updateSnooze(msg)
-		}
-		if m.rerequest != nil {
-			m.sizeRerequestForm()
-			return m, m.updateRerequest(msg)
-		}
-		if m.scheduleEditor != nil {
-			m.sizeScheduleForm()
-			return m, m.updateSchedule(msg)
+		// A form redraws its fields only on a message of its own.
+		m.sizeForm()
+		if cmd, ok := m.updateForm(msg); ok {
+			return m, cmd
 		}
 	case tea.BackgroundColorMsg:
 		m.darkBackground = msg.IsDark()
@@ -459,17 +446,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.picker.setDark(m.darkBackground)
 		}
 		m.setSearchStyle()
-		if m.rulesEditor != nil {
-			return m, m.updateRules(msg)
-		}
-		if m.snoozeEditor != nil {
-			return m, m.updateSnooze(msg)
-		}
-		if m.rerequest != nil {
-			return m, m.updateRerequest(msg)
-		}
-		if m.scheduleEditor != nil {
-			return m, m.updateSchedule(msg)
+		if cmd, ok := m.updateForm(msg); ok {
+			return m, cmd
 		}
 	case spinner.TickMsg:
 		if m.spinning() {
@@ -494,7 +472,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.generation != m.refreshGeneration {
 			return m, nil
 		}
-		if m.picker != nil || m.loginActive || m.accounts != nil || m.rulesEditor != nil || m.snoozeEditor != nil || m.rerequest != nil || m.scheduleEditor != nil || (!m.scopeChosen && m.snapshot.Login != "") {
+		if m.fetchDeferred() {
 			return m, m.scheduleAutoRefresh()
 		}
 		return m, m.startAutomaticFetch()
@@ -503,10 +481,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		quiet := m.fetchQuiet
-		if m.fetchCancel != nil {
-			m.fetchCancel()
-			m.fetchCancel = nil
-		}
+		m.cancelFetch()
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
@@ -583,17 +558,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BlurMsg:
 		m.handleFocus(focusOut)
 	case tea.PasteMsg:
-		if m.rulesEditor != nil {
-			return m, m.updateRules(msg)
-		}
-		if m.snoozeEditor != nil {
-			return m, m.updateSnooze(msg)
-		}
-		if m.rerequest != nil {
-			return m, m.updateRerequest(msg)
-		}
-		if m.scheduleEditor != nil {
-			return m, m.updateSchedule(msg)
+		if cmd, ok := m.updateForm(msg); ok {
+			return m, cmd
 		}
 		if m.picker != nil {
 			return m, m.picker.paste(msg.Content, m.pickerViewportHeight())
@@ -610,21 +576,42 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.handleMouse(msg.(tea.MouseMsg))
 	default:
-		// The rule editor's form steps itself with messages of its own.
-		if m.rulesEditor != nil {
-			return m, m.updateRules(msg)
-		}
-		if m.snoozeEditor != nil {
-			return m, m.updateSnooze(msg)
-		}
-		if m.rerequest != nil {
-			return m, m.updateRerequest(msg)
-		}
-		if m.scheduleEditor != nil {
-			return m, m.updateSchedule(msg)
+		// A form steps itself with messages of its own.
+		if cmd, ok := m.updateForm(msg); ok {
+			return m, cmd
 		}
 	}
 	return m, nil
+}
+
+// updateForm passes msg to the open form, if any. At most one is open:
+// forms take every key, and modalOpen keeps R from opening over another.
+func (m *model) updateForm(msg tea.Msg) (tea.Cmd, bool) {
+	switch {
+	case m.rulesEditor != nil:
+		return m.updateRules(msg), true
+	case m.snoozeEditor != nil:
+		return m.updateSnooze(msg), true
+	case m.rerequest != nil:
+		return m.updateRerequest(msg), true
+	case m.scheduleEditor != nil:
+		return m.updateSchedule(msg), true
+	}
+	return nil, false
+}
+
+// sizeForm fits the open form, if any, to the terminal.
+func (m *model) sizeForm() {
+	switch {
+	case m.rulesEditor != nil:
+		m.sizeRulesForm()
+	case m.snoozeEditor != nil:
+		m.sizeSnoozeForm()
+	case m.rerequest != nil:
+		m.sizeRerequestForm()
+	case m.scheduleEditor != nil:
+		m.sizeScheduleForm()
+	}
 }
 
 func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
@@ -635,17 +622,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.cancel()
 		return tea.Quit
 	}
-	if m.rulesEditor != nil {
-		return m.updateRules(msg)
-	}
-	if m.scheduleEditor != nil {
-		return m.updateSchedule(msg)
-	}
-	if m.snoozeEditor != nil {
-		return m.updateSnooze(msg)
-	}
-	if m.rerequest != nil {
-		return m.updateRerequest(msg)
+	if cmd, ok := m.updateForm(msg); ok {
+		return cmd
 	}
 	if m.picker != nil {
 		return m.updateRepositoryPicker(msg)
@@ -1075,9 +1053,14 @@ func (m *model) keepSelection(rebuild func(), follow bool) {
 // sortMine orders authored pull requests ready to merge first, then oldest
 // created first. Ties keep the fetched order.
 func (m *model) sortMine(visible []int, source []github.PullRequest) {
+	// Rules are evaluated once per row, not once per comparison.
+	ready := make(map[int]bool, len(visible))
+	for _, index := range visible {
+		ready[index] = m.ready(&source[index])
+	}
 	slices.SortStableFunc(visible, func(a, b int) int {
 		x, y := &source[a], &source[b]
-		readyX, readyY := m.ready(x), m.ready(y)
+		readyX, readyY := ready[a], ready[b]
 		if readyX != readyY {
 			if readyX {
 				return -1
@@ -1327,7 +1310,9 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 	} else if m.notify {
 		title += " · notify"
 	}
-	if m.legendHidden() {
+	// The legend is built once per frame; it takes the lines the layout leaves.
+	legendLines := m.legendLines()
+	if m.legendHidden(legendLines) {
 		title += " · legend needs a taller terminal"
 	}
 	lines := []string{m.titleLine(title, m.countdownText())}
@@ -1346,7 +1331,7 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 		}
 		lines = append(lines, m.tableLines(id)...)
 	}
-	lines = append(lines, m.legendLines()...)
+	lines = append(lines, legendLines...)
 	selected := ""
 	if pr, ok := m.selectedPR(); ok {
 		selected = singleLine(pr.URL)
@@ -1367,7 +1352,7 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 		fixed = strings.TrimLeft(fixed+"  "+m.notice, " ")
 	} else if summary := m.changeStatus(m.changeStatusWidth(fixed)); summary != "" {
 		fixed = strings.TrimLeft(fixed+"  "+summary, " ")
-	} else if !(layout.single && m.focus != paneMine) && rowCount(&m.panes[paneMine]) > 0 && len(m.legendLines()) == 0 {
+	} else if !(layout.single && m.focus != paneMine) && rowCount(&m.panes[paneMine]) > 0 && len(legendLines) == 0 {
 		legend = m.icons.legend(m.rules.Customized())
 	}
 	if status := m.scheduleStatus(); status != "" {

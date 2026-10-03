@@ -184,14 +184,8 @@ func (m *model) notifyAlerts(alerts []prAlert) tea.Cmd {
 	}
 	text := alertText(alerts)
 	m.setNotice(text)
-	ctx := m.activityCtx
-	if ctx == nil {
-		ctx = m.ctx
-	}
-	generation, deadline, now := m.activityGeneration, m.activityDeadline, m.now
-	allowed := func() bool {
-		return ctx.Err() == nil && (deadline.IsZero() || now().Before(deadline))
-	}
+	ctx, generation := m.activityContext(), m.activityGeneration
+	allowed := liveUntil(ctx, m.activityDeadline, m.now)
 	if m.desktopNotify == nil {
 		raw := tea.Raw(ansi.Notify("prpr: "+text) + "\a")
 		return func() tea.Msg {

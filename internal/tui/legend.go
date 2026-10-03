@@ -238,9 +238,10 @@ func (m *model) legendLines() []string {
 	return append([]string{lipgloss.NewStyle().Faint(true).Render(rule)}, body...)
 }
 
-// legendHidden reports whether the legend is open but has no room.
-func (m *model) legendHidden() bool {
-	return m.legend && m.width > 0 && len(m.legendLines()) == 0
+// legendHidden reports whether the legend is open but has no room, given
+// the lines legendLines drew.
+func (m *model) legendHidden(lines []string) bool {
+	return m.legend && m.width > 0 && len(lines) == 0
 }
 
 // toggleLegend opens or closes the legend and saves the choice. A failed

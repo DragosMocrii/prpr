@@ -174,8 +174,7 @@ func (m *model) snoozeSignals(list paneID, pr *github.PullRequest) (held, known 
 		}
 	}
 	if list == paneReview {
-		add(signalNeedsYou, true, pr.ReviewStatus == github.ReviewNewCommits ||
-			pr.ReviewStatus == github.ReviewAuthorReplied || pr.ReviewStatus == github.ReviewDismissed)
+		add(signalNeedsYou, true, needsYou(pr.ReviewStatus))
 		add(signalRequested, true, pr.ReviewStatus == github.ReviewRequested)
 		slices.Sort(held)
 		slices.Sort(known)
@@ -302,7 +301,6 @@ type snoozeEditor struct {
 	list          paneID
 	title         string
 	choice, typed string
-	custom        bool
 }
 
 // openSnooze opens the snooze form on the focused row.
@@ -323,7 +321,7 @@ func (m *model) openSnooze() tea.Cmd {
 		list = paneReview
 	}
 	e := &snoozeEditor{key: keyOf(pr), list: list, choice: snoozeActivity,
-		title: fmt.Sprintf("Snooze %s#%d", singleLine(pr.Repository), pr.Number)}
+		title: "Snooze " + alertName(pr)}
 	m.snoozeEditor = e
 	e.form = huh.NewForm(
 		huh.NewGroup(huh.NewSelect[string]().Title(e.title).Options(
@@ -443,7 +441,7 @@ func (m *model) snooze(key prKey, list paneID, until time.Time, activity bool) t
 	if !activity {
 		when = "until " + wakeText(entry, m.now())
 	}
-	m.setNotice(fmt.Sprintf("Snoozed %s#%d %s · U undo", singleLine(pr.Repository), pr.Number, when))
+	m.setNotice("Snoozed " + alertName(pr) + " " + when + " · U undo")
 	return m.scheduleSnoozeTick()
 }
 
@@ -466,7 +464,7 @@ func (m *model) wakeNow() tea.Cmd {
 		return nil
 	}
 	key := keyOf(pr)
-	name := fmt.Sprintf("%s#%d", singleLine(pr.Repository), pr.Number)
+	name := alertName(pr)
 	m.keepSelection(func() {
 		delete(m.snoozes, key)
 		if m.woke == nil {

@@ -36,7 +36,7 @@ var attentionCategories = []attentionCategory{
 	{label: "changes requested", short: "changes", color: "1", pane: paneMine,
 		match: func(_ *model, pr *github.PullRequest) bool { return pr.ReviewDecision == "CHANGES_REQUESTED" }},
 	{label: "failing CI", short: "failing", color: "1", pane: paneMine,
-		match: func(_ *model, pr *github.PullRequest) bool { return pr.Checks == "FAILURE" || pr.Checks == "ERROR" }},
+		match: func(_ *model, pr *github.PullRequest) bool { return checksFailing(pr.Checks) }},
 	{label: "conflicts", short: "conflicts", color: "1", pane: paneMine,
 		match: func(_ *model, pr *github.PullRequest) bool {
 			return pr.Mergeable == "CONFLICTING" || pr.MergeState == "DIRTY"
@@ -110,13 +110,19 @@ func (m *model) categoryCount(number int) int {
 // summaryLine lists each non-empty category with its number key. The active
 // category is drawn in reverse video.
 func (m *model) summaryLine() string {
-	if line := m.summaryText(false); lipgloss.Width(line) <= m.width {
+	counts := make([]int, len(attentionCategories))
+	for i := range attentionCategories {
+		if categoryKnown(i+1, m.snapshot.Preview) {
+			counts[i] = m.categoryCount(i + 1)
+		}
+	}
+	if line := m.summaryText(counts, false); lipgloss.Width(line) <= m.width {
 		return line
 	}
-	return m.summaryText(true)
+	return m.summaryText(counts, true)
 }
 
-func (m *model) summaryText(short bool) string {
+func (m *model) summaryText(counts []int, short bool) string {
 	key := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	var parts []string
 	for i, category := range attentionCategories {
@@ -124,7 +130,7 @@ func (m *model) summaryText(short bool) string {
 		if !categoryKnown(number, m.snapshot.Preview) {
 			continue
 		}
-		count := m.categoryCount(number)
+		count := counts[i]
 		if count == 0 && m.category != number {
 			continue
 		}

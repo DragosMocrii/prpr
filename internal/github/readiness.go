@@ -269,7 +269,7 @@ func decodeRequiredChecks(data []byte, n int) ([]*requiredNode, error) {
 		return nil, fmt.Errorf("decode GitHub required check response: %w", err)
 	}
 	if len(response.Errors) != 0 {
-		return nil, fmt.Errorf("GitHub required check query returned GraphQL errors: %s", strings.Join(rawMessages(response.Errors), "; "))
+		return nil, fmt.Errorf("GitHub required check query returned GraphQL errors: %s", graphQLErrors(response.Errors))
 	}
 	if response.Data == nil {
 		return nil, fmt.Errorf("GitHub required check response has no data")

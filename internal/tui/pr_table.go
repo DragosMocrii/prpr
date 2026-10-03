@@ -632,14 +632,7 @@ func reviewText(ic *iconSet, decision string, approvals int) string {
 // botsText shows the most attention-worthy bot state; concerns are summed
 // across bots.
 func botsText(ic *iconSet, reviews []github.BotReview) string {
-	worst := github.BotReview{}
-	concerns := 0
-	for _, review := range reviews {
-		worst.State = max(worst.State, review.State)
-		concerns += review.Concerns
-	}
-	worst.Concerns = concerns
-	return botStateText(ic, worst)
+	return botStateText(ic, botsWorst(reviews))
 }
 
 func botStateText(ic *iconSet, review github.BotReview) string {
@@ -714,10 +707,8 @@ func safePullRequestURL(rawURL string) bool {
 	if rawURL == "" {
 		return false
 	}
-	for _, r := range rawURL {
-		if unicode.IsControl(r) {
-			return false
-		}
+	if strings.ContainsFunc(rawURL, unicode.IsControl) {
+		return false
 	}
 	parsed, err := url.Parse(rawURL)
 	return err == nil && strings.EqualFold(parsed.Scheme, "https") &&

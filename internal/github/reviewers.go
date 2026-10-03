@@ -116,7 +116,7 @@ func decodeReviewers(data []byte) ([]Reviewer, error) {
 		return nil, fmt.Errorf("decode GitHub reviewers: %w", err)
 	}
 	if len(response.Errors) != 0 {
-		return nil, fmt.Errorf("GitHub reviewer query returned GraphQL errors: %s", strings.Join(rawMessages(response.Errors), "; "))
+		return nil, fmt.Errorf("GitHub reviewer query returned GraphQL errors: %s", graphQLErrors(response.Errors))
 	}
 	if response.Data.Repository == nil || response.Data.Repository.PullRequest == nil {
 		return nil, errors.New("GitHub reviewer query found no pull request")
@@ -261,13 +261,5 @@ func pullRequestTarget(repository string, number int) (owner, name string, err e
 // letters, digits, and hyphens, not leading, at most 39 characters. Some
 // older logins break GitHub's current rules on hyphens, so those are allowed.
 func ValidLogin(login string) bool {
-	if login == "" || len(login) > 39 || login[0] == '-' {
-		return false
-	}
-	for _, r := range login {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-') {
-			return false
-		}
-	}
-	return true
+	return validLogin(login) && len(login) <= 39 && login[0] != '-'
 }

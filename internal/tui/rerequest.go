@@ -70,8 +70,7 @@ func (m *model) authoredPR(key prKey) (*github.PullRequest, bool) {
 // modalOpen reports whether a screen other than the lists takes the keys,
 // or the lists are not shown for an error or a login.
 func (m *model) modalOpen() bool {
-	return m.err != nil || m.loginActive || m.picker != nil || m.accounts != nil || m.searching != nil ||
-		m.rulesEditor != nil || m.snoozeEditor != nil || m.rerequest != nil
+	return m.err != nil || m.loginActive || m.searching != nil || m.overlayOpen()
 }
 
 // rerequestSelected looks up who can be asked again to review the focused
@@ -121,7 +120,7 @@ func (m *model) handleReviewersListed(msg reviewersListedMsg) tea.Cmd {
 		return nil
 	}
 	m.notice = ""
-	e := &rerequestEditor{key: msg.key, title: fmt.Sprintf("Request reviews of %s#%d again", singleLine(pr.Repository), pr.Number),
+	e := &rerequestEditor{key: msg.key, title: "Request reviews of " + alertName(pr) + " again",
 		reviewed: make(map[string]time.Time)}
 	options := make([]huh.Option[string], len(msg.reviewers))
 	approvers := false

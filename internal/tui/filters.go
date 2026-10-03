@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -71,7 +70,7 @@ func (m *model) shown(id paneID, pr *github.PullRequest, preview bool) bool {
 	}
 	switch m.quick {
 	case quickFailing:
-		if preview || (pr.Checks != "FAILURE" && pr.Checks != "ERROR") {
+		if preview || !checksFailing(pr.Checks) {
 			return false
 		}
 	case quickReady:
@@ -85,10 +84,14 @@ func (m *model) shown(id paneID, pr *github.PullRequest, preview bool) bool {
 // searchMatches reports whether every word of the search appears, ignoring
 // case, in the title, repository, author, or #number.
 func searchMatches(pr *github.PullRequest, search string) bool {
+	words := strings.Fields(strings.ToLower(search))
+	if len(words) == 0 {
+		return true
+	}
 	haystack := strings.ToLower(strings.Join([]string{
 		pr.Title, pr.Repository, pr.Author, "#" + strconv.Itoa(pr.Number),
 	}, "\n"))
-	for _, word := range strings.Fields(strings.ToLower(search)) {
+	for _, word := range words {
 		if !strings.Contains(haystack, word) {
 			return false
 		}
@@ -193,12 +196,7 @@ func (m *model) updateSearch(msg tea.Msg) tea.Cmd {
 		}
 	}
 	if paste, ok := msg.(tea.PasteMsg); ok {
-		msg = tea.PasteMsg{Content: strings.Map(func(r rune) rune {
-			if unicode.IsControl(r) {
-				return ' '
-			}
-			return r
-		}, paste.Content)}
+		msg = tea.PasteMsg{Content: singleLine(paste.Content)}
 	}
 	var cmd tea.Cmd
 	*m.searching, cmd = m.searching.Update(msg)

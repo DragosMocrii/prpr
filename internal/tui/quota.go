@@ -32,28 +32,29 @@ type quotaTickMsg struct {
 // pollQuota starts one cancellable quota chain. Each request schedules the
 // next generation-tagged tick only after its result arrives.
 func (m *model) pollQuota() tea.Cmd {
-	if !m.pollingAllowed() || m.quotaBlocked() {
+	if m.quotaBlocked() {
 		m.quotaPaused = true
 		return nil
 	}
-	if m.quotaRunning {
+	// A running chain has a read in flight or a tick pending.
+	if m.quotaCancel != nil {
 		return nil
 	}
 	m.quotaGeneration++
-	m.quotaRunning, m.quotaPaused = true, false
-	base := m.activityCtx
-	if base == nil {
-		base = m.ctx
-	}
-	ctx, cancel := context.WithCancel(base)
-	m.quotaCancel = cancel
-	return m.readQuota(ctx, m.quotaGeneration, m.accountGeneration)
+	m.quotaPaused = false
+	return m.readQuota(m.quotaGeneration, m.accountGeneration)
 }
 
-func (m *model) readQuota(ctx context.Context, generation, account uint64) tea.Cmd {
-	client, deadline, now := m.client, m.activityDeadline, m.now
+// readQuota cancels the chain's previous read and starts the next one.
+func (m *model) readQuota(generation, account uint64) tea.Cmd {
+	if m.quotaCancel != nil {
+		m.quotaCancel()
+	}
+	ctx, cancel := context.WithCancel(m.activityContext())
+	m.quotaCancel = cancel
+	client, live := m.client, liveUntil(ctx, m.activityDeadline, m.now)
 	return func() tea.Msg {
-		if ctx.Err() != nil || !deadline.IsZero() && !now().Before(deadline) {
+		if !live() {
 			return rateLimitMsg{err: context.Canceled, account: account, generation: generation}
 		}
 		limit, err := client.RateLimit(ctx)
@@ -67,14 +68,10 @@ func (m *model) quotaBlocked() bool {
 	return !m.pollingAllowed() || m.loginActive || errors.As(m.err, &authErr)
 }
 
-func (m *model) pauseQuota() {
-	m.invalidateQuota()
-}
-
 // handleQuota advances the single poll chain and rejects every obsolete result.
 func (m *model) handleQuota(msg tea.Msg) tea.Cmd {
 	if m.quotaBlocked() {
-		m.pauseQuota()
+		m.invalidateQuota()
 		return nil
 	}
 	switch msg := msg.(type) {
@@ -93,16 +90,7 @@ func (m *model) handleQuota(msg tea.Msg) tea.Cmd {
 		if msg.generation != m.quotaGeneration || msg.account != m.accountGeneration {
 			return nil
 		}
-		base := m.activityCtx
-		if base == nil {
-			base = m.ctx
-		}
-		if m.quotaCancel != nil {
-			m.quotaCancel()
-		}
-		ctx, cancel := context.WithCancel(base)
-		m.quotaCancel = cancel
-		return m.readQuota(ctx, msg.generation, msg.account)
+		return m.readQuota(msg.generation, msg.account)
 	default:
 		return nil
 	}
@@ -113,7 +101,7 @@ func (m *model) handleQuota(msg tea.Msg) tea.Cmd {
 }
 
 func (m *model) resumeQuota() tea.Cmd {
-	if !m.quotaPaused || m.quotaBlocked() || m.quotaRunning {
+	if !m.quotaPaused {
 		return nil
 	}
 	return m.pollQuota()

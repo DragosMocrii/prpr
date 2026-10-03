@@ -27,15 +27,47 @@ type scheduleEditor struct {
 const scheduleWidth = rulesWidth
 const scheduleChrome = rulesChrome
 
-func (m *model) pollingAllowed() bool {
-	now := m.now()
-	if !m.manualWakeUntil.IsZero() && now.Before(m.manualWakeUntil) {
-		return true
+func (m *model) pollingAllowed() bool { return m.scheduledActivity(m.now()) }
+
+// manualWake reports whether a w wake holds at now.
+func (m *model) manualWake(now time.Time) bool { return now.Before(m.manualWakeUntil) }
+
+// windowEnabled reports whether a readable schedule limits activity.
+func (m *model) windowEnabled() bool { return m.scheduleErr == nil && m.scheduleConfig.Enabled }
+
+// fetchDeferred reports whether an automatic fetch must wait: login owns the
+// terminal, a form or picker is open, or the first scope choice is pending.
+func (m *model) fetchDeferred() bool {
+	return m.loginActive || m.overlayOpen() || (m.snapshot.Login != "" && !m.scopeChosen)
+}
+
+// activityContext is the context automatic requests run under: it ends at
+// the activity deadline.
+func (m *model) activityContext() context.Context {
+	if m.activityCtx == nil {
+		return m.ctx
 	}
-	if m.scheduleErr != nil {
-		return false
+	return m.activityCtx
+}
+
+// liveUntil reports, from inside a command, whether ctx is still live and
+// the deadline, checked against the model's clock, has not passed.
+func liveUntil(ctx context.Context, deadline time.Time, now func() time.Time) func() bool {
+	return func() bool { return ctx.Err() == nil && (deadline.IsZero() || now().Before(deadline)) }
+}
+
+func (m *model) cancelFetch() {
+	if m.fetchCancel != nil {
+		m.fetchCancel()
+		m.fetchCancel = nil
 	}
-	return m.scheduleWindow.Active(now.In(time.Local))
+}
+
+// resetScheduleTimer drops the pending schedule tick so the next reconcile
+// schedules a new one.
+func (m *model) resetScheduleTimer() {
+	m.scheduleGeneration++
+	m.scheduleTimerAt = time.Time{}
 }
 
 func (m *model) notificationsAllowed() bool {
@@ -47,8 +79,7 @@ func (m *model) startAutomaticFetch() tea.Cmd {
 		m.wakeFetchPending = false
 		return nil
 	}
-	if m.loginActive || m.picker != nil || m.accounts != nil || m.rulesEditor != nil || m.snoozeEditor != nil || m.rerequest != nil || m.scheduleEditor != nil ||
-		(m.snapshot.Login != "" && !m.scopeChosen) {
+	if m.fetchDeferred() {
 		m.wakeFetchPending = true
 		return nil
 	}
@@ -66,7 +97,7 @@ func (m *model) startAutomaticFetch() tea.Cmd {
 }
 
 func (m *model) scheduledActivity(now time.Time) bool {
-	if !m.manualWakeUntil.IsZero() && now.Before(m.manualWakeUntil) {
+	if m.manualWake(now) {
 		return true
 	}
 	if m.scheduleErr != nil {
@@ -75,25 +106,18 @@ func (m *model) scheduledActivity(now time.Time) bool {
 	return m.scheduleWindow.Active(now.In(time.Local))
 }
 
+// nextWindowBoundary is when the schedule next opens or closes; zero when
+// no schedule limits activity.
 func (m *model) nextWindowBoundary(now time.Time) time.Time {
-	local := now.In(time.Local)
-	_, offset := local.Zone()
-	if m.scheduleBoundary.IsZero() || !now.Before(m.scheduleBoundary) ||
-		(!m.scheduleLastCheck.IsZero() && now.Before(m.scheduleLastCheck)) ||
-		m.scheduleLocation != local.Location() || m.scheduleOffset != offset {
-		m.scheduleBoundary = time.Time{}
-		if m.scheduleErr == nil && m.scheduleConfig.Enabled {
-			m.scheduleBoundary = m.scheduleWindow.NextChange(local)
-		}
-		m.scheduleLocation, m.scheduleOffset = local.Location(), offset
+	if !m.windowEnabled() {
+		return time.Time{}
 	}
-	m.scheduleLastCheck = now
-	return m.scheduleBoundary
+	return m.scheduleWindow.NextChange(now.In(time.Local))
 }
 
 func (m *model) effectiveDeadline(now time.Time) time.Time {
-	if !m.manualWakeUntil.IsZero() && now.Before(m.manualWakeUntil) {
-		if m.scheduleErr != nil || !m.scheduleConfig.Enabled {
+	if m.manualWake(now) {
+		if !m.windowEnabled() {
 			return m.manualWakeUntil
 		}
 		expires := m.manualWakeUntil.In(time.Local)
@@ -101,9 +125,6 @@ func (m *model) effectiveDeadline(now time.Time) time.Time {
 			return m.scheduleWindow.NextChange(expires)
 		}
 		return m.manualWakeUntil
-	}
-	if m.scheduleErr != nil || !m.scheduleConfig.Enabled {
-		return time.Time{}
 	}
 	return m.nextWindowBoundary(now)
 }
@@ -141,7 +162,6 @@ func (m *model) invalidateQuota() {
 		m.quotaCancel = nil
 	}
 	m.quotaGeneration++
-	m.quotaRunning = false
 	m.quotaPaused = true
 }
 
@@ -151,10 +171,7 @@ func (m *model) enterSleep() {
 	m.refreshGeneration++
 	m.countdownGeneration++
 	m.refreshDue = time.Time{}
-	if m.fetchCancel != nil {
-		m.fetchCancel()
-		m.fetchCancel = nil
-	}
+	m.cancelFetch()
 	if !m.loginActive {
 		m.loading = false
 	}
@@ -190,11 +207,9 @@ func (m *model) resumeActivity() tea.Cmd {
 // reevaluation timer. The timer only notices schedule/clock changes.
 func (m *model) reconcileSchedule() tea.Cmd {
 	now := m.now()
-	if !m.manualWakeUntil.IsZero() && !now.Before(m.manualWakeUntil) {
+	if !m.manualWakeUntil.IsZero() && !m.manualWake(now) {
 		m.manualWakeUntil = time.Time{}
-		m.scheduleBoundary = time.Time{}
-		m.scheduleGeneration++
-		m.scheduleTimerPending = false
+		m.resetScheduleTimer()
 	}
 	active := m.scheduledActivity(now)
 	first := !m.scheduleInitialized
@@ -213,31 +228,25 @@ func (m *model) reconcileSchedule() tea.Cmd {
 		cmds = append(cmds, m.resumeActivity())
 	} else if active {
 		deadline := m.effectiveDeadline(now)
-		if !sameTime(deadline, m.activityDeadline) {
+		if !deadline.Equal(m.activityDeadline) {
 			m.replaceActivity(deadline)
 			if m.fetchCancel != nil {
-				m.fetchCancel()
-				m.fetchCancel = nil
+				m.cancelFetch()
 				m.loading = false
 			}
 			m.invalidateQuota()
 			cmds = append(cmds, m.startAutomaticFetch(), m.pollQuota())
 		}
 	}
-	if m.wakeFetchPending && active && !m.sleeping && !m.loading && !m.loginActive &&
-		m.picker == nil && m.accounts == nil && m.rulesEditor == nil && m.snoozeEditor == nil &&
-		m.rerequest == nil && m.scheduleEditor == nil && (m.snapshot.Login == "" || m.scopeChosen) {
+	if m.wakeFetchPending && !m.sleeping && !m.loading && !m.fetchDeferred() {
 		cmds = append(cmds, m.startAutomaticFetch())
 	}
-	if m.scheduleTimerPending && now.Before(m.scheduleTimerAt) {
+	if now.Before(m.scheduleTimerAt) {
 		return tea.Batch(cmds...)
 	}
-	m.scheduleTimerPending = false
-	next := time.Time{}
-	if m.scheduleErr == nil && m.scheduleConfig.Enabled {
-		next = m.nextWindowBoundary(now)
-	}
-	if !m.manualWakeUntil.IsZero() && m.manualWakeUntil.After(now) && (next.IsZero() || m.manualWakeUntil.Before(next)) {
+	m.scheduleTimerAt = time.Time{}
+	next := m.nextWindowBoundary(now)
+	if m.manualWake(now) && (next.IsZero() || m.manualWakeUntil.Before(next)) {
 		next = m.manualWakeUntil
 	}
 	if !next.IsZero() {
@@ -245,13 +254,10 @@ func (m *model) reconcileSchedule() tea.Cmd {
 		m.scheduleGeneration++
 		generation := m.scheduleGeneration
 		m.scheduleTimerAt = now.Add(delay)
-		m.scheduleTimerPending = true
 		cmds = append(cmds, tea.Tick(delay, func(time.Time) tea.Msg { return scheduleTickMsg{generation} }))
 	}
 	return tea.Batch(cmds...)
 }
-
-func sameTime(a, b time.Time) bool { return a.Equal(b) || a.IsZero() && b.IsZero() }
 
 func (m *model) wakeForHour() tea.Cmd {
 	if !m.manualWakeUntil.IsZero() {
@@ -261,9 +267,7 @@ func (m *model) wakeForHour() tea.Cmd {
 	} else {
 		return nil
 	}
-	m.scheduleGeneration++
-	m.scheduleBoundary = time.Time{}
-	m.scheduleTimerPending = false
+	m.resetScheduleTimer()
 	return m.reconcileSchedule()
 }
 
@@ -350,9 +354,7 @@ func (m *model) saveSchedule() tea.Cmd {
 	m.closeSchedule()
 	m.manualWakeUntil = time.Time{}
 	m.scheduleConfig, m.scheduleWindow, m.scheduleErr = config, window, nil
-	m.scheduleBoundary = time.Time{}
-	m.scheduleGeneration++
-	m.scheduleTimerPending = false
+	m.resetScheduleTimer()
 	if err := m.preferences.SaveSchedule(config); err != nil {
 		m.preferenceErr = fmt.Errorf("Schedule not saved: %w", err)
 	} else {
@@ -372,7 +374,7 @@ func (m *model) scheduleLines() []string {
 }
 
 func (m *model) scheduleStatus() string {
-	if !m.manualWakeUntil.IsZero() && m.now().Before(m.manualWakeUntil) {
+	if m.manualWake(m.now()) {
 		return "Awake until " + m.manualWakeUntil.In(time.Local).Format("Mon 15:04")
 	}
 	if !m.sleeping {

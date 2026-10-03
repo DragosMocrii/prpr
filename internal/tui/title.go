@@ -62,10 +62,11 @@ func (m *model) windowTitle() string {
 		title = "prpr · sign-in needed"
 	case m.err != nil:
 		title = "prpr · error"
-	case m.needYouCount() > 0:
-		title = "prpr · " + strconv.Itoa(m.needYouCount()) + " need you"
 	default:
 		title = "prpr"
+		if count := m.needYouCount(); count > 0 {
+			title += " · " + strconv.Itoa(count) + " need you"
+		}
 	}
 	return singleLine(ansi.Strip(title))
 }

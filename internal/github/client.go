@@ -515,14 +515,10 @@ func decodeRepositoryPages(data []byte) ([]string, error) {
 			return nil, fmt.Errorf("decode GitHub repository page %d: expected repository array", pageIndex+1)
 		}
 		for repositoryIndex, repositoryData := range repositories {
-			var repository struct {
-				FullName *string `json:"full_name"`
-			}
-			if err := json.Unmarshal(repositoryData, &repository); err != nil || repository.FullName == nil ||
-				!ValidRepositoryName(*repository.FullName) {
+			name, err := decodeRepository(repositoryData)
+			if err != nil {
 				return nil, fmt.Errorf("decode GitHub repository page %d item %d: invalid full_name", pageIndex+1, repositoryIndex+1)
 			}
-			name := *repository.FullName
 			key := strings.ToLower(name)
 			if _, exists := seen[key]; exists {
 				continue
@@ -608,7 +604,7 @@ func decodePages(data []byte, bots []Bot) (Snapshot, error) {
 			return Snapshot{}, fmt.Errorf("decode GitHub pull request page %d: %w", i+1, err)
 		}
 		if len(page.Errors) != 0 {
-			return Snapshot{}, fmt.Errorf("GitHub pull request page %d returned GraphQL errors: %s", i+1, strings.Join(rawMessages(page.Errors), "; "))
+			return Snapshot{}, fmt.Errorf("GitHub pull request page %d returned GraphQL errors: %s", i+1, graphQLErrors(page.Errors))
 		}
 		if page.Data.Viewer == nil {
 			return Snapshot{}, fmt.Errorf("GitHub pull request page %d has no viewer", i+1)
@@ -675,7 +671,7 @@ func decodeSearchPages(data []byte, name string, convert func(*pullRequestNode) 
 			return nil, fmt.Errorf("decode GitHub %s page %d: %w", name, i+1, err)
 		}
 		if len(page.Errors) != 0 {
-			return nil, fmt.Errorf("GitHub %s page %d returned GraphQL errors: %s", name, i+1, strings.Join(rawMessages(page.Errors), "; "))
+			return nil, fmt.Errorf("GitHub %s page %d returned GraphQL errors: %s", name, i+1, graphQLErrors(page.Errors))
 		}
 		if page.Data.Search == nil {
 			return nil, fmt.Errorf("GitHub %s page %d has no search connection", name, i+1)
@@ -693,12 +689,13 @@ func decodeSearchPages(data []byte, name string, convert func(*pullRequestNode) 
 	return prs, nil
 }
 
-func rawMessages(messages []json.RawMessage) []string {
+// graphQLErrors joins a response's raw GraphQL errors for an error message.
+func graphQLErrors(messages []json.RawMessage) string {
 	result := make([]string, len(messages))
 	for i, message := range messages {
 		result[i] = string(message)
 	}
-	return result
+	return strings.Join(result, "; ")
 }
 
 // RateLimit is the viewer's GraphQL quota, which pull request fetches use.
@@ -737,7 +734,7 @@ func decodeRateLimit(data []byte) (RateLimit, error) {
 		return RateLimit{}, fmt.Errorf("decode GitHub rate limit: %w", err)
 	}
 	if len(response.Errors) != 0 {
-		return RateLimit{}, fmt.Errorf("GitHub rate limit query returned GraphQL errors: %s", strings.Join(rawMessages(response.Errors), "; "))
+		return RateLimit{}, fmt.Errorf("GitHub rate limit query returned GraphQL errors: %s", graphQLErrors(response.Errors))
 	}
 	pool := response.Data.RateLimit
 	if pool == nil || pool.Limit == nil || pool.Remaining == nil || pool.ResetAt == nil || *pool.Limit <= 0 || *pool.Remaining < 0 {

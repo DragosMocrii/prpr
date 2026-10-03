@@ -141,8 +141,8 @@ func TestQuietRefreshKeepsSuccessfulSnapshotAndSuppressesAlerts(t *testing.T) {
 	quotaGeneration := m.quotaGeneration
 
 	press(m, tea.Key{Code: 'r', Text: "r"})
-	if !m.loading || !m.fetchQuiet || m.quotaRunning || m.quotaGeneration != quotaGeneration || !m.refreshDue.IsZero() {
-		t.Fatalf("one-shot request state: loading %t quiet %t quota-running %t quota-generation %d refresh %v", m.loading, m.fetchQuiet, m.quotaRunning, m.quotaGeneration, m.refreshDue)
+	if !m.loading || !m.fetchQuiet || m.quotaCancel != nil || m.quotaGeneration != quotaGeneration || !m.refreshDue.IsZero() {
+		t.Fatalf("one-shot request state: loading %t quiet %t quota-running %t quota-generation %d refresh %v", m.loading, m.fetchQuiet, m.quotaCancel != nil, m.quotaGeneration, m.refreshDue)
 	}
 	updated := base
 	updated.Checks = "FAILURE"

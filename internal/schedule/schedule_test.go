@@ -97,6 +97,19 @@ func TestNextChangeEndsOvernightWindowOnUnselectedDay(t *testing.T) {
 	}
 }
 
+func TestNextChangeAcrossMidnightDST(t *testing.T) {
+	// Santiago skips 2026-09-06 00:00, so that day's local midnight does not exist.
+	loc, err := time.LoadLocation("America/Santiago")
+	if err != nil {
+		t.Fatal(err)
+	}
+	window := compile(t, Config{Enabled: true, Days: []string{"sun", "tue", "wed"}, Start: "11:12", End: "18:55"})
+	at := time.Date(2026, 9, 3, 19, 13, 0, 0, loc)
+	if got, want := window.NextChange(at), time.Date(2026, 9, 6, 11, 12, 0, 0, loc); !got.Equal(want) {
+		t.Fatalf("next opening = %s, want %s", got, want)
+	}
+}
+
 func TestNextChangeAcrossNewYorkDST(t *testing.T) {
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {

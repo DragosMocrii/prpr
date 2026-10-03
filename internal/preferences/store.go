@@ -384,15 +384,21 @@ func validLogin(login string) bool {
 // to follow gh's active account.
 func (s *Store) PinnedAccount() string { return s.pinned }
 
+// saveApp writes the app settings with edit applied. Callers update their
+// field only once the write succeeds.
+func (s *Store) saveApp(edit func(*appJSON)) error {
+	app := s.app()
+	edit(&app)
+	return s.writeAll(s.accounts, app)
+}
+
 // SavePinnedAccount saves the account prpr uses; "" follows gh's active
 // account.
 func (s *Store) SavePinnedAccount(login string) error {
 	if login != "" && !validLogin(login) {
 		return fmt.Errorf("save preferences %q: invalid GitHub login %q", s.path, login)
 	}
-	app := s.app()
-	app.Account = login
-	if err := s.writeAll(s.accounts, app); err != nil {
+	if err := s.saveApp(func(app *appJSON) { app.Account = login }); err != nil {
 		return err
 	}
 	s.pinned = login
@@ -412,9 +418,7 @@ func (s *Store) SaveIcons(name string) error {
 	if !ValidIcons(name) {
 		return fmt.Errorf("save preferences %q: unknown icon set %q", s.path, name)
 	}
-	app := s.app()
-	app.Icons = name
-	if err := s.writeAll(s.accounts, app); err != nil {
+	if err := s.saveApp(func(app *appJSON) { app.Icons = name }); err != nil {
 		return err
 	}
 	s.icons = name
@@ -426,9 +430,7 @@ func (s *Store) Legend() bool { return s.legend }
 
 // SaveLegend saves whether the icon legend panel is open.
 func (s *Store) SaveLegend(open bool) error {
-	app := s.app()
-	app.Legend = open
-	if err := s.writeAll(s.accounts, app); err != nil {
+	if err := s.saveApp(func(app *appJSON) { app.Legend = open }); err != nil {
 		return err
 	}
 	s.legend = open
@@ -440,9 +442,7 @@ func (s *Store) ShowDrafts() bool { return s.drafts }
 
 // SaveShowDrafts saves whether draft pull requests are shown.
 func (s *Store) SaveShowDrafts(show bool) error {
-	app := s.app()
-	app.Drafts = show
-	if err := s.writeAll(s.accounts, app); err != nil {
+	if err := s.saveApp(func(app *appJSON) { app.Drafts = show }); err != nil {
 		return err
 	}
 	s.drafts = show
@@ -474,9 +474,7 @@ func (s *Store) SaveSchedule(config schedule.Config) error {
 	if err != nil {
 		return fmt.Errorf("encode preferences %q: %w", s.path, err)
 	}
-	app := s.app()
-	app.Schedule = data
-	if err := s.writeAll(s.accounts, app); err != nil {
+	if err := s.saveApp(func(app *appJSON) { app.Schedule = data }); err != nil {
 		return err
 	}
 	s.schedule, s.scheduleRaw, s.scheduleErr = config, data, nil
@@ -491,9 +489,7 @@ func (s *Store) SaveRules(rules readiness.Rules) error {
 	if err != nil {
 		return fmt.Errorf("encode preferences %q: %w", s.path, err)
 	}
-	app := s.app()
-	app.Ready = data
-	if err := s.writeAll(s.accounts, app); err != nil {
+	if err := s.saveApp(func(app *appJSON) { app.Ready = data }); err != nil {
 		return err
 	}
 	s.rules, s.rulesRaw, s.rulesErr = rules.Clone(), data, nil

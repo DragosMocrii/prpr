@@ -212,7 +212,7 @@ func TestAccountSwitchKeepsQuotaPollingAfterAFailedFetch(t *testing.T) {
 	m, _ := accountsModel(t)
 	m.chooseAccount("work")
 	m.Update(fetchFinishedMsg{account: m.accountGeneration, generation: m.refreshGeneration, err: errors.New("offline")})
-	if !m.quotaRunning || m.quotaPaused {
-		t.Fatalf("quota polling stopped after the switch: running %t paused %t", m.quotaRunning, m.quotaPaused)
+	if m.quotaCancel == nil || m.quotaPaused {
+		t.Fatalf("quota polling stopped after the switch: running %t paused %t", m.quotaCancel != nil, m.quotaPaused)
 	}
 }

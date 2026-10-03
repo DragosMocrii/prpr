@@ -26,7 +26,7 @@ type paneHit struct {
 func (m *model) showingList() bool {
 	return m.width >= minimumWidth && m.height >= minimumHeight &&
 		!(m.loading && !m.loginActive && !m.refreshing()) &&
-		(m.err == nil || m.keptWhileAsleep()) && m.picker == nil && m.accounts == nil && m.rulesEditor == nil && m.snoozeEditor == nil && m.rerequest == nil && m.scheduleEditor == nil && m.scopeChosen && m.panesFit() && !m.detailsShown()
+		(m.err == nil || m.keptWhileAsleep()) && !m.overlayOpen() && m.scopeChosen && m.panesFit() && !m.detailsShown()
 }
 
 // toggleMouse turns mouse mode on or off. Off, the terminal handles the mouse
