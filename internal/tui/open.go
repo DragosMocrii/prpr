@@ -28,6 +28,7 @@ func (m *model) openSelected() tea.Cmd {
 		m.setNotice(fmt.Sprintf("#%d has no GitHub link to open", pr.Number))
 		return nil
 	}
+	m.markRead()
 	m.setNotice(fmt.Sprintf("Opening #%d in the browser…", pr.Number))
 	ctx, open, url, id := m.ctx, m.openBrowser, pr.URL, m.noticeID
 	return func() tea.Msg {
@@ -57,6 +58,7 @@ func (m *model) copySelected() tea.Cmd {
 		m.setNotice(fmt.Sprintf("#%d has no GitHub link to copy", pr.Number))
 		return nil
 	}
+	m.markRead()
 	m.setNotice(fmt.Sprintf("Copied the URL of #%d", pr.Number))
 	return tea.SetClipboard(pr.URL)
 }

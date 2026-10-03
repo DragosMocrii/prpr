@@ -159,6 +159,7 @@ func TestClickingAwayFromAGoneRowDropsIt(t *testing.T) {
 	updateSnapshot(m, "alice", two, three)
 	// Selection stayed on #1, now a gone row after the others.
 	press(m, mouseKey)
+	rest(m)
 	click(m, lineOf(m, 2))
 	if selected, _ := m.selectedPR(); selected.Number != 2 || markers(m, paneMine) != "  " {
 		t.Fatalf("after clicking away from gone #1: selected #%d, markers %q", selected.Number, markers(m, paneMine))

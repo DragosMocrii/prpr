@@ -158,7 +158,8 @@ func TestLegendDrawsWhatTheTablesDraw(t *testing.T) {
 			mergeIcon(ic, false, "CONFLICTING", "DIRTY", false), mergeIcon(ic, false, "UNKNOWN", "UNKNOWN", false),
 			checksIcon(ic, "SUCCESS"), checksIcon(ic, "FAILURE"), checksIcon(ic, "PENDING"),
 			reviewText(ic, "APPROVED", 0), reviewText(ic, "CHANGES_REQUESTED", 0), reviewText(ic, "REVIEW_REQUIRED", 0),
-			markText(markNew, false), markText(markChanged, false), markText(markActivity, false), markText(markNone, true),
+			markText(markNew, dirNeutral, false), markText(markChanged, dirGood, false), markText(markChanged, dirBad, false),
+			markText(markChanged, dirNeutral, false), markText(markActivity, dirNeutral, false), markText(markNone, dirNeutral, true),
 			pendingText, ic.star,
 		}
 		for _, state := range []github.BotState{github.BotPassed, github.BotStale, github.BotRunning, github.BotFailed} {

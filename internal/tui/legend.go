@@ -112,10 +112,12 @@ func (m *model) legendSections() []legendSection {
 	}
 	sections = append(sections,
 		legendSection{"Marks", []string{
-			item(markText(markNew, false), "new"),
-			item(markText(markChanged, false), "changed"),
-			item(markText(markActivity, false), "updated"),
-			item(markText(markNone, true), "gone"),
+			item(markText(markNew, dirNeutral, false), "new"),
+			item(markText(markChanged, dirGood, false), "better"),
+			item(markText(markChanged, dirBad, false), "needs you"),
+			item(markText(markChanged, dirNeutral, false), "changed"),
+			item(markText(markActivity, dirNeutral, false), "updated"),
+			item(markText(markNone, dirNeutral, true), "gone"),
 		}},
 		legendSection{"Other", []string{item(ageText(time.Time{}, time.Time{}), "no age (draft)"), item(pendingText, "still loading")}})
 	title := []string{item(ic.star, "watchlist")}

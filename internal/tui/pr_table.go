@@ -179,8 +179,10 @@ func (m *model) paneLayout(id paneID) tableLayout {
 const (
 	reverseOn  = "\x1b[7m"
 	reverseOff = "\x1b[27m"
-	goneOn     = "\x1b[2;9m"
-	goneOff    = "\x1b[22;29m"
+	// underlineOff ends underlineOn.
+	underlineOff = "\x1b[24;59m"
+	goneOn       = "\x1b[2;9m"
+	goneOff      = "\x1b[22;29m"
 	// waitingOn marks a reviewed pull request that waits on someone else.
 	waitingOn  = "\x1b[2;3m"
 	waitingOff = "\x1b[22;23m"
@@ -202,9 +204,14 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			continue
 		}
 		mark := m.rowMark(id, pr)
+		var lines []changeLine
+		if !gone {
+			lines = m.changeLines(id, pr)
+		}
+		markCell := markText(mark.kind, rowDirection(lines), gone)
 		changed := func(cell changedCells, text string) string {
 			if mark.kind == markChanged && mark.cells&cell != 0 {
-				return restyle(text, reverseOn, reverseOff)
+				return restyle(text, underlineOn(cellDirection(lines, cell)), underlineOff)
 			}
 			return text
 		}
@@ -233,11 +240,11 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			name = wokeTag(ic, singleLine(reason)) + " · " + name
 		}
 		if id == paneSnoozed {
-			rows = append(rows, m.snoozedRow(pr, gone, layout, mark, changed(cellName, name), now))
+			rows = append(rows, m.snoozedRow(pr, gone, layout, markCell, changed(cellName, name), now))
 			continue
 		}
 		if id == paneQueue {
-			cells := table.Row{markText(mark.kind, gone), changed(cellQueue, queueText(ic, pr.Queue.State))}
+			cells := table.Row{markCell, changed(cellQueue, queueText(ic, pr.Queue.State))}
 			if layout.repositoryColumn {
 				cells = append(cells, singleLine(pr.Repository))
 			}
@@ -264,7 +271,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			last, lastCell = singleLine(pr.Author), cellAuthor
 		}
 		cells := make(table.Row, 0, len(layout.columns))
-		cells = append(cells, markText(mark.kind, gone))
+		cells = append(cells, markCell)
 		if !review {
 			cells = append(cells, changed(lastCell, last))
 		}
@@ -299,12 +306,12 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 
 // snoozedRow is a Snoozed pane row: drawn dim, or struck through when gone.
 // A snooze deleted when its pull request closed has no wake time.
-func (m *model) snoozedRow(pr *github.PullRequest, gone bool, layout tableLayout, mark rowMark, name string, now time.Time) table.Row {
+func (m *model) snoozedRow(pr *github.PullRequest, gone bool, layout tableLayout, markCell, name string, now time.Time) table.Row {
 	wakes := "—"
 	if s, ok := m.snoozes[keyOf(pr)]; ok {
 		wakes = wakeText(s, now)
 	}
-	cells := table.Row{markText(mark.kind, gone), wakes}
+	cells := table.Row{markCell, wakes}
 	if layout.repositoryColumn {
 		cells = append(cells, singleLine(pr.Repository))
 	}
@@ -471,20 +478,42 @@ func reviewStatusText(status github.ReviewStatus) string {
 // pendingText fills a cell that a preview does not know yet.
 var pendingText = lipgloss.NewStyle().Faint(true).Render("…")
 
-// markText is a row's change marker.
-func markText(kind markKind, gone bool) string {
+// markText is a row's change marker. A changed row's marker shows its
+// direction.
+func markText(kind markKind, dir direction, gone bool) string {
 	switch {
 	case gone:
 		return lipgloss.NewStyle().Faint(true).Render("−")
 	case kind == markNew:
 		return coloredIcon("+", "2")
+	case kind == markChanged && dir == dirGood:
+		return coloredIcon("▲", directionColor(dir))
+	case kind == markChanged && dir == dirBad:
+		return coloredIcon("▼", directionColor(dir))
 	case kind == markChanged:
-		return coloredIcon("•", "3")
+		return coloredIcon("•", directionColor(dir))
 	case kind == markActivity:
 		return lipgloss.NewStyle().Faint(true).Render("·")
 	default:
 		return " "
 	}
+}
+
+// directionColor is the ANSI color of a change's direction.
+func directionColor(dir direction) string {
+	switch dir {
+	case dirGood:
+		return "2"
+	case dirBad:
+		return "1"
+	default:
+		return "3"
+	}
+}
+
+// underlineOn underlines a changed cell in its direction's color.
+func underlineOn(dir direction) string {
+	return "\x1b[4;58;5;" + directionColor(dir) + "m"
 }
 
 // restyle applies on to the whole of text, turning it back on after every

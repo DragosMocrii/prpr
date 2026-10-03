@@ -33,6 +33,15 @@ func changesModel(t *testing.T, mine ...github.PullRequest) *model {
 	return m
 }
 
+// underlined marks a changed cell.
+const underlined = "\x1b[4;58;5;"
+
+// rest lets the cursor rest on its row until the row's mark counts as read.
+func rest(m *model) {
+	m.Update(restMsg{})
+	m.Update(restMsg{m.restGeneration})
+}
+
 // markers lists the change marker of each row in a pane, top to bottom.
 func markers(m *model, id paneID) string {
 	var marks []string
@@ -68,16 +77,16 @@ func TestRefreshMarksNewChangedActivityAndGoneRows(t *testing.T) {
 	aged.WaitingSince = changeTime.Add(-time.Hour)
 	updateSnapshot(m, "alice", aged, ci, activity, changePR(5, "acme/a"))
 
-	if got := markers(m, paneMine); got != " •·+−" {
+	if got := markers(m, paneMine); got != " ▲·+−" {
 		t.Fatalf("markers = %q, want unchanged, changed, activity, new, gone", got)
 	}
 	for _, title := range []string{"CI", "Comments"} {
-		if cell := cellOf(t, m, paneMine, 1, title); !strings.Contains(cell, reverseOn) {
+		if cell := cellOf(t, m, paneMine, 1, title); !strings.Contains(cell, underlined) {
 			t.Errorf("changed %s cell not highlighted: %q", title, cell)
 		}
 	}
 	for _, title := range []string{"PR name", "Merge", "Review", "Size"} {
-		if cell := cellOf(t, m, paneMine, 1, title); strings.Contains(cell, reverseOn) {
+		if cell := cellOf(t, m, paneMine, 1, title); strings.Contains(cell, underlined) {
 			t.Errorf("unchanged %s cell highlighted: %q", title, cell)
 		}
 	}
@@ -106,18 +115,18 @@ func TestMarksAccumulateAcrossRefreshesAndFailedFetches(t *testing.T) {
 	m.Update(fetchFinishedMsg{err: errors.New("network down")})
 	updateSnapshot(m, "alice", two)
 
-	if got := markers(m, paneMine); got != "•−" {
+	if got := markers(m, paneMine); got != "▲−" {
 		t.Fatalf("markers after failed fetch = %q, want changed and gone", got)
 	}
 	for _, title := range []string{"CI", "Review"} {
-		if cell := cellOf(t, m, paneMine, 0, title); !strings.Contains(cell, reverseOn) {
+		if cell := cellOf(t, m, paneMine, 0, title); !strings.Contains(cell, underlined) {
 			t.Errorf("%s change lost across refreshes: %q", title, cell)
 		}
 	}
 
 	// A gone PR that comes back is new again and leaves the gone rows.
 	updateSnapshot(m, "alice", two, one)
-	if got := markers(m, paneMine); got != "•+" {
+	if got := markers(m, paneMine); got != "▲+" {
 		t.Fatalf("markers after return = %q", got)
 	}
 }
@@ -137,15 +146,21 @@ func TestLeavingARowClearsItsMarkAndDropsGoneRows(t *testing.T) {
 	if selected, _ := m.selectedPR(); selected.Number != 4 || markers(m, paneMine) != "+ −−" {
 		t.Fatalf("on the new row: selected %+v, markers %q", selected, markers(m, paneMine))
 	}
+	rest(m)
+	if got := markers(m, paneMine); got != "+ −−" {
+		t.Fatalf("markers while resting on the new row = %q", got)
+	}
 	press(m, down)
 	if got := markers(m, paneMine); got != "  −−" {
 		t.Fatalf("markers after leaving the new row = %q", got)
 	}
 	press(m, down)
+	rest(m)
 	press(m, down)
 	if selected, _ := m.selectedPR(); selected.Number != 3 || markers(m, paneMine) != "  −" {
 		t.Fatalf("leaving gone #2 downward: selected %+v, markers %q", selected, markers(m, paneMine))
 	}
+	rest(m)
 	press(m, up)
 	if selected, _ := m.selectedPR(); selected.Number != 1 || markers(m, paneMine) != "  " {
 		t.Fatalf("leaving gone #3 upward: selected %+v, markers %q", selected, markers(m, paneMine))
@@ -227,7 +242,7 @@ func TestReviewPaneMarksAuthorChanges(t *testing.T) {
 	if got := markers(m, paneReview); got != "•" {
 		t.Fatalf("review markers = %q", got)
 	}
-	if cell := cellOf(t, m, paneReview, 0, "Author"); !strings.Contains(cell, reverseOn) {
+	if cell := cellOf(t, m, paneReview, 0, "Author"); !strings.Contains(cell, underlined) {
 		t.Fatalf("author change not highlighted: %q", cell)
 	}
 }

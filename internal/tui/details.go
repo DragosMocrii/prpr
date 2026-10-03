@@ -155,6 +155,11 @@ func (m *model) detailRows(pr *github.PullRequest, gone bool) []detailRowText {
 	add := func(label string, values ...string) {
 		rows = append(rows, detailRowText{label, values})
 	}
+	if !gone {
+		if changed := m.changedDetail(pr); len(changed) > 0 {
+			add("Changed", changed...)
+		}
+	}
 	if review {
 		add("Author", singleLine(pr.Author))
 	}

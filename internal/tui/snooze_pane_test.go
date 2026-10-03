@@ -157,6 +157,7 @@ func TestWokeRowsAreMarkedAndTagged(t *testing.T) {
 	m.selectPR(paneMine, "acme/api", 2)
 	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	rest(m)
 	m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if _, ok := m.woke[prKey{"acme/api", 2}]; ok {
 		t.Fatal("leaving the row kept the woke tag")

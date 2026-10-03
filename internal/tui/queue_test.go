@@ -160,7 +160,7 @@ func TestRemovedPullRequestsAreTaggedInMyPRs(t *testing.T) {
 	}
 }
 
-func TestQueueChangeReversesTheNameInMyPRs(t *testing.T) {
+func TestQueueChangeUnderlinesTheNameInMyPRs(t *testing.T) {
 	m := newPaneModel(t, 140, 30, manyPRs(2), nil)
 	snapshot := m.snapshot
 	snapshot.PullRequests = manyPRs(2)
@@ -169,13 +169,13 @@ func TestQueueChangeReversesTheNameInMyPRs(t *testing.T) {
 	var found bool
 	for _, row := range m.paneRows(paneMine, m.paneLayout(paneMine)) {
 		for _, cell := range row {
-			if strings.Contains(cell, "queue failed") && strings.Contains(cell, reverseOn) {
+			if strings.Contains(cell, "queue failed") && strings.Contains(cell, underlined) {
 				found = true
 			}
 		}
 	}
 	if !found {
-		t.Fatal("name is not reversed after a queue change")
+		t.Fatal("name is not underlined after a queue change")
 	}
 }
 
@@ -350,13 +350,13 @@ func TestLeavingTheQueueIsMarkedWithoutAnEntry(t *testing.T) {
 	var reversed bool
 	for _, row := range m.paneRows(paneMine, m.paneLayout(paneMine)) {
 		for _, cell := range row {
-			if strings.Contains(cell, "title") && strings.Contains(cell, reverseOn) {
+			if strings.Contains(cell, "title") && strings.Contains(cell, underlined) {
 				reversed = true
 			}
 		}
 	}
 	if !reversed {
-		t.Fatal("name is not reversed after leaving the queue")
+		t.Fatal("name is not underlined after leaving the queue")
 	}
 }
 

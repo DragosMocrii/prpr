@@ -231,11 +231,15 @@ What prpr cannot see: a required check that has not started yet is not reported 
 After each refresh, the column at the left of each list marks what changed since the previous successful refresh:
 
 - `+`: the pull request is new in this list.
-- `•`: a shown column changed; the changed cells are drawn in reverse video. Age is never compared.
+- `▲` (green): a shown column changed for the better, such as CI passing, an approval, or turning ready to merge, and none for the worse.
+- `▼` (red): something needs you. On your own pull requests: CI failing, changes requested, a conflict, losing ready to merge, more bot threads, or a merge queue removal. On pull requests you review: only a review requested again, new commits, an author reply, or a dismissed review; their failures are for their authors.
+- `•` (yellow): a shown column changed, such as the title, comments, or size, but neither for the better nor the worse.
 - `·`: GitHub reports new activity, such as a code review comment, but no shown column changed.
 - `−`: the pull request left the list (merged, closed, the review request was withdrawn, or a pull request you reviewed went 30 days without an update). It stays as a dimmed, struck-through row at the bottom of the list, and its link still opens it.
 
-Marks pile up across refreshes until you look: a row's mark clears when the cursor leaves it, and a gone row is removed the same way. `x` clears them all, and is the only way to clear a list's last remaining row. Each list's title counts its new, changed, and gone rows when that fits. A failed refresh does not reset the comparison, and switching GitHub accounts starts over. Changes are kept in memory only.
+Changed cells are underlined in the same colors (a plain underline in terminals without colored underlines). Age is never compared. For the selected changed row, the status line sums up each change from its earlier value, such as `▼ ci pending→failing · review required→approved (1)`, and the details screen lists them under **Changed**. Changes that pile up across refreshes read from the value before the first of them.
+
+Marks pile up across refreshes until you read them: once the cursor rests on a row for a moment, or you open its details, open it, or copy its URL, the mark clears when the cursor leaves the row, and a gone row is removed the same way. Rows the cursor only passes keep their marks, and a row that changes again needs reading again. `x` clears them all, and is the only way to clear a list's last remaining row. Each list's title counts its new, changed, and gone rows when that fits. A failed refresh does not reset the comparison, and switching GitHub accounts starts over. Changes are kept in memory only.
 
 ### After your review
 

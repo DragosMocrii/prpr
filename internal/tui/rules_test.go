@@ -255,13 +255,13 @@ func TestRuleFieldsTurningKnownMarkNothing(t *testing.T) {
 	known := cleanPR(1, 0)
 	known.CodeOwnersKnown, known.ThreadsKnown, known.RequiredChecks = true, true, "SUCCESS"
 	fetch(m, []github.PullRequest{known}, nil)
-	if got := markers(m, paneMine); strings.Contains(got, "•") {
+	if got := markers(m, paneMine); got != " " {
 		t.Fatalf("markers after the rule fields were first read = %q", got)
 	}
 	pending := known
 	pending.PendingCodeOwners = []string{"@acme/core"}
 	fetch(m, []github.PullRequest{pending}, nil)
-	if got := markers(m, paneMine); !strings.Contains(got, "•") {
+	if got := markers(m, paneMine); got != "▼" {
 		t.Fatalf("markers after a code owner was requested = %q", got)
 	}
 }

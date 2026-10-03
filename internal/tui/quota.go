@@ -100,6 +100,19 @@ func (m *model) quotaText(level int) string {
 	return text
 }
 
+// changeStatusWidth is the room the status line leaves a change summary
+// beside fixed and the shortest quota.
+func (m *model) changeStatusWidth(fixed string) int {
+	width := m.width
+	if fixed != "" {
+		width -= lipgloss.Width(fixed) + 2
+	}
+	if m.quotaKnown {
+		width -= lipgloss.Width(m.quotaText(2)) + 2
+	}
+	return width
+}
+
 // statusLine joins the always-shown text and the legend, with the quota
 // right-aligned. The legend is dropped first, then quota detail.
 func (m *model) statusLine(fixed, legend string) string {

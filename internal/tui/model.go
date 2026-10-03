@@ -55,6 +55,10 @@ type model struct {
 	// snoozeGeneration counts snooze timers; ticks from an older one are
 	// dropped.
 	snoozeGeneration uint64
+	// rest is the row the cursor rests on; a rest that ends restGeneration
+	// is dropped once the cursor moved on.
+	rest           restState
+	restGeneration uint64
 	// changesLogin is the account the change baseline belongs to.
 	changesLogin        string
 	focus               paneID
@@ -345,7 +349,7 @@ func (m *model) spinning() bool {
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	model, cmd := m.update(msg)
 	m.closeStaleDetails()
-	return model, cmd
+	return model, tea.Batch(cmd, m.trackRest(msg))
 }
 
 func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -473,6 +477,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleTokenChecked(msg)
 	case desktopNotifiedMsg:
 		m.handleDesktopNotified(msg)
+	case restMsg:
+		m.handleRest(msg)
 	case snoozeTickMsg:
 		return m, m.handleSnoozeTick(msg)
 	case flashTickMsg:
@@ -650,6 +656,9 @@ func (m *model) leaveRow(id paneID, row int) {
 	}
 	pr, gone, ok := m.paneRow(id, row)
 	if !ok {
+		return
+	}
+	if !m.wasRead(id, pr, gone) {
 		return
 	}
 	key := keyOf(pr)
@@ -875,6 +884,7 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 					m.changes[id].update(m.source(id))
 				}
 			}
+			m.rechanged()
 		}
 		m.rebuildVisiblePRs()
 	})
@@ -1222,6 +1232,8 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 		fixed = strings.TrimLeft(fixed+"  "+m.preferenceErr.Error(), " ")
 	} else if m.notice != "" {
 		fixed = strings.TrimLeft(fixed+"  "+m.notice, " ")
+	} else if summary := m.changeStatus(m.changeStatusWidth(fixed)); summary != "" {
+		fixed = strings.TrimLeft(fixed+"  "+summary, " ")
 	} else if !(layout.single && m.focus != paneMine) && rowCount(&m.panes[paneMine]) > 0 && len(m.legendLines()) == 0 {
 		legend = m.icons.legend(m.rules.Customized())
 	}
