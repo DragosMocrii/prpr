@@ -807,7 +807,10 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 }
 
 // keepingSelection runs rebuild, then reselects each pane's pull request if
-// it is still in the pane.
+// it is still in the pane. When the focused pull request moved between
+// My PRs and the queue pane, focus follows it, so the details screen, o, and
+// y keep acting on it. A preview's selection is not followed: a preview has
+// no queue entries, and its first row stays first.
 func (m *model) keepingSelection(rebuild func()) {
 	type selection struct {
 		repository string
@@ -820,11 +823,22 @@ func (m *model) keepingSelection(rebuild func()) {
 			previous[id] = selection{pr.Repository, pr.Number, true}
 		}
 	}
+	focus, follow := m.focus, !m.snapshot.Preview
 	rebuild()
 	for _, id := range paneIDs {
 		if previous[id].ok {
 			m.selectPR(id, previous[id].repository, previous[id].number)
 		}
+	}
+	other := map[paneID]paneID{paneMine: paneQueue, paneQueue: paneMine}
+	to, authored := other[focus]
+	selected := previous[focus]
+	if !follow || !authored || !selected.ok || m.selectPR(focus, selected.repository, selected.number) {
+		return
+	}
+	if m.selectPR(to, selected.repository, selected.number) {
+		m.setFocus(to)
+		m.selectPR(to, selected.repository, selected.number)
 	}
 }
 

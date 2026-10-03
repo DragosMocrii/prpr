@@ -32,11 +32,12 @@ func (m *model) legendSections() []legendSection {
 	ic := m.icons
 	item := legendItem
 	var sections []legendSection
+	queuePane := slices.Contains(m.drawnPanes(), paneQueue)
 	if ic.nerd {
 		columns := []string{"State", "Merge", "Age", "Bots", "CI", "Review", "Comments", "Size", "Queue"}
 		var items []string
 		for _, column := range columns {
-			if column == "Bots" && !m.bots {
+			if (column == "Bots" && !m.bots) || (column == "Queue" && !queuePane) {
 				continue
 			}
 			items = append(items, item(ic.header(column), column))
@@ -90,14 +91,17 @@ func (m *model) legendSections() []legendSection {
 		}
 		sections = append(sections, legendSection{"Reviewed", reviewed})
 	}
-	if ic.nerd || slices.Contains(m.drawnPanes(), paneQueue) {
+	// With queues off, or nothing queued or removed, the legend is today's.
+	if queuePane || m.removedQueueShown() {
 		sections = append(sections, legendSection{"Queue", []string{
 			item(queueText(ic, github.QueuePassed), "passed, merging soon"),
 			item(queueText(ic, github.QueueFailing), "a check failed"),
 			item(queueText(ic, github.QueueTesting), "testing"),
 			item(queueText(ic, github.QueueQueued), "waiting to test"),
 			item(queueText(ic, github.QueueSubmitted), "submitted"),
+			item(queueText(ic, github.QueueUnknown), "state not recognized"),
 			item(removedQueueTag(ic, github.QueueRemovedFailed), "removed: failed"),
+			item(removedQueueTag(ic, github.QueueRemovedCanceled), "removed: canceled"),
 		}})
 	}
 	sections = append(sections,
@@ -113,6 +117,17 @@ func (m *model) legendSections() []legendSection {
 		title = append(title, item(ic.pin, "pinned account"), item(ic.bell, "notifications on"))
 	}
 	return append(sections, legendSection{"Title", title})
+}
+
+// removedQueueShown reports whether My PRs shows a pull request tagged as
+// removed from a merge queue.
+func (m *model) removedQueueShown() bool {
+	for _, index := range m.panes[paneMine].visible {
+		if removedQueueTag(m.icons, queueState(&m.snapshot.PullRequests[index])) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // legendSectionLines draws each section as rows of at most width cells,

@@ -159,6 +159,14 @@ func (m *model) layoutPanes() paneLayout {
 	// Pane titles, then an empty line for each pane without rows; filled
 	// panes share the rest, earlier panes taking the remainder.
 	rows := avail - len(drawn) - (len(drawn) - len(full))
+	// The queue is short-lived and usually short: beside other filled panes,
+	// its table takes no more than its rows, and they share what it leaves.
+	if len(full) > 1 && filled(paneQueue) {
+		fit := max(minDualTableHeight, tableHeaderLen+rowCount(&m.panes[paneQueue]))
+		layout.tables[paneQueue] = min(fit, rows/len(full))
+		rows -= layout.tables[paneQueue]
+		full = slices.DeleteFunc(full, func(id paneID) bool { return id == paneQueue })
+	}
 	for i, id := range full {
 		layout.tables[id] = rows / len(full)
 		if i < rows%len(full) {
@@ -213,17 +221,19 @@ func (m *model) selectedPR() (*github.PullRequest, bool) {
 }
 
 // selectPR moves a pane's cursor to the row for repository and number, if
-// that pull request is still in the pane, as a visible or gone row.
-func (m *model) selectPR(id paneID, repository string, number int) {
+// that pull request is still in the pane, as a visible or gone row, and
+// reports whether it is.
+func (m *model) selectPR(id paneID, repository string, number int) bool {
 	pane := &m.panes[id]
 	for row := range rowCount(pane) {
 		pr, _, ok := m.paneRow(id, row)
 		if ok && pr.Number == number && strings.EqualFold(pr.Repository, repository) {
 			moveCursor(&pane.table, row)
 			m.syncPages(id)
-			return
+			return true
 		}
 	}
+	return false
 }
 
 // syncPages derives a pane's page indicator from its table's visible rows and

@@ -197,13 +197,14 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			}
 		}
 		nameCells := cellName
-		if id == paneMine && pr.Queue != nil {
-			if tag := removedQueueTag(ic, pr.Queue.State); tag != "" && ic.nerd {
+		if id == paneMine {
+			// The name stands for the queue in My PRs, even once the entry is gone.
+			nameCells |= cellQueue
+			if tag := removedQueueTag(ic, queueState(pr)); tag != "" && ic.nerd {
 				name = tag + " " + name
 			} else if tag != "" {
 				name = tag + " · " + name
 			}
-			nameCells |= cellQueue
 		}
 		if id == paneQueue {
 			cells := table.Row{markText(mark.kind, gone), changed(cellQueue, queueText(ic, pr.Queue.State))}
@@ -321,6 +322,14 @@ func queueText(ic *iconSet, state github.QueueState) string {
 		return text
 	}
 	return coloredIcon(text, color)
+}
+
+// queueState is a pull request's queue state, zero without an entry.
+func queueState(pr *github.PullRequest) github.QueueState {
+	if pr.Queue == nil {
+		return 0
+	}
+	return pr.Queue.State
 }
 
 // queueRank orders the queue pane: furthest along first.

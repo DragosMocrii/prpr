@@ -284,3 +284,169 @@ func TestQueuePaneDropsDetailBeforeItsNameGetsTooNarrow(t *testing.T) {
 		t.Fatalf("queue pane at 40x10:\n%s", view)
 	}
 }
+
+func TestSelectionFollowsAPullRequestBetweenMyPRsAndTheQueue(t *testing.T) {
+	for _, size := range [][2]int{{140, 40}, {40, 10}} {
+		m := queueModel(t, size[0], size[1])
+		// The queue pane lists #2 (testing), then #4 (queued).
+		press(m, tea.Key{Code: tea.KeyTab})
+		press(m, tea.Key{Code: tea.KeyDown})
+		press(m, tea.Key{Code: tea.KeyEnter})
+		if pr, ok := m.selectedPR(); !ok || pr.Number != 4 || m.focus != paneQueue || !m.details {
+			t.Fatalf("%v: setup selected %+v focus %v details %v", size, pr, m.focus, m.details)
+		}
+		snapshot := m.snapshot
+		snapshot.PullRequests = append([]github.PullRequest(nil), snapshot.PullRequests...)
+		snapshot.PullRequests[3].Queue = &github.QueueEntry{Provider: "GitHub", State: github.QueueRemovedFailed}
+		m.applySnapshot(snapshot)
+		if pr, ok := m.selectedPR(); !ok || pr.Number != 4 || m.focus != paneMine || !m.details {
+			t.Fatalf("%v: out of the queue selected %+v focus %v details %v", size, pr, m.focus, m.details)
+		}
+		assertBounded(t, m, size[0], size[1])
+
+		// Back into the queue.
+		snapshot.PullRequests = append([]github.PullRequest(nil), snapshot.PullRequests...)
+		snapshot.PullRequests[3].Queue = &github.QueueEntry{Provider: "GitHub", State: github.QueueSubmitted}
+		m.applySnapshot(snapshot)
+		if pr, ok := m.selectedPR(); !ok || pr.Number != 4 || m.focus != paneQueue || !m.details {
+			t.Fatalf("%v: into the queue selected %+v focus %v details %v", size, pr, m.focus, m.details)
+		}
+		assertBounded(t, m, size[0], size[1])
+	}
+}
+
+func TestSelectionFollowsTheLastQueuedPullRequestOut(t *testing.T) {
+	mine := manyPRs(3)
+	mine[2].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueTesting}
+	m := newPaneModel(t, 140, 40, mine, reviewPRs(2))
+	m.setFocus(paneQueue)
+	press(m, tea.Key{Code: tea.KeyEnter})
+	snapshot := m.snapshot
+	snapshot.PullRequests = manyPRs(3)
+	snapshot.PullRequests[2].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueRemovedFailed}
+	m.applySnapshot(snapshot)
+	if pr, ok := m.selectedPR(); !ok || pr.Number != 3 || m.focus != paneMine || !m.details {
+		t.Fatalf("selected %+v focus %v", pr, m.focus)
+	}
+}
+
+func TestLeavingTheQueueIsMarkedWithoutAnEntry(t *testing.T) {
+	mine := manyPRs(2)
+	mine[0].Queue = &github.QueueEntry{Provider: "GitHub", State: github.QueueQueued}
+	m := newPaneModel(t, 140, 30, mine, nil)
+	snapshot := m.snapshot
+	snapshot.PullRequests = manyPRs(2)
+	m.applySnapshot(snapshot)
+	pr := &m.snapshot.PullRequests[0]
+	if mark := m.tracker(paneMine).mark(pr); mark.kind != markChanged || mark.cells&cellQueue == 0 {
+		t.Fatalf("mark = %+v, want changed queue cell", mark)
+	}
+	var reversed bool
+	for _, row := range m.paneRows(paneMine, m.paneLayout(paneMine)) {
+		for _, cell := range row {
+			if strings.Contains(cell, "title") && strings.Contains(cell, reverseOn) {
+				reversed = true
+			}
+		}
+	}
+	if !reversed {
+		t.Fatal("name is not reversed after leaving the queue")
+	}
+}
+
+func TestQueuePaneTakesOnlyTheRowsItNeeds(t *testing.T) {
+	mine := manyPRs(30)
+	mine[0].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueTesting}
+	m := newPaneModel(t, 120, 40, mine, reviewPRs(30))
+	layout := m.layoutPanes()
+	if layout.single || layout.tables[paneQueue] != minDualTableHeight {
+		t.Fatalf("queue table = %d, want %d", layout.tables[paneQueue], minDualTableHeight)
+	}
+	rows := m.height - m.listChromeHeight() - len(m.drawnPanes())
+	if total := layout.tables[paneMine] + layout.tables[paneQueue] + layout.tables[paneReview]; total != rows {
+		t.Fatalf("tables %v use %d of %d lines", layout.tables, total, rows)
+	}
+	if layout.tables[paneMine] < layout.tables[paneReview] || layout.tables[paneMine]-layout.tables[paneReview] > 1 {
+		t.Fatalf("mine %d review %d do not share the rest", layout.tables[paneMine], layout.tables[paneReview])
+	}
+	assertBounded(t, m, 120, 40)
+}
+
+func TestPreviewDrawsNoQueuePane(t *testing.T) {
+	store := testPreferences(t)
+	if err := store.Save("alice", ""); err != nil {
+		t.Fatal(err)
+	}
+	m := testModel(store, 120, 40)
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", Preview: true, PullRequests: manyPRs(4), ReviewRequests: reviewPRs(2)}})
+	if len(m.panes[paneMine].visible) != 4 || len(m.panes[paneQueue].visible) != 0 || slicesContains(m.drawnPanes(), paneQueue) {
+		t.Fatalf("preview mine %v queue %v drawn %v", m.panes[paneMine].visible, m.panes[paneQueue].visible, m.drawnPanes())
+	}
+	if view := ansi.Strip(strings.Join(assertBounded(t, m, 120, 40), "\n")); strings.Contains(view, "Merge queue") {
+		t.Fatalf("preview draws the queue pane:\n%s", view)
+	}
+}
+
+func TestSubmittedRowsStillAlertOnCIAndReviews(t *testing.T) {
+	mine := manyPRs(2)
+	mine[0].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueSubmitted}
+	mine[1].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueTesting}
+	m := newPaneModel(t, 140, 30, mine, nil)
+	snapshot := m.snapshot
+	snapshot.PullRequests = append([]github.PullRequest(nil), mine...)
+	for i := range snapshot.PullRequests {
+		snapshot.PullRequests[i].Checks = "FAILURE"
+	}
+	m.snapshot = snapshot
+	alerts := m.alerts()
+	if len(alerts) != 1 || alerts[0].pr.Number != 1 || strings.Join(alerts[0].kinds, ",") != "failing CI" {
+		t.Fatalf("alerts = %+v, want failing CI for the submitted row only", alerts)
+	}
+	snapshot.PullRequests = append([]github.PullRequest(nil), mine...)
+	for i := range snapshot.PullRequests {
+		snapshot.PullRequests[i].ReviewDecision = "CHANGES_REQUESTED"
+	}
+	m.snapshot = snapshot
+	if alerts := m.alerts(); len(alerts) != 1 || alerts[0].pr.Number != 1 || strings.Join(alerts[0].kinds, ",") != "changes requested" {
+		t.Fatalf("alerts = %+v, want changes requested for the submitted row only", alerts)
+	}
+}
+
+func TestSubmittedRowsNeverAlertReady(t *testing.T) {
+	mine := manyPRs(1)
+	mine[0].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueSubmitted}
+	mine[0].Mergeable, mine[0].MergeState = "MERGEABLE", "BLOCKED"
+	m := newPaneModel(t, 140, 30, mine, nil)
+	snapshot := m.snapshot
+	snapshot.PullRequests = append([]github.PullRequest(nil), mine...)
+	snapshot.PullRequests[0].MergeState = "CLEAN"
+	m.snapshot = snapshot
+	if alerts := m.alerts(); len(alerts) != 0 {
+		t.Fatalf("alerts = %+v, want none", alerts)
+	}
+}
+
+func TestQueueLegendOnlyWithQueueRows(t *testing.T) {
+	m := newPaneModel(t, 240, 80, manyPRs(2), reviewPRs(1))
+	m.icons = &nerdIcons
+	pressL(m)
+	queueIcon := nerdIcons.header("Queue")
+	for _, section := range m.legendSections() {
+		if section.label == "Queue" {
+			t.Fatal("Queue section without queue entries")
+		}
+		for _, item := range section.items {
+			if strings.HasPrefix(ansi.Strip(item), queueIcon) {
+				t.Fatalf("Queue column entry without queue entries: %q", ansi.Strip(item))
+			}
+		}
+	}
+	// A removed tag on screen brings the section back.
+	snapshot := m.snapshot
+	snapshot.PullRequests = manyPRs(2)
+	snapshot.PullRequests[1].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueRemovedCanceled}
+	m.applySnapshot(snapshot)
+	if !strings.Contains(legendText(m), "removed: canceled") {
+		t.Fatalf("legend without the removed tag's entry:\n%s", legendText(m))
+	}
+}

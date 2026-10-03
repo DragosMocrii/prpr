@@ -32,7 +32,9 @@ func checksFailing(state string) bool {
 // the baseline is replaced. Only authored pull requests listed in both
 // fetches alert; a review row alerts when it arrives or stops waiting on
 // others, but never when it starts waiting. A pull request a merge queue
-// removed for failed tests alerts once; queued ones never alert. readiness is each
+// removed for failed tests alerts once; queued ones never alert, except that
+// a submitted one still alerts on failing CI and changes requested, which
+// keep it from entering the queue. readiness is each
 // authored pull request's last known readiness by the rules: an unknown
 // result keeps it, so a state that GitHub recomputes does not alert again. alerts updates
 // it whether or not notifications are on.
@@ -62,12 +64,14 @@ func (m *model) alerts() []prAlert {
 			found = append(found, prAlert{pr, []string{"removed from the merge queue: tests failed"}})
 			continue
 		}
-		// A queued pull request waits on the queue, not on its author.
-		if queued(pr) {
+		// A queued pull request waits on the queue, not on its author, except
+		// while submitted: the queue still waits on its checks and reviews.
+		inQueue := queued(pr)
+		if inQueue && pr.Queue.State != github.QueueSubmitted {
 			continue
 		}
 		var kinds []string
-		if known && !wasReady && readiness[key] {
+		if !inQueue && known && !wasReady && readiness[key] {
 			kinds = append(kinds, "ready to merge")
 		}
 		if checksFailing(pr.Checks) && !checksFailing(old.Checks) {

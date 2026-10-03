@@ -186,7 +186,11 @@ var legendExempt = map[string]string{
 
 func TestEveryIconIsInTheLegend(t *testing.T) {
 	for _, set := range []*iconSet{&unicodeIcons, &nerdIcons} {
-		m := newPaneModel(t, 240, 80, manyPRs(1), reviewPRs(1))
+		// A queued and a removed pull request put the queue's icons on screen.
+		mine := manyPRs(3)
+		mine[1].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueTesting}
+		mine[2].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueRemovedFailed}
+		m := newPaneModel(t, 240, 80, mine, reviewPRs(1))
 		m.icons = set
 		m.bots = true
 		m.rules = readiness.Rules{Default: readiness.Rule{Approvals: 1}}
