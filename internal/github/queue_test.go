@@ -34,6 +34,7 @@ func TestTrunkCommentStates(t *testing.T) {
 		{"🚫 This pull request was removed from the merge queue because it was canceled by Pat Example (a GitHub user). See more details [here](https://app.trunk.io/acme/merge-queue/x/12).", QueueRemovedCanceled, ""},
 		{"🦄 Something Trunk says one day", QueueUnknown, ""},
 		{"✨ Submitted to Merge by Pat Example (@pat).\n\n<!-- Start PR Submit Checkbox -->\n- [x] <!-- End PR Submit Checkbox -->Submitted.", QueueSubmitted, ""},
+		{"❌ This pull request was removed from the merge queue because it failed tests.\n\n<!-- Start PR Submit Checkbox -->\n- [ ] <!-- End PR Submit Checkbox -->Check the box to resubmit.", QueueRemovedFailed, ""},
 	} {
 		entry := trunkEntry(trunkComment(tc.line))
 		if entry == nil || entry.Provider != "Trunk" || entry.State != tc.state || entry.Detail != tc.detail {

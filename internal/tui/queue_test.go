@@ -303,6 +303,9 @@ func TestSelectionFollowsAPullRequestBetweenMyPRsAndTheQueue(t *testing.T) {
 			t.Fatalf("%v: out of the queue selected %+v focus %v details %v", size, pr, m.focus, m.details)
 		}
 		assertBounded(t, m, size[0], size[1])
+		if m.layoutPanes().tables[m.focus] == 0 {
+			t.Fatalf("%v: focused pane %v is not drawn", size, m.focus)
+		}
 
 		// Back into the queue.
 		snapshot.PullRequests = append([]github.PullRequest(nil), snapshot.PullRequests...)
@@ -312,6 +315,9 @@ func TestSelectionFollowsAPullRequestBetweenMyPRsAndTheQueue(t *testing.T) {
 			t.Fatalf("%v: into the queue selected %+v focus %v details %v", size, pr, m.focus, m.details)
 		}
 		assertBounded(t, m, size[0], size[1])
+		if m.layoutPanes().tables[m.focus] == 0 {
+			t.Fatalf("%v: focused pane %v is not drawn", size, m.focus)
+		}
 	}
 }
 
