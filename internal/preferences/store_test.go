@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DragosMocrii/prpr/internal/readiness"
 )
@@ -432,5 +433,109 @@ func TestLegendAndDraftsAreSavedWithTheOtherAppSettings(t *testing.T) {
 	}
 	if again.Legend() || !again.ShowDrafts() || again.Icons() != "nerd" {
 		t.Fatalf("after closing: legend %t, icons %q", again.Legend(), again.Icons())
+	}
+}
+
+func TestSnoozesRoundTripPerAccountAndKeepTheScope(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save("Alice", "acme/api"); err != nil {
+		t.Fatal(err)
+	}
+	until := time.Date(2026, 10, 6, 9, 0, 0, 0, time.FixedZone("EDT", -4*3600))
+	requested := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	snoozes := []Snooze{
+		{Repository: "acme/api", Number: 12, List: SnoozeMine, Until: until, Seen: []string{"failing"}},
+		{Repository: "acme/web", Number: 7, List: SnoozeReview, Until: until, Activity: true, Requested: requested},
+	}
+	if err := store.SaveSnoozes("Alice", snoozes); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reopened.Snoozes("alice")
+	if len(got) != 2 || got[0].Number != 12 || !got[0].Until.Equal(until) || !slices.Equal(got[0].Seen, []string{"failing"}) ||
+		got[1].List != SnoozeReview || !got[1].Activity || !got[1].Requested.Equal(requested) {
+		t.Fatalf("snoozes = %+v", got)
+	}
+	if scope, found := reopened.Lookup("alice"); !found || scope.Repository != "acme/api" {
+		t.Fatalf("scope = %+v, %v; snoozes must keep the saved scope", scope, found)
+	}
+	if len(reopened.Snoozes("bob")) != 0 {
+		t.Fatal("another account sees alice's snoozes")
+	}
+	if err := reopened.SaveSnoozes("alice", nil); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil || string(raw["github.com/alice"]) != `"acme/api"` {
+		t.Fatalf("account without snoozes = %s, want the plain repository string", raw["github.com/alice"])
+	}
+}
+
+func TestSnoozesWithoutAScopeDoNotChooseOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	store, _ := Open(path)
+	until := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
+	if err := store.SaveSnoozes("alice", []Snooze{{Repository: "acme/api", Number: 1, List: SnoozeMine, Until: until}}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, _ := Open(path)
+	if _, found := reopened.Lookup("alice"); found {
+		t.Fatal("saving snoozes chose a scope")
+	}
+}
+
+func TestUnreadableSnoozesAreSkippedAndKeptUntilSaved(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	body := `{"github.com/alice":{"repository":"","snoozed":[` +
+		`{"repository":"acme/api","number":12,"list":"mine","until":"2026-10-06T09:00:00Z"},` +
+		`{"repository":"not a repo","number":3,"list":"mine","until":"2026-10-06T09:00:00Z"},` +
+		`{"repository":"acme/api","number":4,"list":"elsewhere","until":"2026-10-06T09:00:00Z"}]}}`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open = %v; unreadable snoozes must not fail the whole file", err)
+	}
+	if got := store.Snoozes("alice"); len(got) != 1 || got[0].Number != 12 {
+		t.Fatalf("snoozes = %+v, want only #12", got)
+	}
+	if store.SnoozesErr("alice") == nil {
+		t.Fatal("no warning for unreadable snoozes")
+	}
+	if err := store.SaveShowDrafts(true); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); !strings.Contains(string(data), "not a repo") {
+		t.Fatal("an unrelated save dropped the unreadable snoozes")
+	}
+	if err := store.SaveSnoozes("alice", store.Snoozes("alice")); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); strings.Contains(string(data), "not a repo") || store.SnoozesErr("alice") != nil {
+		t.Fatal("saving snoozes kept the unreadable ones")
+	}
+}
+
+func TestSaveSnoozesRejectsInvalidEntries(t *testing.T) {
+	store, _ := Open(filepath.Join(t.TempDir(), "preferences.json"))
+	until := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
+	for _, bad := range []Snooze{
+		{Repository: "nope", Number: 1, List: SnoozeMine, Until: until},
+		{Repository: "acme/api", Number: 0, List: SnoozeMine, Until: until},
+		{Repository: "acme/api", Number: 1, List: "other", Until: until},
+		{Repository: "acme/api", Number: 1, List: SnoozeMine},
+	} {
+		if err := store.SaveSnoozes("alice", []Snooze{bad}); err == nil {
+			t.Errorf("SaveSnoozes(%+v) = nil, want an error", bad)
+		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -40,6 +41,62 @@ func ValidWatchlistName(name string) bool {
 	return !strings.ContainsFunc(name, unicode.IsControl)
 }
 
+// The lists a snooze can belong to.
+const (
+	SnoozeMine   = "mine"
+	SnoozeReview = "review"
+)
+
+// Snooze is a pull request hidden from its list until a time or new activity.
+type Snooze struct {
+	Repository string
+	Number     int
+	List       string    // SnoozeMine or SnoozeReview
+	Until      time.Time // always set; an activity snooze stores now+7d
+	Activity   bool      // drawn "activity"
+	Seen       []string  // wake signals held at the last full fetch
+	Requested  time.Time // review rows: request time recorded while pending; zero otherwise
+}
+
+// snoozeJSON is a saved snooze.
+type snoozeJSON struct {
+	Repository string    `json:"repository"`
+	Number     int       `json:"number"`
+	List       string    `json:"list"`
+	Until      time.Time `json:"until"`
+	Activity   bool      `json:"activity,omitempty"`
+	Seen       []string  `json:"seen,omitempty"`
+	Requested  time.Time `json:"requested,omitzero"`
+}
+
+// validSnooze reports why a snooze cannot be saved, or nil.
+func validSnooze(s Snooze) error {
+	switch {
+	case !github.ValidRepositoryName(s.Repository):
+		return fmt.Errorf("snooze has invalid repository %q", s.Repository)
+	case s.Number <= 0:
+		return fmt.Errorf("snooze of %s has invalid number %d", s.Repository, s.Number)
+	case s.List != SnoozeMine && s.List != SnoozeReview:
+		return fmt.Errorf("snooze of %s#%d has unknown list %q", s.Repository, s.Number, s.List)
+	case s.Until.IsZero():
+		return fmt.Errorf("snooze of %s#%d has no end", s.Repository, s.Number)
+	}
+	for _, signal := range s.Seen {
+		if signal == "" || strings.ContainsFunc(signal, unicode.IsControl) {
+			return fmt.Errorf("snooze of %s#%d has invalid signal %q", s.Repository, s.Number, signal)
+		}
+	}
+	return nil
+}
+
+func cloneSnoozes(snoozes []Snooze) []Snooze {
+	cloned := slices.Clone(snoozes)
+	for i := range cloned {
+		cloned[i].Seen = slices.Clone(cloned[i].Seen)
+	}
+	return cloned
+}
+
 // account is what the store keeps for one GitHub account. chosen
 // distinguishes a saved scope from none: a saved empty scope means the user
 // chose All repositories.
@@ -47,6 +104,12 @@ type account struct {
 	scope      Scope
 	chosen     bool
 	watchlists []Watchlist
+	// snoozes are the account's snoozed pull requests. Saved snoozes that
+	// cannot all be read are kept as snoozedRaw, written back unchanged
+	// until snoozes are saved, with snoozeErr saying why.
+	snoozes    []Snooze
+	snoozedRaw json.RawMessage
+	snoozeErr  error
 }
 
 type Store struct {
@@ -89,14 +152,15 @@ func (s *Store) app() appJSON {
 	return appJSON{Account: s.pinned, Icons: s.icons, Legend: s.legend, Drafts: s.drafts, Ready: s.rulesRaw}
 }
 
-// accountJSON is an account's value when it has watchlists or a watchlist
-// scope; otherwise the value is the repository string alone, the format
-// older versions read. An object without repository or watchlist has no
-// saved scope.
+// accountJSON is an account's value when it has watchlists, snoozes, or a
+// watchlist scope; otherwise the value is the repository string alone, the
+// format older versions read. An object without repository or watchlist has
+// no saved scope.
 type accountJSON struct {
 	Repository *string             `json:"repository,omitempty"`
 	Watchlist  string              `json:"watchlist,omitempty"`
 	Watchlists map[string][]string `json:"watchlists,omitempty"`
+	Snoozed    json.RawMessage     `json:"snoozed,omitempty"`
 }
 
 func Open(path string) (*Store, error) {
@@ -183,6 +247,12 @@ func decodeAccount(value json.RawMessage) (account, error) {
 		decoded.watchlists = append(decoded.watchlists, Watchlist{Name: name, Repositories: uniqueRepositories(repositories)})
 	}
 	sortWatchlists(decoded.watchlists)
+	if len(object.Snoozed) != 0 {
+		decoded.snoozes, decoded.snoozeErr = decodeSnoozes(object.Snoozed)
+		if decoded.snoozeErr != nil {
+			decoded.snoozedRaw = object.Snoozed
+		}
+	}
 	switch {
 	case object.Repository != nil && object.Watchlist != "":
 		return account{}, errors.New("has both a repository and a watchlist")
@@ -198,6 +268,34 @@ func decodeAccount(value json.RawMessage) (account, error) {
 		}
 	}
 	return decoded, nil
+}
+
+// decodeSnoozes reads saved snoozes, skipping unreadable ones; the error
+// says why any were skipped.
+func decodeSnoozes(raw json.RawMessage) ([]Snooze, error) {
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, fmt.Errorf("snoozes not read: %w", err)
+	}
+	var snoozes []Snooze
+	var problems []error
+	for _, entry := range entries {
+		var saved snoozeJSON
+		if err := json.Unmarshal(entry, &saved); err != nil {
+			problems = append(problems, err)
+			continue
+		}
+		snooze := Snooze(saved)
+		if err := validSnooze(snooze); err != nil {
+			problems = append(problems, err)
+			continue
+		}
+		snoozes = append(snoozes, snooze)
+	}
+	if len(problems) > 0 {
+		return snoozes, fmt.Errorf("%d snoozes not read: %w", len(problems), errors.Join(problems...))
+	}
+	return snoozes, nil
 }
 
 func (a *account) find(name string) int {
@@ -223,16 +321,29 @@ func uniqueRepositories(repositories []string) []string {
 }
 
 func (a account) encode() any {
-	if len(a.watchlists) == 0 && a.chosen && a.scope.Watchlist == "" {
+	if len(a.watchlists) == 0 && len(a.snoozes) == 0 && a.snoozedRaw == nil && a.chosen && a.scope.Watchlist == "" {
 		return a.scope.Repository
 	}
-	object := accountJSON{Watchlist: a.scope.Watchlist, Watchlists: make(map[string][]string, len(a.watchlists))}
+	object := accountJSON{Watchlist: a.scope.Watchlist}
+	if len(a.watchlists) > 0 {
+		object.Watchlists = make(map[string][]string, len(a.watchlists))
+	}
 	if a.chosen && a.scope.Watchlist == "" {
 		repository := a.scope.Repository
 		object.Repository = &repository
 	}
 	for _, watchlist := range a.watchlists {
 		object.Watchlists[watchlist.Name] = watchlist.Repositories
+	}
+	switch {
+	case a.snoozedRaw != nil:
+		object.Snoozed = a.snoozedRaw
+	case len(a.snoozes) > 0:
+		saved := make([]snoozeJSON, len(a.snoozes))
+		for i, s := range a.snoozes {
+			saved[i] = snoozeJSON(s)
+		}
+		object.Snoozed, _ = json.Marshal(saved)
 	}
 	return object
 }
@@ -352,6 +463,28 @@ func (s *Store) Watchlists(login string) []Watchlist {
 	return watchlists
 }
 
+// Snoozes returns an account's snoozed pull requests, in saved order.
+func (s *Store) Snoozes(login string) []Snooze {
+	return cloneSnoozes(s.accounts[accountKey(login)].snoozes)
+}
+
+// SnoozesErr says why some of an account's saved snoozes were not read.
+func (s *Store) SnoozesErr(login string) error { return s.accounts[accountKey(login)].snoozeErr }
+
+// SaveSnoozes replaces an account's snoozes, including any that could not
+// be read.
+func (s *Store) SaveSnoozes(login string, snoozes []Snooze) error {
+	for _, snooze := range snoozes {
+		if err := validSnooze(snooze); err != nil {
+			return fmt.Errorf("save preferences %q: %w", s.path, err)
+		}
+	}
+	return s.change(login, func(a *account) error {
+		a.snoozes, a.snoozedRaw, a.snoozeErr = cloneSnoozes(snoozes), nil, nil
+		return nil
+	})
+}
+
 // Save saves the scope of one repository, or All repositories when
 // repository is empty.
 func (s *Store) Save(login, repository string) error {
@@ -435,6 +568,7 @@ func (s *Store) change(login string, edit func(*account) error) error {
 	key := accountKey(login)
 	edited := s.accounts[key]
 	edited.watchlists = slices.Clone(edited.watchlists)
+	edited.snoozes = cloneSnoozes(edited.snoozes)
 	if err := edit(&edited); err != nil {
 		return fmt.Errorf("save preferences %q: %w", s.path, err)
 	}
