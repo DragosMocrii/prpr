@@ -200,3 +200,16 @@ func pressMsg(m *model, msg tea.KeyPressMsg) {
 	_, cmd := m.Update(msg)
 	drive(m, cmd)
 }
+
+func TestHelpListsUndoFromTheStart(t *testing.T) {
+	mine, review := snoozePRs()
+	m := newPaneModel(t, 140, 40, mine, review)
+	m.syncKeys()
+	if !m.keys.Undo.Enabled() || !m.keys.Snooze.Enabled() {
+		t.Fatal("snooze and undo are not enabled before anything is snoozed")
+	}
+	m.help.ShowAll = true
+	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "undo snooze") {
+		t.Fatal("full help does not list U")
+	}
+}

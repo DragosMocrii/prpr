@@ -215,7 +215,7 @@ func (m *model) syncKeys() {
 	}
 	k.Rules.SetEnabled(listing && m.rulesEditor == nil)
 	k.Snooze.SetEnabled(listing && rows && m.snoozeEditor == nil)
-	k.Undo.SetEnabled(listing && m.lastSnooze != nil && m.snoozeEditor == nil)
+	k.Undo.SetEnabled(listing && m.snoozeEditor == nil)
 	if m.focus == paneSnoozed {
 		k.Snooze.SetHelp("z", "wake")
 	} else {

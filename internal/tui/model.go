@@ -601,9 +601,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return m.wakeNow()
 		}
 		return m.openSnooze()
-	case key.Matches(msg, k.Undo), bound(msg, k.Undo) && k.Rules.Enabled():
-		// Undo is hidden from help while there is nothing to undo, but its
-		// key still says so on the list.
+	case key.Matches(msg, k.Undo):
 		return m.undoSnooze()
 	case key.Matches(msg, k.Help):
 		m.help.ShowAll = !m.help.ShowAll
