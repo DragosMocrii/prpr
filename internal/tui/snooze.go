@@ -2,10 +2,14 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 
 	"github.com/DragosMocrii/prpr/internal/github"
 	"github.com/DragosMocrii/prpr/internal/preferences"
@@ -278,3 +282,255 @@ func listName(list paneID) string {
 	}
 	return preferences.SnoozeMine
 }
+
+// Snooze form choices.
+const (
+	snoozeActivity = "activity"
+	snoozeHour     = "hour"
+	snoozeTomorrow = "tomorrow"
+	snoozeMonday   = "monday"
+	snoozeCustom   = "custom"
+)
+
+// snoozeEditor is the snooze form for one pull request of list (paneMine or
+// paneReview). Its fields write to choice and typed.
+type snoozeEditor struct {
+	form          *huh.Form
+	key           prKey
+	list          paneID
+	title         string
+	choice, typed string
+	custom        bool
+}
+
+// openSnooze opens the snooze form on the focused row.
+func (m *model) openSnooze() tea.Cmd {
+	pr, gone, ok := m.paneRow(m.focus, m.focused().table.Cursor())
+	switch {
+	case !ok:
+		return nil
+	case m.snapshot.Preview:
+		m.setNotice("Snoozing waits for the details to load")
+		return nil
+	case gone:
+		m.setNotice("Gone pull requests cannot be snoozed")
+		return nil
+	}
+	list := paneMine
+	if m.focus == paneReview {
+		list = paneReview
+	}
+	e := &snoozeEditor{key: keyOf(pr), list: list, choice: snoozeActivity,
+		title: fmt.Sprintf("Snooze %s#%d", singleLine(pr.Repository), pr.Number)}
+	m.snoozeEditor = e
+	e.form = huh.NewForm(
+		huh.NewGroup(huh.NewSelect[string]().Title(e.title).Options(
+			huh.NewOption("Until activity (at most 7 days)", snoozeActivity),
+			huh.NewOption("1 hour", snoozeHour),
+			huh.NewOption("Tomorrow 9:00", snoozeTomorrow),
+			huh.NewOption("Next Monday 9:00", snoozeMonday),
+			huh.NewOption("Custom…", snoozeCustom),
+		).Value(&e.choice)),
+		huh.NewGroup(huh.NewInput().Title("Snooze until").
+			Description("45m, 3h, 2d, 1w, tomorrow, fri, 14:30, or 2026-10-10 14:00").
+			Value(&e.typed).Validate(func(text string) error {
+			_, err := parseSnoozeTime(text, m.now())
+			return err
+		})).WithHideFunc(func() bool { return e.choice != snoozeCustom }),
+	)
+	dark := m.darkBackground
+	e.form.WithAccessible(false).WithShowHelp(true).
+		WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return rulesTheme(dark) }))
+	e.form.SubmitCmd, e.form.CancelCmd = nil, nil
+	m.sizeSnoozeForm()
+	return e.form.Init()
+}
+
+// sizeSnoozeForm fits the form to the terminal; every resize sets it again.
+func (m *model) sizeSnoozeForm() {
+	m.snoozeEditor.form.WithWidth(max(min(m.width, rulesWidth), 1)).WithHeight(max(m.height-rulesChrome, 1))
+}
+
+// updateSnooze passes a message to the form. Esc cancels; a finished form
+// snoozes.
+func (m *model) updateSnooze(msg tea.Msg) tea.Cmd {
+	e := m.snoozeEditor
+	if press, ok := msg.(tea.KeyPressMsg); ok && press.String() == "esc" {
+		m.snoozeEditor = nil
+		return nil
+	}
+	form, cmd := e.form.Update(msg)
+	if f, ok := form.(*huh.Form); ok {
+		e.form = f
+	}
+	switch e.form.State {
+	case huh.StateAborted:
+		m.snoozeEditor = nil
+		return nil
+	case huh.StateCompleted:
+		m.snoozeEditor = nil
+		now := m.now()
+		var until time.Time
+		activity := false
+		switch e.choice {
+		case snoozeHour:
+			until = now.Add(time.Hour)
+		case snoozeTomorrow:
+			until = tomorrowMorning(now)
+		case snoozeMonday:
+			until = nextWeekday(now, time.Monday)
+		case snoozeCustom:
+			var err error
+			if until, err = parseSnoozeTime(e.typed, now); err != nil {
+				m.setNotice(err.Error())
+				return nil
+			}
+		default:
+			until, activity = now.Add(activityLimit), true
+		}
+		return m.snooze(e.key, e.list, until, activity)
+	}
+	return cmd
+}
+
+// snoozeLines draws the snooze form.
+func (m *model) snoozeLines() []string {
+	lines := []string{m.titleLine("prpr — "+m.accountLabel()+" — snooze", ""), ""}
+	lines = append(lines, strings.Split(m.snoozeEditor.form.View(), "\n")...)
+	return append(lines, "", m.help.ShortHelpView(m.keys.snoozeHelp().short))
+}
+
+// snooze hides a pull request of list until a time, or until activity.
+func (m *model) snooze(key prKey, list paneID, until time.Time, activity bool) tea.Cmd {
+	var pr *github.PullRequest
+	source := m.source(list)
+	for i := range source {
+		if keyOf(&source[i]) == key {
+			pr = &source[i]
+			break
+		}
+	}
+	if pr == nil {
+		m.setNotice(fmt.Sprintf("%s#%d is no longer listed", key.repository, key.number))
+		return nil
+	}
+	held, _ := m.snoozeSignals(list, pr)
+	entry := preferences.Snooze{Repository: pr.Repository, Number: pr.Number, List: listName(list),
+		Until: until, Activity: activity, Seen: held, Requested: requestedAt(list, pr)}
+	focus, row := m.focus, m.focused().table.Cursor()
+	m.keepSelection(func() {
+		if m.snoozes == nil {
+			m.snoozes = make(map[prKey]preferences.Snooze)
+		}
+		m.snoozes[key] = entry
+		delete(m.woke, key)
+		m.rebuildVisiblePRs()
+	}, false)
+	if m.focus == focus {
+		m.reselectRow(focus, row)
+	}
+	m.lastSnooze = &key
+	m.saveSnoozes()
+	when := "until activity"
+	if !activity {
+		when = "until " + wakeText(entry, m.now())
+	}
+	m.setNotice(fmt.Sprintf("Snoozed %s#%d %s · U undo", singleLine(pr.Repository), pr.Number, when))
+	return m.scheduleSnoozeTick()
+}
+
+// reselectRow puts a pane's cursor on row, or the last row when fewer remain.
+func (m *model) reselectRow(id paneID, row int) {
+	pane := &m.panes[id]
+	moveCursor(&pane.table, min(row, rowCount(pane)-1))
+	m.syncPages(id)
+}
+
+// wakeNow ends the snooze of the Snoozed pane's selected pull request.
+func (m *model) wakeNow() tea.Cmd {
+	row := m.focused().table.Cursor()
+	pr, gone, ok := m.paneRow(paneSnoozed, row)
+	switch {
+	case !ok:
+		return nil
+	case gone:
+		m.setNotice("Gone pull requests cannot be woken")
+		return nil
+	}
+	key := keyOf(pr)
+	name := fmt.Sprintf("%s#%d", singleLine(pr.Repository), pr.Number)
+	m.keepSelection(func() {
+		delete(m.snoozes, key)
+		if m.woke == nil {
+			m.woke = make(map[prKey]string)
+		}
+		m.woke[key] = "woken"
+		m.rebuildVisiblePRs()
+	}, false)
+	if m.focus == paneSnoozed {
+		m.reselectRow(paneSnoozed, row)
+	}
+	m.saveSnoozes()
+	m.setNotice("Woke " + name)
+	return m.scheduleSnoozeTick()
+}
+
+// undoSnooze ends the last snooze and shows the pull request where it was.
+func (m *model) undoSnooze() tea.Cmd {
+	if m.lastSnooze == nil {
+		m.setNotice("Nothing to undo")
+		return nil
+	}
+	key := *m.lastSnooze
+	if _, ok := m.snoozes[key]; !ok {
+		m.lastSnooze = nil
+		m.setNotice("Nothing to undo")
+		return nil
+	}
+	m.lastSnooze = nil
+	m.keepSelection(func() {
+		delete(m.snoozes, key)
+		m.rebuildVisiblePRs()
+	}, false)
+	for _, list := range [][]github.PullRequest{m.snapshot.PullRequests, m.snapshot.ReviewRequests} {
+		for i := range list {
+			if keyOf(&list[i]) != key {
+				continue
+			}
+			pr := &list[i]
+			for _, id := range m.drawnPanes() {
+				if m.selectPR(id, pr.Repository, pr.Number) {
+					m.setFocus(id)
+					m.selectPR(id, pr.Repository, pr.Number)
+					break
+				}
+			}
+		}
+	}
+	m.saveSnoozes()
+	m.setNotice("Snooze undone")
+	return m.scheduleSnoozeTick()
+}
+
+// saveSnoozes saves the snoozes, by repository then number. A failed save
+// keeps them for the session and shows the warning.
+func (m *model) saveSnoozes() {
+	entries := make([]preferences.Snooze, 0, len(m.snoozes))
+	for _, entry := range m.snoozes {
+		entries = append(entries, entry)
+	}
+	slices.SortFunc(entries, func(a, b preferences.Snooze) int {
+		if c := strings.Compare(a.Repository, b.Repository); c != 0 {
+			return c
+		}
+		return a.Number - b.Number
+	})
+	if err := m.preferences.SaveSnoozes(m.snapshot.Login, entries); err != nil {
+		m.preferenceErr = fmt.Errorf("Snoozes not saved: %w", err)
+		return
+	}
+	m.preferenceErr = nil
+}
+
+// scheduleSnoozeTick is a stub; a later change fills it in.
+func (m *model) scheduleSnoozeTick() tea.Cmd { return nil }

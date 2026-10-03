@@ -35,6 +35,8 @@ type keyMap struct {
 	Legend          key.Binding
 	Rules           key.Binding
 	RulesCancel     key.Binding
+	Snooze          key.Binding
+	Undo            key.Binding
 	Account         key.Binding
 	Retry           key.Binding
 	Login           key.Binding
@@ -108,6 +110,8 @@ func defaultKeyMap() keyMap {
 		Legend:          key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "show legend")),
 		Rules:           key.NewBinding(key.WithKeys(","), key.WithHelp(",", "ready rules")),
 		RulesCancel:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel without saving")),
+		Snooze:          key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "snooze")),
+		Undo:            key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "undo snooze")),
 		Account:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "account")),
 		Retry:           key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
 		Login:           key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log in to GitHub")),
@@ -210,6 +214,13 @@ func (m *model) syncKeys() {
 		k.Legend.SetHelp("L", "show legend")
 	}
 	k.Rules.SetEnabled(listing && m.rulesEditor == nil)
+	k.Snooze.SetEnabled(listing && rows && m.snoozeEditor == nil)
+	k.Undo.SetEnabled(listing && m.lastSnooze != nil && m.snoozeEditor == nil)
+	if m.focus == paneSnoozed {
+		k.Snooze.SetHelp("z", "wake")
+	} else {
+		k.Snooze.SetHelp("z", "snooze")
+	}
 	if m.icons.nerd {
 		k.Icons.SetHelp("i", "unicode icons")
 	} else {
@@ -313,7 +324,7 @@ func (k keyMap) listHelp() helpKeys {
 			{t.PageUp, t.PageDown, t.HalfPageUp, t.HalfPageDown},
 			{k.Pages.PrevPage, k.Pages.NextPage, k.Icons, k.Rules},
 			{k.NextPane, k.PrevPane, k.Account, k.Legend},
-			{k.Details, k.Open, k.CopyURL},
+			{k.Details, k.Open, k.CopyURL, k.Snooze, k.Undo},
 			{k.Search, k.Categories, k.ClearFilters},
 			{k.Drafts, k.QuickFailing, k.QuickReady},
 			{k.PickRepository, k.AllRepositories, k.Refresh, k.ClearMarks},
@@ -328,6 +339,10 @@ func (k keyMap) detailsHelp() helpKeys {
 }
 
 func (k keyMap) rulesHelp() helpKeys {
+	return helpKeys{short: []key.Binding{k.RulesCancel, k.ForceQuit}}
+}
+
+func (k keyMap) snoozeHelp() helpKeys {
 	return helpKeys{short: []key.Binding{k.RulesCancel, k.ForceQuit}}
 }
 

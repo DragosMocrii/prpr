@@ -48,6 +48,10 @@ type model struct {
 	// woke holds woken pull requests: the reason, until their row is left
 	// or marks are cleared.
 	woke map[prKey]string
+	// snoozeEditor is the snooze form, nil when closed. lastSnooze is the
+	// pull request U would unsnooze.
+	snoozeEditor *snoozeEditor
+	lastSnooze   *prKey
 	// changesLogin is the account the change baseline belongs to.
 	changesLogin        string
 	focus               paneID
@@ -357,6 +361,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sizeRulesForm()
 			return m, m.updateRules(msg)
 		}
+		if m.snoozeEditor != nil {
+			m.sizeSnoozeForm()
+			return m, m.updateSnooze(msg)
+		}
 	case tea.BackgroundColorMsg:
 		m.darkBackground = msg.IsDark()
 		m.help.Styles = help.DefaultStyles(m.darkBackground)
@@ -367,6 +375,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setSearchStyle()
 		if m.rulesEditor != nil {
 			return m, m.updateRules(msg)
+		}
+		if m.snoozeEditor != nil {
+			return m, m.updateSnooze(msg)
 		}
 	case spinner.TickMsg:
 		if m.spinning() {
@@ -469,6 +480,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.rulesEditor != nil {
 			return m, m.updateRules(msg)
 		}
+		if m.snoozeEditor != nil {
+			return m, m.updateSnooze(msg)
+		}
 		if m.picker != nil {
 			return m, m.picker.paste(msg.Content, m.pickerViewportHeight())
 		}
@@ -488,6 +502,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.rulesEditor != nil {
 			return m, m.updateRules(msg)
 		}
+		if m.snoozeEditor != nil {
+			return m, m.updateSnooze(msg)
+		}
 	}
 	return m, nil
 }
@@ -502,6 +519,9 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.rulesEditor != nil {
 		return m.updateRules(msg)
+	}
+	if m.snoozeEditor != nil {
+		return m.updateSnooze(msg)
 	}
 	if m.picker != nil {
 		return m.updateRepositoryPicker(msg)
@@ -576,6 +596,15 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleLegend()
 	case key.Matches(msg, k.Rules):
 		return m.openRules()
+	case key.Matches(msg, k.Snooze):
+		if m.focus == paneSnoozed {
+			return m.wakeNow()
+		}
+		return m.openSnooze()
+	case key.Matches(msg, k.Undo), bound(msg, k.Undo) && k.Rules.Enabled():
+		// Undo is hidden from help while there is nothing to undo, but its
+		// key still says so on the list.
+		return m.undoSnooze()
 	case key.Matches(msg, k.Help):
 		m.help.ShowAll = !m.help.ShowAll
 		m.rebuildPRTable(false)
@@ -1014,6 +1043,8 @@ func (m *model) View() tea.View {
 	switch {
 	case m.rulesEditor != nil && m.width >= minimumWidth && m.height >= minimumHeight:
 		lines = m.rulesLines()
+	case m.snoozeEditor != nil && m.width >= minimumWidth && m.height >= minimumHeight:
+		lines = m.snoozeLines()
 	case m.detailsShown():
 		lines = m.detailsView()
 	case list:
