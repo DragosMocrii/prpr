@@ -29,6 +29,8 @@ var (
 	errSnoozeTime   = errors.New("try 45m, 3h, 2d, 1w, tomorrow, fri, 14:30, or 2026-10-10 14:00")
 	errSnoozePast   = errors.New("that time has passed")
 	errSnoozeTooFar = errors.New("snoozes end within a year")
+	// errSnoozesNotSaved marks the warning of a failed snooze save.
+	errSnoozesNotSaved = errors.New("Snoozes not saved")
 )
 
 func atWakeHour(day time.Time) time.Time {
@@ -513,7 +515,9 @@ func (m *model) undoSnooze() tea.Cmd {
 }
 
 // saveSnoozes saves the snoozes, by repository then number. A failed save
-// keeps them for the session and shows the warning.
+// keeps them for the session and shows the warning. They save under the
+// account they were loaded for, which a failed fetch or an account choice
+// still awaiting its fetch leaves in place.
 func (m *model) saveSnoozes() {
 	entries := make([]preferences.Snooze, 0, len(m.snoozes))
 	for _, entry := range m.snoozes {
@@ -525,12 +529,218 @@ func (m *model) saveSnoozes() {
 		}
 		return a.Number - b.Number
 	})
-	if err := m.preferences.SaveSnoozes(m.snapshot.Login, entries); err != nil {
-		m.preferenceErr = fmt.Errorf("Snoozes not saved: %w", err)
+	if err := m.preferences.SaveSnoozes(m.filterLogin, entries); err != nil {
+		m.preferenceErr = fmt.Errorf("%w: %w", errSnoozesNotSaved, err)
 		return
 	}
-	m.preferenceErr = nil
+	// Saves also run on their own, so a success clears only its own warning.
+	if errors.Is(m.preferenceErr, errSnoozesNotSaved) {
+		m.preferenceErr = nil
+	}
 }
 
-// scheduleSnoozeTick is a stub; a later change fills it in.
-func (m *model) scheduleSnoozeTick() tea.Cmd { return nil }
+// snoozeCheckInterval is the furthest ahead the snooze timer runs, since a
+// suspended machine's timers run late.
+const snoozeCheckInterval = time.Minute
+
+// snoozeTickMsg is a snooze timer tick; ticks from an older generation are
+// dropped.
+type snoozeTickMsg struct{ generation uint64 }
+
+// snoozeListID is the list a saved snooze belongs to: paneMine or
+// paneReview.
+func snoozeListID(s preferences.Snooze) paneID {
+	if s.List == preferences.SnoozeReview {
+		return paneReview
+	}
+	return paneMine
+}
+
+// markWoke records why a pull request woke, for its name tag.
+func (m *model) markWoke(key prKey, reason string) {
+	if m.woke == nil {
+		m.woke = make(map[prKey]string)
+	}
+	m.woke[key] = reason
+}
+
+// wakeAlert adds the alert of a pull request that woke, when alerting and
+// the pull request is listed in the scope.
+func (m *model) wakeAlert(alerts []prAlert, alert bool, pr *github.PullRequest, kind string) []prAlert {
+	if alert && pr != nil && m.inScope(pr) {
+		alerts = append(alerts, prAlert{pr, []string{kind}})
+	}
+	return alerts
+}
+
+// loadSnoozes replaces the snoozes with an account's saved ones, on an
+// account change. Those already past wake silently; restoring the rest
+// never writes.
+func (m *model) loadSnoozes(login string) {
+	m.snoozes = make(map[prKey]preferences.Snooze)
+	for _, s := range m.preferences.Snoozes(login) {
+		m.snoozes[prKey{strings.ToLower(s.Repository), s.Number}] = s
+	}
+	m.snoozeClosed, m.woke, m.lastSnooze = nil, nil, nil
+	// Read before a wake saves, which drops the unreadable entries.
+	unread := m.preferences.SnoozesErr(login)
+	m.wakeDue(false)
+	if unread != nil && m.preferenceErr == nil {
+		m.preferenceErr = fmt.Errorf("Some snoozes not read: %s", singleLine(unread.Error()))
+	}
+}
+
+// snoozedRow is a snoozed pull request listed in its own list.
+type snoozedRow struct {
+	key  prKey
+	list paneID
+	pr   *github.PullRequest
+}
+
+// listedSnoozes are the snoozed pull requests listed in their own lists, in
+// fetch order (the authored list, then the review list), so wake alerts
+// follow the same order as other alerts.
+func (m *model) listedSnoozes() []snoozedRow {
+	var rows []snoozedRow
+	for _, id := range listIDs {
+		source := m.source(id)
+		for i := range source {
+			key := keyOf(&source[i])
+			if s, ok := m.snoozes[key]; ok && snoozeListID(s) == id {
+				rows = append(rows, snoozedRow{key, id, &source[i]})
+			}
+		}
+	}
+	return rows
+}
+
+// expire wakes every snooze whose end is not after now, with alerts for
+// the listed ones when alert. It reports whether any woke; it does not save.
+func (m *model) expire(alert bool) ([]prAlert, bool) {
+	now := m.now()
+	var alerts []prAlert
+	woke := false
+	for _, row := range m.listedSnoozes() {
+		if !m.snoozes[row.key].Until.After(now) {
+			alerts = m.wakeAlert(alerts, alert, row.pr, "snooze ended")
+		}
+	}
+	for key, s := range m.snoozes {
+		if !s.Until.After(now) {
+			delete(m.snoozes, key)
+			m.markWoke(key, "snooze ended")
+			woke = true
+		}
+	}
+	return alerts, woke
+}
+
+// wakeDue wakes the snoozes that ended and saves when any woke. The caller
+// rebuilds the panes.
+func (m *model) wakeDue(alert bool) []prAlert {
+	alerts, woke := m.expire(alert)
+	if woke {
+		m.saveSnoozes()
+	}
+	return alerts
+}
+
+// reviewSnoozes compares a full fetch with the snoozes: a closed pull
+// request's snooze is deleted and its row is gone in Snoozed, a new signal
+// or a passed end wakes, and otherwise the signals seen are recorded. It
+// saves once when anything changed.
+func (m *model) reviewSnoozes(alert bool) []prAlert {
+	var alerts []prAlert
+	changed := false
+	listed := make(map[prKey]bool)
+	for _, row := range m.listedSnoozes() {
+		listed[row.key] = true
+		s := m.snoozes[row.key]
+		held, known := m.snoozeSignals(row.list, row.pr)
+		reason, seen, requested := snoozeWake(s, held, known, row.pr)
+		if reason != "" {
+			delete(m.snoozes, row.key)
+			m.markWoke(row.key, reason)
+			alerts = m.wakeAlert(alerts, alert, row.pr, "woke: "+reason)
+			changed = true
+			continue
+		}
+		if !slices.Equal(seen, s.Seen) || !requested.Equal(s.Requested) {
+			s.Seen, s.Requested = seen, requested
+			m.snoozes[row.key] = s
+			changed = true
+		}
+	}
+	// A snooze whose pull request left its list closed: its row is gone in
+	// Snoozed.
+	for key, s := range m.snoozes {
+		if listed[key] {
+			continue
+		}
+		delete(m.snoozes, key)
+		if m.snoozeClosed == nil {
+			m.snoozeClosed = make(map[prKey]paneID)
+		}
+		m.snoozeClosed[key] = snoozeListID(s)
+		changed = true
+	}
+	expired, woke := m.expire(alert)
+	alerts = append(alerts, expired...)
+	// A pull request listed again is no longer gone.
+	for _, id := range listIDs {
+		source := m.source(id)
+		for i := range source {
+			delete(m.snoozeClosed, keyOf(&source[i]))
+		}
+	}
+	if changed || woke {
+		m.saveSnoozes()
+	}
+	return alerts
+}
+
+// scheduleSnoozeTick starts a timer for the earliest snooze end, at most
+// snoozeCheckInterval ahead. Every call starts a new generation.
+func (m *model) scheduleSnoozeTick() tea.Cmd {
+	m.snoozeGeneration++
+	if len(m.snoozes) == 0 {
+		return nil
+	}
+	var earliest time.Time
+	for _, s := range m.snoozes {
+		if earliest.IsZero() || s.Until.Before(earliest) {
+			earliest = s.Until
+		}
+	}
+	generation := m.snoozeGeneration
+	delay := min(max(earliest.Sub(m.now()), 0), snoozeCheckInterval)
+	return tea.Tick(delay, func(time.Time) tea.Msg { return snoozeTickMsg{generation: generation} })
+}
+
+// handleSnoozeTick wakes the snoozes that ended, with one notification, and
+// schedules the next tick.
+func (m *model) handleSnoozeTick(msg snoozeTickMsg) tea.Cmd {
+	if msg.generation != m.snoozeGeneration {
+		return nil
+	}
+	now := m.now()
+	due := false
+	for _, s := range m.snoozes {
+		if !s.Until.After(now) {
+			due = true
+			break
+		}
+	}
+	var alerts []prAlert
+	if due {
+		m.keepingSelection(func() {
+			alerts = m.wakeDue(true)
+			m.rebuildVisiblePRs()
+		})
+	}
+	cmds := []tea.Cmd{m.notifyAlerts(alerts)}
+	if len(alerts) > 0 {
+		cmds = append(cmds, m.startFlash(alertText(alerts)))
+	}
+	return tea.Batch(append(cmds, m.scheduleSnoozeTick())...)
+}

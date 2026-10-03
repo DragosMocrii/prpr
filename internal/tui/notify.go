@@ -55,6 +55,10 @@ func (m *model) alerts() []prAlert {
 		} else if known {
 			readiness[key] = wasReady
 		}
+		// A snoozed pull request alerts only when it wakes.
+		if m.snoozed(pr) {
+			continue
+		}
 		old, listed := previous[key]
 		if !listed || !m.inScope(pr) {
 			continue
@@ -93,6 +97,9 @@ func (m *model) alerts() []prAlert {
 	}
 	for i := range m.snapshot.ReviewRequests {
 		pr := &m.snapshot.ReviewRequests[i]
+		if m.snoozed(pr) {
+			continue
+		}
 		old, listed := reviews[keyOf(pr)]
 		// A review row alerts when it starts needing the viewer: it arrives, or
 		// it stops waiting on others.

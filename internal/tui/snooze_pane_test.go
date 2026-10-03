@@ -52,8 +52,10 @@ func TestSnoozedPaneIndexesBothLists(t *testing.T) {
 		t.Fatal("Snoozed pane drawn without snoozes")
 	}
 	until := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
+	// The review snooze saw the pending request, so a fetch does not wake it.
 	snoozeFor(m,
-		preferences.Snooze{Repository: "acme/web", Number: 7, List: preferences.SnoozeReview, Until: until},
+		preferences.Snooze{Repository: "acme/web", Number: 7, List: preferences.SnoozeReview, Until: until,
+			Seen: []string{signalRequested}},
 		preferences.Snooze{Repository: "acme/api", Number: 2, List: preferences.SnoozeMine, Until: until.Add(time.Hour)})
 	if got := paneNumbers(m, paneSnoozed); !slices.Equal(got, []int{7, 2}) {
 		t.Fatalf("Snoozed rows = %v, want [7 2] (soonest first)", got)
@@ -64,7 +66,9 @@ func TestSnoozedPaneIndexesBothLists(t *testing.T) {
 	if got := paneNumbers(m, paneReview); len(got) != 0 {
 		t.Fatalf("Review requested = %v, want none", got)
 	}
-	// An empty authored list still maps review rows.
+	// An empty authored list still maps review rows. The fixed clock keeps
+	// the snoozes from ending.
+	m.now = func() time.Time { return snoozeNow }
 	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: review}})
 	if got := paneNumbers(m, paneSnoozed); !slices.Contains(got, 7) {
 		t.Fatalf("Snoozed rows with no authored list = %v", got)
@@ -202,13 +206,10 @@ func TestSnoozedGoneRowsIndexBothGoneLists(t *testing.T) {
 	if got := paneNumbers(m, paneMine); !slices.Equal(got, []int{1}) {
 		t.Fatalf("My PRs gone rows = %v, want [1]", got)
 	}
-	// A deleted snooze keeps its gone row through snoozeClosed, with no
-	// wake time.
-	delete(m.snoozes, prKey{"acme/web", 7})
-	m.snoozeClosed = map[prKey]paneID{{"acme/web", 7}: paneReview}
-	m.rebuildVisiblePRs()
-	if got := paneNumbers(m, paneSnoozed); !slices.Equal(got, []int{2, 7}) {
-		t.Fatalf("Snoozed gone rows after delete = %v, want [2 7]", got)
+	// The closed snoozes are deleted; their gone rows stay through
+	// snoozeClosed.
+	if len(m.snoozes) != 0 || len(m.snoozeClosed) != 2 {
+		t.Fatalf("snoozes %v, closed %v, want none and two", m.snoozes, m.snoozeClosed)
 	}
 	if got := paneNumbers(m, paneReview); len(got) != 0 {
 		t.Fatalf("Review requested gone rows = %v, want none", got)

@@ -52,6 +52,9 @@ type model struct {
 	// pull request U would unsnooze.
 	snoozeEditor *snoozeEditor
 	lastSnooze   *prKey
+	// snoozeGeneration counts snooze timers; ticks from an older one are
+	// dropped.
+	snoozeGeneration uint64
 	// changesLogin is the account the change baseline belongs to.
 	changesLogin        string
 	focus               paneID
@@ -470,6 +473,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleTokenChecked(msg)
 	case desktopNotifiedMsg:
 		m.handleDesktopNotified(msg)
+	case snoozeTickMsg:
+		return m, m.handleSnoozeTick(msg)
 	case flashTickMsg:
 		return m, m.handleFlashTick(msg)
 	case tea.FocusMsg:
@@ -847,6 +852,10 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 	m.keepingSelection(func() {
 		m.snapshot = snapshot
 		m.err = nil
+		// Snoozes load once the snapshot names the account they save under.
+		if accountChanged {
+			m.loadSnoozes(snapshot.Login)
+		}
 		if !snapshot.Preview {
 			reset := !strings.EqualFold(m.changesLogin, snapshot.Login)
 			m.changesLogin = snapshot.Login
@@ -856,6 +865,9 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 			} else {
 				alerts = m.alerts()
 			}
+			// After alerts, so a pull request woken now alerts only through
+			// its wake.
+			alerts = append(alerts, m.reviewSnoozes(!reset)...)
 			for _, id := range listIDs {
 				if reset {
 					m.changes[id].reset(m.source(id))
@@ -876,10 +888,14 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 		}
 		m.setFocus(focus)
 	}
-	if len(alerts) == 0 {
-		return nil
+	var tick tea.Cmd
+	if accountChanged {
+		tick = m.scheduleSnoozeTick()
 	}
-	return tea.Batch(m.notifyAlerts(alerts), m.startFlash(alertText(alerts)))
+	if len(alerts) == 0 {
+		return tick
+	}
+	return tea.Batch(m.notifyAlerts(alerts), m.startFlash(alertText(alerts)), tick)
 }
 
 // keepingSelection runs rebuild, keeping each pane's selection and following
