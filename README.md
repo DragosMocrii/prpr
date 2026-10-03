@@ -115,6 +115,7 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - Tab / Shift+Tab: switch between **My PRs**, **Merge queue** (while it has rows), **Review requested**, and **Snoozed** (while it has rows). Each list keeps its own selection and scroll position; navigation keys move only the focused list.
 - `z`: snooze the selected pull request, or wake it when it is in **Snoozed**; see [Snoozing](#snoozing).
 - `U`: undo the last snooze.
+- `R`: request reviews of your selected pull request again; see [Requesting reviews again](#requesting-reviews-again).
 - `/`: search every list; see [Search and quick filters](#search-and-quick-filters).
 - `D`: show or hide draft pull requests in every list, and save the choice; see [Drafts](#drafts).
 - `F` / `M`: show only PRs with failing CI, or PRs ready to merge; press again to show all.
@@ -190,6 +191,10 @@ Pull requests you have handed to a merge queue move to a **Merge queue** list be
 When Trunk removes a pull request, because its tests failed or someone canceled it, it returns to **My PRs** tagged `queue failed` or `queue canceled` until Trunk's comment changes, and a failed removal sends a notification while notifications are on (`--notify` or `n`). A pull request Trunk shows as submitted still waits on its own checks and reviews, so it alerts on failing CI or requested changes like a pull request in **My PRs**; further along, the queue owns it and it alerts only when removed for failed tests. Pull requests in the queue count in no attention category and not in the terminal title. `--queues=github` or `--queues=trunk` reads one queue; `--queues=` reads none and hides the list. prpr reads the first 10 comments of each of your open pull requests to find Trunk's, which is almost always the first.
 
 Reading Trunk's comment costs more GraphQL quota: with Trunk enabled, each full fetch reads up to 10 comment bodies per open pull request of yours. `--queues=github` or `--queues=` avoids it.
+
+### Requesting reviews again
+
+`R` on one of your pull requests, in **My PRs**, **Merge queue**, or **Snoozed** (not from the details screen), asks people who already reviewed it to review it again, as GitHub's re-request button does. prpr looks up who reviewed it and whose review is requested, and offers them all; reviews made before the latest commits start chosen, except approvals: an approver asked again shows on GitHub as awaiting review, though the approval still counts toward merging, so approvers are never chosen for you and the form says so. Space toggles a reviewer and Enter sends the requests; Esc cancels. Before sending, prpr reads the reviewers again: anyone who reviewed it while the form was open, whatever the verdict, is not asked, and the notice names them. GitHub ignores a request for a review that is already requested, so for those prpr removes the request and makes it again, which GitHub notifies as new; if making it fails, prpr makes the removed request again and says whether that worked. A code owner's request renewed this way becomes an ordinary request, though GitHub still requires a code owner's review. GitHub notifies each reviewer as it does a first request, so it works whether or not they use prpr; in their prpr, the pull request moves back among pending requests, and with notifications on, it alerts as "review requested again". Bots and teams are not offered. This is the only change prpr makes on GitHub: it needs an account that can request reviews in the repository, and it runs as the pinned account like every request.
 
 ### Snoozing
 

@@ -103,18 +103,36 @@ func (m *model) alerts() []prAlert {
 		}
 		old, listed := reviews[keyOf(pr)]
 		// A review row alerts when it starts needing the viewer: it arrives, or
-		// it stops waiting on others.
+		// it stops waiting on others. A request made again alerts, whatever
+		// the row needed before.
 		// A hidden draft arrives when it leaves draft.
-		if pr.ReviewStatus.Waiting() || (listed && !old.ReviewStatus.Waiting() && m.inScope(old)) || !m.inScope(pr) {
+		again := listed && requestedAgain(old, pr)
+		if pr.ReviewStatus.Waiting() || (listed && !old.ReviewStatus.Waiting() && m.inScope(old) && !again) || !m.inScope(pr) {
 			continue
 		}
 		kind := "review requested"
-		if text := reviewStatusText(pr.ReviewStatus); text != "" {
+		if again {
+			kind = "review requested again"
+		} else if text := reviewStatusText(pr.ReviewStatus); text != "" {
 			kind = text
 		}
 		found = append(found, prAlert{pr, []string{kind}})
 	}
 	return found
+}
+
+// requestedAgain reports that the viewer's review was requested again: a
+// reviewed row became a pending request, or a pending request's time, the
+// latest direct request of the viewer, moved later. A reviewed row's time
+// means something else, so it is not compared.
+func requestedAgain(old, pr *github.PullRequest) bool {
+	if pr.ReviewStatus != github.ReviewRequested {
+		return false
+	}
+	if old.ReviewStatus != github.ReviewRequested {
+		return true
+	}
+	return !old.WaitingSince.IsZero() && pr.WaitingSince.After(old.WaitingSince)
 }
 
 // resetReadiness records the authored pull requests' known merge readiness

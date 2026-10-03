@@ -52,6 +52,11 @@ type model struct {
 	// pull request U would unsnooze.
 	snoozeEditor *snoozeEditor
 	lastSnooze   *prKey
+	// rerequest is the form that requests reviews again, nil when closed.
+	// listReviewers and requestReviews are the client's in the app.
+	rerequest      *rerequestEditor
+	listReviewers  func(context.Context, string, int) ([]github.Reviewer, error)
+	requestReviews func(context.Context, string, int, []string, []string) error
 	// snoozeGeneration counts snooze timers; ticks from an older one are
 	// dropped.
 	snoozeGeneration uint64
@@ -194,6 +199,8 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m.refreshInterval = refreshInterval
 	m.bots = len(client.Bots()) > 0
 	m.openBrowser = client.OpenInBrowser
+	m.listReviewers = client.Reviewers
+	m.requestReviews = client.RequestReviews
 	m.notify = notify
 	m.icons = startIcons(icons, preferences)
 	m.legend = preferences.Legend()
@@ -372,6 +379,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sizeSnoozeForm()
 			return m, m.updateSnooze(msg)
 		}
+		if m.rerequest != nil {
+			m.sizeRerequestForm()
+			return m, m.updateRerequest(msg)
+		}
 	case tea.BackgroundColorMsg:
 		m.darkBackground = msg.IsDark()
 		m.help.Styles = help.DefaultStyles(m.darkBackground)
@@ -385,6 +396,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.snoozeEditor != nil {
 			return m, m.updateSnooze(msg)
+		}
+		if m.rerequest != nil {
+			return m, m.updateRerequest(msg)
 		}
 	case spinner.TickMsg:
 		if m.spinning() {
@@ -469,6 +483,12 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startFetch()
 	case browserOpenedMsg:
 		m.handleBrowserOpened(msg)
+	case reviewersListedMsg:
+		return m, m.handleReviewersListed(msg)
+	case reviewersRecheckedMsg:
+		return m, m.handleReviewersRechecked(msg)
+	case reviewsRequestedMsg:
+		m.handleReviewsRequested(msg)
 	case accountsListedMsg:
 		m.handleAccountsListed(msg)
 	case tokenRecheckMsg:
@@ -494,6 +514,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.snoozeEditor != nil {
 			return m, m.updateSnooze(msg)
 		}
+		if m.rerequest != nil {
+			return m, m.updateRerequest(msg)
+		}
 		if m.picker != nil {
 			return m, m.picker.paste(msg.Content, m.pickerViewportHeight())
 		}
@@ -516,6 +539,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.snoozeEditor != nil {
 			return m, m.updateSnooze(msg)
 		}
+		if m.rerequest != nil {
+			return m, m.updateRerequest(msg)
+		}
 	}
 	return m, nil
 }
@@ -533,6 +559,9 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.snoozeEditor != nil {
 		return m.updateSnooze(msg)
+	}
+	if m.rerequest != nil {
+		return m.updateRerequest(msg)
 	}
 	if m.picker != nil {
 		return m.updateRepositoryPicker(msg)
@@ -614,6 +643,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.openSnooze()
 	case key.Matches(msg, k.Undo):
 		return m.undoSnooze()
+	case key.Matches(msg, k.Rerequest):
+		return m.rerequestSelected()
 	case key.Matches(msg, k.Help):
 		m.help.ShowAll = !m.help.ShowAll
 		m.rebuildPRTable(false)
@@ -1069,6 +1100,8 @@ func (m *model) View() tea.View {
 		lines = m.rulesLines()
 	case m.snoozeEditor != nil && m.width >= minimumWidth && m.height >= minimumHeight:
 		lines = m.snoozeLines()
+	case m.rerequest != nil && m.width >= minimumWidth && m.height >= minimumHeight:
+		lines = m.rerequestLines()
 	case m.detailsShown():
 		lines = m.detailsView()
 	case list:

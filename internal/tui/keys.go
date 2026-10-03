@@ -37,6 +37,7 @@ type keyMap struct {
 	RulesCancel     key.Binding
 	Snooze          key.Binding
 	Undo            key.Binding
+	Rerequest       key.Binding
 	Account         key.Binding
 	Retry           key.Binding
 	Login           key.Binding
@@ -112,6 +113,7 @@ func defaultKeyMap() keyMap {
 		RulesCancel:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel without saving")),
 		Snooze:          key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "snooze")),
 		Undo:            key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "undo snooze")),
+		Rerequest:       key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "request reviews again")),
 		Account:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "account")),
 		Retry:           key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
 		Login:           key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log in to GitHub")),
@@ -216,6 +218,7 @@ func (m *model) syncKeys() {
 	k.Rules.SetEnabled(listing && m.rulesEditor == nil)
 	k.Snooze.SetEnabled(listing && rows && m.snoozeEditor == nil)
 	k.Undo.SetEnabled(listing && m.snoozeEditor == nil)
+	k.Rerequest.SetEnabled(listing && rows && m.focus != paneReview && m.rerequest == nil)
 	if m.focus == paneSnoozed {
 		k.Snooze.SetHelp("z", "wake")
 	} else {
@@ -322,7 +325,7 @@ func (k keyMap) listHelp() helpKeys {
 		full: [][]key.Binding{
 			{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom},
 			{t.PageUp, t.PageDown, t.HalfPageUp, t.HalfPageDown},
-			{k.Pages.PrevPage, k.Pages.NextPage, k.Icons, k.Rules},
+			{k.Pages.PrevPage, k.Pages.NextPage, k.Icons, k.Rules, k.Rerequest},
 			{k.NextPane, k.PrevPane, k.Account, k.Legend},
 			{k.Details, k.Open, k.CopyURL, k.Snooze, k.Undo},
 			{k.Search, k.Categories, k.ClearFilters},

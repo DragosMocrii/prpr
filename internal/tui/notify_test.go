@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -217,5 +218,35 @@ func TestDesktopNotifierReplacesOSC9AndFallsBackWhenItFails(t *testing.T) {
 	_, cmd = m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: []github.PullRequest{changePR(9, "acme/b"), changePR(8, "acme/b"), changePR(7, "acme/b")}}})
 	if got := notifications(cmd); len(got) != 1 {
 		t.Fatalf("after the failure notifications = %q, want OSC 9", got)
+	}
+}
+
+func TestARenewedReviewRequestAlertsAgain(t *testing.T) {
+	m := notifyModel(t, "")
+	review := changePR(9, "acme/b")
+	review.WaitingSince = time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	fetch(m, nil, []github.PullRequest{review})
+	if got := fetch(m, nil, []github.PullRequest{review}); got != nil {
+		t.Fatalf("an unchanged request notified: %q", got)
+	}
+	review.WaitingSince = review.WaitingSince.Add(time.Hour)
+	got := fetch(m, nil, []github.PullRequest{review})
+	if len(got) != 1 || !strings.Contains(got[0], "acme/b#9 review requested again") {
+		t.Fatalf("notifications = %q, want the request made again", got)
+	}
+	if got := fetch(m, nil, []github.PullRequest{review}); got != nil {
+		t.Fatalf("the renewed request notified twice: %q", got)
+	}
+}
+
+func TestAReviewRequestedAgainAfterReviewingAlerts(t *testing.T) {
+	m := notifyModel(t, "")
+	review := changePR(9, "acme/b")
+	review.ReviewStatus = github.ReviewNewCommits
+	fetch(m, nil, []github.PullRequest{review})
+	review.ReviewStatus = github.ReviewRequested
+	got := fetch(m, nil, []github.PullRequest{review})
+	if len(got) != 1 || !strings.Contains(got[0], "acme/b#9 review requested again") {
+		t.Fatalf("notifications = %q, want the request made again", got)
 	}
 }
