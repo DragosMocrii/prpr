@@ -55,8 +55,9 @@ func (m *model) alerts() []prAlert {
 		} else if known {
 			readiness[key] = wasReady
 		}
-		// A snoozed pull request alerts only when it wakes.
-		if m.snoozed(pr) {
+		// A snoozed pull request alerts only when it wakes; one whose snooze
+		// closed has no snooze left and alerts as it returns.
+		if _, ok := m.snoozes[key]; ok {
 			continue
 		}
 		old, listed := previous[key]
@@ -97,7 +98,7 @@ func (m *model) alerts() []prAlert {
 	}
 	for i := range m.snapshot.ReviewRequests {
 		pr := &m.snapshot.ReviewRequests[i]
-		if m.snoozed(pr) {
+		if _, ok := m.snoozes[keyOf(pr)]; ok {
 			continue
 		}
 		old, listed := reviews[keyOf(pr)]

@@ -230,11 +230,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			}
 		}
 		if reason, ok := m.woke[keyOf(pr)]; ok && id != paneSnoozed {
-			sep := " · "
-			if ic.nerd {
-				sep = " "
-			}
-			name = wokeTag(ic, singleLine(reason)) + sep + name
+			name = wokeTag(ic, singleLine(reason)) + " · " + name
 		}
 		if id == paneSnoozed {
 			rows = append(rows, m.snoozedRow(pr, gone, layout, mark, changed(cellName, name), now))

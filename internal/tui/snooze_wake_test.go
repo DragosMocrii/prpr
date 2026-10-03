@@ -155,16 +155,66 @@ func TestTimerWakesAndDropsStaleTicks(t *testing.T) {
 	}
 }
 
-func TestTimerWakeAfterAFailedFetchSavesUnderTheAccount(t *testing.T) {
-	m, _, _ := snoozedModel(t, snoozeNow.Add(time.Hour), preferences.SnoozeMine, 2)
+func TestTimerWakeAfterAFailedFetchWaitsForTheNextFetch(t *testing.T) {
+	m, mine, review := snoozedModel(t, snoozeNow.Add(time.Hour), preferences.SnoozeMine, 2)
 	m.Update(fetchFinishedMsg{err: errors.New("network down")})
 	m.now = func() time.Time { return snoozeNow.Add(2 * time.Hour) }
 	m.Update(snoozeTickMsg{generation: m.snoozeGeneration})
-	if len(m.snoozes) != 0 {
-		t.Fatal("timer did not wake")
+	if len(m.snoozes) != 1 {
+		t.Fatal("timer woke with no row to alert for")
+	}
+	if saved := m.preferences.Snoozes("alice"); len(saved) != 1 {
+		t.Fatalf("alice has %+v saved, want the snooze kept", saved)
+	}
+	m.notice = ""
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: mine, ReviewRequests: review}})
+	if len(m.snoozes) != 0 || m.woke[prKey{"acme/api", 2}] != "snooze ended" {
+		t.Fatalf("snoozes %v, woke %v", m.snoozes, m.woke)
+	}
+	if !strings.Contains(m.notice, "snooze ended") {
+		t.Fatalf("notice = %q, want the wake alert", m.notice)
 	}
 	if saved := m.preferences.Snoozes("alice"); len(saved) != 0 {
 		t.Fatalf("alice still has %+v saved", saved)
+	}
+}
+
+func TestReturningSnoozedReviewRequestAlertsAgain(t *testing.T) {
+	m, mine, review := snoozedModel(t, snoozeNow.Add(24*time.Hour), preferences.SnoozeMine, 2)
+	snoozeFor(m, preferences.Snooze{Repository: "acme/web", Number: 7, List: preferences.SnoozeReview,
+		Until: snoozeNow.Add(24 * time.Hour), Seen: []string{signalRequested}})
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: mine, ReviewRequests: review}})
+	if len(m.snoozes) != 2 {
+		t.Fatalf("snoozes = %v, want both kept", m.snoozes)
+	}
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: mine}})
+	if _, ok := m.snoozeClosed[prKey{"acme/web", 7}]; !ok {
+		t.Fatal("the snooze did not close")
+	}
+	m.notice = ""
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: mine, ReviewRequests: review}})
+	if !strings.Contains(m.notice, "review requested") {
+		t.Fatalf("notice = %q, want the arrival alert", m.notice)
+	}
+}
+
+func TestSnoozeKeepsReadyWhileMergeStateIsUnknown(t *testing.T) {
+	m, mine, review := snoozedModel(t, snoozeNow.Add(24*time.Hour), preferences.SnoozeMine, 2)
+	key := prKey{"acme/api", 2}
+	delete(m.snoozes, key)
+	unknown := append([]github.PullRequest(nil), mine...)
+	unknown[1].MergeState = ""
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: unknown, ReviewRequests: review}})
+	m.readiness[key] = true
+	m.snooze(key, paneMine, snoozeNow.Add(24*time.Hour), false)
+	if !slices.Contains(m.snoozes[key].Seen, signalReady) {
+		t.Fatalf("Seen = %v, want ready kept", m.snoozes[key].Seen)
+	}
+	clean := append([]github.PullRequest(nil), mine...)
+	clean[1].MergeState = "CLEAN"
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: clean, ReviewRequests: review}})
+	if len(m.snoozes) != 1 {
+		t.Fatalf("woke on a state it had already seen: %v", m.woke)
 	}
 }
 

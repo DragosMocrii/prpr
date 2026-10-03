@@ -416,7 +416,13 @@ func (m *model) snooze(key prKey, list paneID, until time.Time, activity bool) t
 		m.setNotice(fmt.Sprintf("%s#%d is no longer listed", key.repository, key.number))
 		return nil
 	}
-	held, _ := m.snoozeSignals(list, pr)
+	held, known := m.snoozeSignals(list, pr)
+	// An unknown merge state keeps the readiness last known, so a fetch that
+	// reads the state again does not wake it as newly ready.
+	if list == paneMine && !slices.Contains(known, signalReady) && m.readiness[key] {
+		held = append(held, signalReady)
+		slices.Sort(held)
+	}
 	entry := preferences.Snooze{Repository: pr.Repository, Number: pr.Number, List: listName(list),
 		Until: until, Activity: activity, Seen: held, Requested: requestedAt(list, pr)}
 	focus, row := m.focus, m.focused().table.Cursor()
@@ -724,7 +730,13 @@ func (m *model) handleSnoozeTick(msg snoozeTickMsg) tea.Cmd {
 		return nil
 	}
 	now := m.now()
-	due := false
+	// With no rows to alert for, a due snooze waits for the next full fetch,
+	// whose time check wakes it with its alert.
+	due := m.snapshot.Login != "" && m.err == nil
+	if !due {
+		return m.scheduleSnoozeTick()
+	}
+	due = false
 	for _, s := range m.snoozes {
 		if !s.Until.After(now) {
 			due = true

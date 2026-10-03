@@ -255,3 +255,16 @@ func TestSnoozeLegendOnlyWithSnoozedOrWokeRows(t *testing.T) {
 		}
 	}
 }
+
+func TestWokeTagIsSeparatedFromTheNameInBothIconSets(t *testing.T) {
+	for _, icons := range []*iconSet{&unicodeIcons, &nerdIcons} {
+		mine, review := snoozePRs()
+		m := newPaneModel(t, 140, 40, mine, review)
+		m.icons = icons
+		m.woke = map[prKey]string{{"acme/api", 2}: "changes requested"}
+		m.rebuildVisiblePRs()
+		if view := ansi.Strip(m.View().Content); !strings.Contains(view, "changes requested · Second") {
+			t.Errorf("nerd %t: tag runs into the name", icons.nerd)
+		}
+	}
+}
