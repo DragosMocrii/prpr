@@ -38,8 +38,16 @@ type model struct {
 	// watchlist is the watchlist scope; its empty name means none.
 	watchlist   preferences.Watchlist
 	filterLogin string
-	panes       [3]prPane
+	panes       [len(paneIDs)]prPane
 	changes     [2]paneChanges
+	// snoozes are the account's snoozed pull requests.
+	snoozes map[prKey]preferences.Snooze
+	// snoozeClosed holds snoozed pull requests that closed: their list, for
+	// gone rows.
+	snoozeClosed map[prKey]paneID
+	// woke holds woken pull requests: the reason, until their row is left
+	// or marks are cleared.
+	woke map[prKey]string
 	// changesLogin is the account the change baseline belongs to.
 	changesLogin        string
 	focus               paneID
@@ -212,7 +220,7 @@ func newModel(ctx context.Context, client *github.Client, preferences *preferenc
 		icons:          &unicodeIcons,
 		rules:          readiness.DefaultRules(),
 	}
-	m.panes = [3]prPane{newPRPane(), newPRPane(), newPRPane()}
+	m.panes = [len(paneIDs)]prPane{newPRPane(), newPRPane(), newPRPane(), newPRPane()}
 	m.rebuildPRTable(true)
 	return m
 }
@@ -532,6 +540,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			for _, id := range listIDs {
 				m.changes[id].clear()
 			}
+			m.woke = nil
+			m.snoozeClosed = nil
 			m.rebuildVisiblePRs()
 		})
 	case key.Matches(msg, k.Details):
@@ -610,19 +620,26 @@ func (m *model) leaveRow(id paneID, row int) {
 	if !ok {
 		return
 	}
+	key := keyOf(pr)
 	if !gone {
-		if m.tracker(id).see(pr) {
+		seen := m.trackerFor(id, pr).see(pr)
+		if _, ok := m.woke[key]; ok {
+			delete(m.woke, key)
+			seen = true
+		}
+		if seen {
 			m.redrawRows(id)
 		}
 		return
 	}
-	m.tracker(id).dismiss(pr)
-	// The authored panes share one tracker, so both lose the dismissed row.
-	if id == paneReview {
-		m.rebuildGone(id)
-	} else {
-		m.rebuildGone(paneMine)
-		m.rebuildGone(paneQueue)
+	m.trackerFor(id, pr).dismiss(pr)
+	if id == paneSnoozed {
+		delete(m.snoozeClosed, key)
+	}
+	// Panes share trackers, and the Snoozed pane's gone indexes run over
+	// both, so every pane's gone rows are rebuilt.
+	for _, p := range paneIDs {
+		m.rebuildGone(p)
 	}
 	target := pane.table.Cursor()
 	if row < target {
@@ -701,6 +718,10 @@ func (m *model) rebuildVisiblePRs() {
 	for _, id := range paneIDs {
 		pane := &m.panes[id]
 		pane.visible = pane.visible[:0]
+		if id == paneSnoozed {
+			m.rebuildSnoozed()
+			continue
+		}
 		source := m.source(id)
 		for index, pr := range source {
 			if m.shown(id, &pr, m.snapshot.Preview) {
@@ -731,6 +752,34 @@ func (m *model) rebuildVisiblePRs() {
 	m.rebuildPRTable(true)
 }
 
+// rebuildSnoozed lists the Snoozed pane's rows from both lists, indexes
+// running over the authored list, then the review list: soonest wake first,
+// activity snoozes last, ties in that order.
+func (m *model) rebuildSnoozed() {
+	pane := &m.panes[paneSnoozed]
+	offset := 0
+	for _, list := range listIDs {
+		source := m.source(list)
+		for index := range source {
+			if m.shown(paneSnoozed, &source[index], m.snapshot.Preview) {
+				pane.visible = append(pane.visible, offset+index)
+			}
+		}
+		offset += len(source)
+	}
+	slices.SortStableFunc(pane.visible, func(a, b int) int {
+		x, y := m.snoozeAt(a), m.snoozeAt(b)
+		if x.Activity != y.Activity {
+			if x.Activity {
+				return 1
+			}
+			return -1
+		}
+		return x.Until.Compare(y.Until)
+	})
+	m.rebuildGone(paneSnoozed)
+}
+
 // applySnapshot shows a fetched or previewed snapshot. A new account restores
 // its saved scope or prompts for one. Only full snapshots are compared for
 // change marks and alerts; a preview leaves the baseline alone. The returned
@@ -755,7 +804,7 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 	}
 	// A preview cannot sort ready pull requests first, so a cursor still on
 	// its first row stays on the first row once the details arrive.
-	var atTop [3]bool
+	var atTop [len(paneIDs)]bool
 	for _, id := range paneIDs {
 		atTop[id] = m.snapshot.Preview && !snapshot.Preview && m.panes[id].table.Cursor() == 0
 	}
@@ -806,39 +855,49 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 	return tea.Batch(m.notifyAlerts(alerts), m.startFlash(alertText(alerts)))
 }
 
-// keepingSelection runs rebuild, then reselects each pane's pull request if
-// it is still in the pane. When the focused pull request moved between
-// My PRs and the queue pane, focus follows it, so the details screen, o, and
-// y keep acting on it. A preview's selection is not followed: a preview has
-// no queue entries, and its first row stays first.
+// keepingSelection runs rebuild, keeping each pane's selection and following
+// the focused pull request into another pane; see keepSelection.
 func (m *model) keepingSelection(rebuild func()) {
+	m.keepSelection(rebuild, true)
+}
+
+// keepSelection runs rebuild, then reselects each pane's pull request if it
+// is still in the pane. With follow, when the focused pull request moved to
+// another pane (between My PRs and the queue pane, or in or out of
+// Snoozed), focus follows it, so the details screen, o, and y keep acting
+// on it; panes partition each list, so it is in at most one. A preview's
+// selection is not followed: a preview has no queue entries, and its first
+// row stays first.
+func (m *model) keepSelection(rebuild func(), follow bool) {
 	type selection struct {
 		repository string
 		number     int
 		ok         bool
 	}
-	var previous [3]selection
+	var previous [len(paneIDs)]selection
 	for _, id := range paneIDs {
 		if pr, ok := m.paneSelectedPR(id); ok {
 			previous[id] = selection{pr.Repository, pr.Number, true}
 		}
 	}
-	focus, follow := m.focus, !m.snapshot.Preview
+	focus := m.focus
+	follow = follow && !m.snapshot.Preview
 	rebuild()
 	for _, id := range paneIDs {
 		if previous[id].ok {
 			m.selectPR(id, previous[id].repository, previous[id].number)
 		}
 	}
-	other := map[paneID]paneID{paneMine: paneQueue, paneQueue: paneMine}
-	to, authored := other[focus]
 	selected := previous[focus]
-	if !follow || !authored || !selected.ok || m.selectPR(focus, selected.repository, selected.number) {
+	if !follow || !selected.ok || m.selectPR(focus, selected.repository, selected.number) {
 		return
 	}
-	if m.selectPR(to, selected.repository, selected.number) {
-		m.setFocus(to)
-		m.selectPR(to, selected.repository, selected.number)
+	for _, to := range m.drawnPanes() {
+		if to != focus && m.selectPR(to, selected.repository, selected.number) {
+			m.setFocus(to)
+			m.selectPR(to, selected.repository, selected.number)
+			return
+		}
 	}
 }
 
@@ -901,10 +960,25 @@ func (m *model) scopeLabel() string {
 	}
 }
 
-// rebuildGone lists a pane's gone pull requests in the current scope.
+// rebuildGone lists a pane's gone pull requests in the current scope. The
+// Snoozed pane's indexes run over the authored list's gone pull requests,
+// then the review list's.
 func (m *model) rebuildGone(id paneID) {
 	pane := &m.panes[id]
 	pane.gone = pane.gone[:0]
+	if id == paneSnoozed {
+		offset := 0
+		for _, list := range listIDs {
+			gone := m.changes[list].gone
+			for index := range gone {
+				if m.shown(paneSnoozed, &gone[index], false) {
+					pane.gone = append(pane.gone, offset+index)
+				}
+			}
+			offset += len(gone)
+		}
+		return
+	}
 	t := m.tracker(id)
 	for index := range t.gone {
 		if m.shown(id, &t.gone[index], false) {

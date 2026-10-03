@@ -142,7 +142,7 @@ type detailRowText struct {
 func (m *model) detailRows(pr *github.PullRequest, gone bool) []detailRowText {
 	// A preview row knows its conflicts, title, size, and dates only.
 	preview := m.snapshot.Preview && !gone
-	review := m.focus == paneReview
+	review := m.focus == paneReview || (m.focus == paneSnoozed && m.snoozeList(pr) == paneReview)
 	now := m.now()
 	pending := func(text string) string {
 		if preview {

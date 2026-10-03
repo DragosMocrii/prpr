@@ -129,11 +129,11 @@ func (m *model) hiddenDrafts(id paneID) int {
 		return 0
 	}
 	count := 0
-	for i := range m.source(id) {
-		if pr := &m.source(id)[i]; pr.Draft && m.inRepositoryScope(pr) && m.inPane(id, pr) {
+	m.eachSourcePR(id, func(pr *github.PullRequest) {
+		if pr.Draft && m.inRepositoryScope(pr) && m.inPane(id, pr) {
 			count++
 		}
-	}
+	})
 	return count
 }
 

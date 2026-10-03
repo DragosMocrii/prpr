@@ -231,3 +231,50 @@ func snoozeWake(s preferences.Snooze, held, known []string, pr *github.PullReque
 	}
 	return "", seen, requested
 }
+
+// snoozed reports whether a pull request is snoozed, or was snoozed when
+// it closed: either way it belongs to the Snoozed pane.
+func (m *model) snoozed(pr *github.PullRequest) bool {
+	key := keyOf(pr)
+	if _, ok := m.snoozes[key]; ok {
+		return true
+	}
+	_, ok := m.snoozeClosed[key]
+	return ok
+}
+
+// snoozeList is the list a snoozed pull request was snoozed from: paneMine
+// or paneReview.
+func (m *model) snoozeList(pr *github.PullRequest) paneID {
+	key := keyOf(pr)
+	if s, ok := m.snoozes[key]; ok {
+		if s.List == preferences.SnoozeReview {
+			return paneReview
+		}
+		return paneMine
+	}
+	if m.snoozeClosed[key] == paneReview {
+		return paneReview
+	}
+	return paneMine
+}
+
+// snoozeAt is the snooze of the pull request at an index of the Snoozed
+// pane's visible rows, which run over the authored list, then the review
+// list.
+func (m *model) snoozeAt(index int) preferences.Snooze {
+	list, index := splitIndex(index, len(m.snapshot.PullRequests))
+	source := m.source(list)
+	if index < 0 || index >= len(source) {
+		return preferences.Snooze{}
+	}
+	return m.snoozes[keyOf(&source[index])]
+}
+
+// listName is a list's name in a saved snooze.
+func listName(list paneID) string {
+	if list == paneReview {
+		return preferences.SnoozeReview
+	}
+	return preferences.SnoozeMine
+}

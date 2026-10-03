@@ -27,9 +27,10 @@ func (m *model) ready(pr *github.PullRequest) bool {
 }
 
 // readyIn is ready for pane id. Rules read fields that only the authored
-// query selects, so review rows are ready when GitHub would merge them.
+// query selects, so review rows are ready when GitHub would merge them. A
+// Snoozed row is ready as in the list it was snoozed from.
 func (m *model) readyIn(id paneID, pr *github.PullRequest) bool {
-	if id == paneReview {
+	if id == paneReview || (id == paneSnoozed && m.snoozeList(pr) == paneReview) {
 		return mergeReady(pr.Draft, pr.Mergeable, pr.MergeState)
 	}
 	return m.ready(pr)

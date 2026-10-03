@@ -68,9 +68,10 @@ func (m *model) summaryShown() bool {
 }
 
 // covers reports whether a category limits pane id. The queue pane shares
-// the authored list, so counting it too would count those rows twice.
+// the authored list, so counting it too would count those rows twice; the
+// Snoozed pane's rows count nowhere.
 func (c attentionCategory) covers(id paneID) bool {
-	if id == paneQueue {
+	if id == paneQueue || id == paneSnoozed {
 		return false
 	}
 	return c.both || c.pane == id
