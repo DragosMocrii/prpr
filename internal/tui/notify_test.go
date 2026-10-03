@@ -49,7 +49,7 @@ func notifications(cmd tea.Cmd) []string {
 }
 
 func fetch(m *model, mine, reviews []github.PullRequest) []string {
-	_, cmd := m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: mine, ReviewRequests: reviews}})
+	_, cmd := updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: mine, ReviewRequests: reviews}})
 	return notifications(cmd)
 }
 
@@ -157,7 +157,7 @@ func TestAccountSwitchAndFailedFetchDoNotAlert(t *testing.T) {
 	m := notifyModel(t, "")
 	pr := changePR(1, "acme/a")
 	fetch(m, []github.PullRequest{pr}, nil)
-	m.Update(fetchFinishedMsg{err: errors.New("offline")})
+	updateFetch(m, fetchFinishedMsg{err: errors.New("offline")})
 	pr.Checks = "FAILURE"
 	if got := fetch(m, []github.PullRequest{pr}, nil); len(got) != 1 {
 		t.Fatalf("after a failed fetch notifications = %q, want the failing CI against the last good lists", got)
@@ -166,7 +166,7 @@ func TestAccountSwitchAndFailedFetchDoNotAlert(t *testing.T) {
 	if err := m.preferences.Save("bob", ""); err != nil {
 		t.Fatal(err)
 	}
-	_, cmd := m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "bob",
+	_, cmd := updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "bob",
 		PullRequests: []github.PullRequest{changePR(5, "acme/a")}, ReviewRequests: []github.PullRequest{changePR(6, "acme/a")}}})
 	if got := notifications(cmd); got != nil {
 		t.Fatalf("account switch notified: %q", got)
@@ -197,7 +197,7 @@ func TestDesktopNotifierReplacesOSC9AndFallsBackWhenItFails(t *testing.T) {
 		return nil
 	}
 	fetch(m, nil, nil)
-	_, cmd := m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: []github.PullRequest{changePR(9, "acme/b")}}})
+	_, cmd := updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: []github.PullRequest{changePR(9, "acme/b")}}})
 	raw, msgs := run(cmd)
 	if len(posted) != 1 || !strings.Contains(posted[0], "acme/b#9 review requested") {
 		t.Fatalf("desktop notifications = %q, want the review request", posted)
@@ -207,7 +207,7 @@ func TestDesktopNotifierReplacesOSC9AndFallsBackWhenItFails(t *testing.T) {
 	}
 
 	fail = true
-	_, cmd = m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: []github.PullRequest{changePR(9, "acme/b"), changePR(8, "acme/b")}}})
+	_, cmd = updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: []github.PullRequest{changePR(9, "acme/b"), changePR(8, "acme/b")}}})
 	_, msgs = run(cmd)
 	for _, msg := range msgs {
 		m.Update(msg)
@@ -215,7 +215,7 @@ func TestDesktopNotifierReplacesOSC9AndFallsBackWhenItFails(t *testing.T) {
 	if m.desktopNotify != nil || !strings.Contains(m.notice, "not allowed") {
 		t.Fatalf("failed desktop notification kept the notifier or hid the error: notice %q", m.notice)
 	}
-	_, cmd = m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: []github.PullRequest{changePR(9, "acme/b"), changePR(8, "acme/b"), changePR(7, "acme/b")}}})
+	_, cmd = updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: []github.PullRequest{changePR(9, "acme/b"), changePR(8, "acme/b"), changePR(7, "acme/b")}}})
 	if got := notifications(cmd); len(got) != 1 {
 		t.Fatalf("after the failure notifications = %q, want OSC 9", got)
 	}

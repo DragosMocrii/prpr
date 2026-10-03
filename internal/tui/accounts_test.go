@@ -66,11 +66,11 @@ func TestPinningAnAccountSavesItAndDropsTheOldAccountsResults(t *testing.T) {
 	}
 
 	// The fetch started as alice finishes late and is dropped.
-	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{changePR(9, "acme/z")}}})
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{changePR(9, "acme/z")}}, generation: m.refreshGeneration - 1, account: m.accountGeneration - 1})
 	if m.snapshot.Login != "" || !m.loading {
 		t.Fatalf("a result fetched as the previous account was applied: %q", m.snapshot.Login)
 	}
-	m.Update(fetchFinishedMsg{account: m.accountGeneration, snapshot: github.Snapshot{Login: "work"}})
+	m.Update(fetchFinishedMsg{account: m.accountGeneration, generation: m.refreshGeneration, snapshot: github.Snapshot{Login: "work"}})
 	if m.snapshot.Login != "work" || !strings.Contains(m.View().Content, "@work (pinned)") {
 		t.Fatalf("the pinned account's result: login %q, view %q", m.snapshot.Login, m.View().Content)
 	}
@@ -99,13 +99,15 @@ func TestStaleAccountListsAndQuotaReadsAreIgnored(t *testing.T) {
 	}
 	esc(m)
 
+	oldAccount := m.accountGeneration
+	oldQuota := m.quotaGeneration
 	m.accountGeneration++
-	cmd = m.handleQuota(rateLimitMsg{limit: github.RateLimit{Limit: 5000, Remaining: 1}})
+	cmd = m.handleQuota(rateLimitMsg{limit: github.RateLimit{Limit: 5000, Remaining: 1}, generation: oldQuota, account: oldAccount})
 	if m.quotaKnown && m.quota.Remaining == 1 {
 		t.Fatal("a quota read as the previous account was shown")
 	}
-	if cmd == nil {
-		t.Fatal("a stale quota read ended the poll chain")
+	if cmd != nil {
+		t.Fatal("a stale quota read started a new poll chain")
 	}
 }
 
@@ -155,7 +157,7 @@ func TestFailedAccountSaveStaysShownForTheNewAccount(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 	m.chooseAccount("work")
-	m.Update(fetchFinishedMsg{account: m.accountGeneration, snapshot: github.Snapshot{Login: "work"}})
+	m.Update(fetchFinishedMsg{account: m.accountGeneration, generation: m.refreshGeneration, snapshot: github.Snapshot{Login: "work"}})
 	if store.PinnedAccount() != "" {
 		t.Fatal("the store saved the account")
 	}
@@ -203,5 +205,14 @@ func TestPinnedAccountRecoversOnceGHHasANewToken(t *testing.T) {
 	// The fetch replaced the wait, so its old ticks end.
 	if _, cmd := m.Update(recheck); cmd != nil {
 		t.Fatal("a recheck from before the fetch ran")
+	}
+}
+
+func TestAccountSwitchKeepsQuotaPollingAfterAFailedFetch(t *testing.T) {
+	m, _ := accountsModel(t)
+	m.chooseAccount("work")
+	m.Update(fetchFinishedMsg{account: m.accountGeneration, generation: m.refreshGeneration, err: errors.New("offline")})
+	if !m.quotaRunning || m.quotaPaused {
+		t.Fatalf("quota polling stopped after the switch: running %t paused %t", m.quotaRunning, m.quotaPaused)
 	}
 }

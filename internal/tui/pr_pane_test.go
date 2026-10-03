@@ -247,7 +247,7 @@ func TestRefreshRestoresEachPaneAndKeepsFocus(t *testing.T) {
 	press(m, tea.Key{Code: 'r', Text: "r"})
 	press(m, tea.Key{Code: tea.KeyTab})     // switching focus during a refresh is allowed
 	press(m, tea.Key{Code: 'G', Text: "G"}) // review: acme/c #3
-	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{
+	updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{
 		Login:          "alice",
 		PullRequests:   []github.PullRequest{shared, mine[0]},
 		ReviewRequests: []github.PullRequest{review[2], review[0], shared},
@@ -269,7 +269,7 @@ func TestFailedRefreshClearsBothPanes(t *testing.T) {
 	if len(m.panes[paneReview].visible) != 2 {
 		t.Fatal("refresh hid review rows before finishing")
 	}
-	m.Update(fetchFinishedMsg{err: errors.New("offline")})
+	updateFetch(m, fetchFinishedMsg{err: errors.New("offline")})
 	if len(m.panes[paneMine].visible) != 0 || len(m.panes[paneReview].visible) != 0 || len(m.snapshot.ReviewRequests) != 0 {
 		t.Fatalf("failed refresh kept rows: %v / %v", m.panes[paneMine].visible, m.panes[paneReview].visible)
 	}

@@ -590,6 +590,8 @@ func (m *model) loadSnoozes(login string) {
 	m.snoozeClosed, m.woke, m.lastSnooze = nil, nil, nil
 	// Read before a wake saves, which drops the unreadable entries.
 	unread := m.preferences.SnoozesErr(login)
+	// Snoozes already past when they load wake silently, even during a
+	// quiet fetch, so the next normal fetch cannot alert for them.
 	m.wakeDue(false)
 	if unread != nil && m.preferenceErr == nil {
 		m.preferenceErr = fmt.Errorf("Some snoozes not read: %s", singleLine(unread.Error()))
@@ -725,7 +727,7 @@ func snoozeTickDelay(until, now time.Time, idle bool) time.Duration {
 // snoozeCheckInterval when idle.
 func (m *model) scheduleSnoozeTickWhen(idle bool) tea.Cmd {
 	m.snoozeGeneration++
-	if len(m.snoozes) == 0 {
+	if m.sleeping || m.fetchQuiet || len(m.snoozes) == 0 {
 		return nil
 	}
 	var earliest time.Time
@@ -743,6 +745,9 @@ func (m *model) scheduleSnoozeTickWhen(idle bool) tea.Cmd {
 // schedules the next tick.
 func (m *model) handleSnoozeTick(msg snoozeTickMsg) tea.Cmd {
 	if msg.generation != m.snoozeGeneration {
+		return nil
+	}
+	if m.sleeping || m.fetchQuiet {
 		return nil
 	}
 	now := m.now()

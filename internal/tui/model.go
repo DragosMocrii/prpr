@@ -21,6 +21,7 @@ import (
 	"github.com/DragosMocrii/prpr/internal/notifier"
 	"github.com/DragosMocrii/prpr/internal/preferences"
 	"github.com/DragosMocrii/prpr/internal/readiness"
+	"github.com/DragosMocrii/prpr/internal/schedule"
 )
 
 const (
@@ -98,6 +99,7 @@ type model struct {
 	quotaKnown      bool
 	quotaStale      bool
 	quotaPaused     bool
+	quotaFetchedAt  time.Time
 	// bots shows the Bots column and the selected PR's bot breakdown.
 	bots bool
 	// legend is whether the icon legend panel is open; it is saved.
@@ -164,11 +166,38 @@ type model struct {
 	useAccount        func(string)
 	// tokenChanged reports whether gh has a new token for the pinned account.
 	tokenChanged func(context.Context) bool
+	// schedule controls when automatic GitHub work and notifications may run.
+	scheduleConfig       schedule.Config
+	scheduleWindow       schedule.Window
+	scheduleErr          error
+	sleeping             bool
+	manualWakeUntil      time.Time
+	scheduleGeneration   uint64
+	scheduleBoundary     time.Time
+	scheduleTimerAt      time.Time
+	scheduleTimerPending bool
+	scheduleLastCheck    time.Time
+	scheduleOffset       int
+	scheduleLocation     *time.Location
+	scheduleInitialized  bool
+	wakeFetchPending     bool
+	activityCtx          context.Context
+	activityCancel       context.CancelFunc
+	activityDeadline     time.Time
+	activityGeneration   uint64
+	fetchCancel          context.CancelFunc
+	fetchQuiet           bool
+	lastSuccessAt        time.Time
+	scheduleEditor       *scheduleEditor
+	quotaCancel          context.CancelFunc
+	quotaGeneration      uint64
+	quotaRunning         bool
 }
 
 type fetchFinishedMsg struct {
-	snapshot github.Snapshot
-	err      error
+	snapshot   github.Snapshot
+	err        error
+	generation uint64
 	// account is the accountGeneration the fetch ran for.
 	account uint64
 }
@@ -210,6 +239,9 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	if err := preferences.RulesErr(); err != nil {
 		m.preferenceErr = err
 	}
+	if m.scheduleErr != nil && m.preferenceErr == nil {
+		m.preferenceErr = fmt.Errorf("Active-hours schedule needs repair: %w", m.scheduleErr)
+	}
 	m.setTitle = title
 	m.desktopNotify = notifier.Desktop()
 	m.listAccounts = client.Accounts
@@ -237,6 +269,13 @@ func newModel(ctx context.Context, client *github.Client, preferences *preferenc
 		now:            time.Now,
 		icons:          &unicodeIcons,
 		rules:          readiness.DefaultRules(),
+		scheduleConfig: preferences.Schedule(),
+		scheduleErr:    preferences.ScheduleErr(),
+	}
+	if window, err := schedule.Compile(m.scheduleConfig); err == nil {
+		m.scheduleWindow = window
+	} else if m.scheduleErr == nil {
+		m.scheduleErr = err
 	}
 	m.panes = [len(paneIDs)]prPane{newPRPane(), newPRPane(), newPRPane(), newPRPane()}
 	m.rebuildPRTable(true)
@@ -244,26 +283,46 @@ func newModel(ctx context.Context, client *github.Client, preferences *preferenc
 }
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(tea.RequestBackgroundColor, m.startFetch(), m.pollQuota())
+	cmds := []tea.Cmd{tea.RequestBackgroundColor, m.reconcileSchedule()}
+	if m.pollingAllowed() {
+		cmds = append(cmds, m.startAutomaticFetch(), m.pollQuota())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *model) startFetch() tea.Cmd {
 	m.closeRepositoryPicker()
+	if m.fetchCancel != nil {
+		m.fetchCancel()
+	}
 	m.loading = true
 	m.loginActive = false
 	m.refreshGeneration++
 	m.refreshDue = time.Time{}
 	m.err = nil
-	client, ctx, account := m.client, m.ctx, m.accountGeneration
-	cmds := []tea.Cmd{func() tea.Msg {
+	generation, client, account := m.refreshGeneration, m.client, m.accountGeneration
+	quiet := !m.pollingAllowed()
+	base := m.ctx
+	deadline := time.Time{}
+	if !quiet && m.activityCtx != nil {
+		base = m.activityCtx
+		deadline = m.activityDeadline
+	}
+	ctx, cancel := context.WithCancel(base)
+	m.fetchCancel, m.fetchQuiet = cancel, quiet
+	fetch := func() tea.Msg {
+		if ctx.Err() != nil || !deadline.IsZero() && !m.now().Before(deadline) {
+			return fetchFinishedMsg{err: context.Canceled, generation: generation, account: account}
+		}
 		snapshot, err := client.Fetch(ctx)
-		return fetchFinishedMsg{snapshot: snapshot, err: err, account: account}
-	}, m.spinner.Tick}
-	// With no rows on screen, a preview shows rows while the full fetch runs.
-	// A refresh keeps the full rows already shown instead.
+		return fetchFinishedMsg{snapshot: snapshot, err: err, generation: generation, account: account}
+	}
+	cmds := []tea.Cmd{fetch, m.spinner.Tick}
 	if m.snapshot.Login == "" {
-		generation := m.refreshGeneration
 		cmds = append(cmds, func() tea.Msg {
+			if ctx.Err() != nil || !deadline.IsZero() && !m.now().Before(deadline) {
+				return previewMsg{generation: generation, account: account, err: context.Canceled}
+			}
 			snapshot, err := client.Preview(ctx)
 			return previewMsg{generation: generation, account: account, snapshot: snapshot, err: err}
 		})
@@ -294,7 +353,7 @@ func (m *model) countUnknownRechecks() {
 // scheduleAutoRefresh starts the auto-refresh timer for the current fetch
 // generation, sooner while merge states are unknown.
 func (m *model) scheduleAutoRefresh() tea.Cmd {
-	if m.refreshInterval <= 0 {
+	if m.refreshInterval <= 0 || !m.pollingAllowed() || m.fetchQuiet {
 		return nil
 	}
 	delay := m.refreshInterval
@@ -354,9 +413,14 @@ func (m *model) spinning() bool {
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if tick, ok := msg.(scheduleTickMsg); ok && tick.generation == m.scheduleGeneration {
+		m.scheduleTimerPending = false
+	}
+	scheduleCmd := m.reconcileSchedule()
 	model, cmd := m.update(msg)
 	m.closeStaleDetails()
-	return model, tea.Batch(cmd, m.trackRest(msg))
+	postScheduleCmd := m.reconcileSchedule()
+	return model, tea.Batch(scheduleCmd, cmd, postScheduleCmd, m.trackRest(msg))
 }
 
 func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -383,6 +447,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sizeRerequestForm()
 			return m, m.updateRerequest(msg)
 		}
+		if m.scheduleEditor != nil {
+			m.sizeScheduleForm()
+			return m, m.updateSchedule(msg)
+		}
 	case tea.BackgroundColorMsg:
 		m.darkBackground = msg.IsDark()
 		m.help.Styles = help.DefaultStyles(m.darkBackground)
@@ -400,6 +468,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.rerequest != nil {
 			return m, m.updateRerequest(msg)
 		}
+		if m.scheduleEditor != nil {
+			return m, m.updateSchedule(msg)
+		}
 	case spinner.TickMsg:
 		if m.spinning() {
 			var cmd tea.Cmd
@@ -412,6 +483,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleRepositoryLookupFinished(msg)
 	case rateLimitMsg, quotaTickMsg:
 		return m, m.handleQuota(msg)
+	case scheduleTickMsg:
+		return m, nil
 	case countdownTickMsg:
 		if msg.generation != m.countdownGeneration {
 			return m, nil
@@ -421,55 +494,57 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.generation != m.refreshGeneration {
 			return m, nil
 		}
-		// Fetching would close the picker or skip the scope choice, and login
-		// fetches when it finishes.
-		if m.picker != nil || m.loginActive || (!m.scopeChosen && m.snapshot.Login != "") {
+		if m.picker != nil || m.loginActive || m.accounts != nil || m.rulesEditor != nil || m.snoozeEditor != nil || m.rerequest != nil || m.scheduleEditor != nil || (!m.scopeChosen && m.snapshot.Login != "") {
 			return m, m.scheduleAutoRefresh()
 		}
-		return m, m.startFetch()
+		return m, m.startAutomaticFetch()
 	case fetchFinishedMsg:
-		if msg.account != m.accountGeneration {
+		if msg.generation != m.refreshGeneration || msg.account != m.accountGeneration {
 			return m, nil
+		}
+		quiet := m.fetchQuiet
+		if m.fetchCancel != nil {
+			m.fetchCancel()
+			m.fetchCancel = nil
 		}
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
-			// The retry selects the fields current rules need.
 			m.refetchForRules = false
-			// The picker can be open when the scope is chosen from a preview.
 			m.closeRepositoryPicker()
-			// The search input belongs to the list, which the error replaces.
 			m.searching = nil
-			m.snapshot = github.Snapshot{}
-			// Change tracking keeps its baseline, so the next success is
-			// compared with the last good lists.
-			for _, id := range paneIDs {
-				m.panes[id].visible = nil
-				m.panes[id].gone = nil
+			keepSnapshot := quiet && m.sleeping && !m.snapshot.Preview && !m.lastSuccessAt.IsZero()
+			if !keepSnapshot {
+				m.snapshot = github.Snapshot{}
+				for _, id := range paneIDs {
+					m.panes[id].visible = nil
+					m.panes[id].gone = nil
+				}
+				m.rebuildPRTable(true)
 			}
-			m.rebuildPRTable(true)
-			// Authentication failures need a login, not a retry. A pinned
-			// account is fetched again once gh has a new token for it.
+			m.fetchQuiet = false
 			var authErr *github.AuthError
 			if errors.As(msg.err, &authErr) {
 				return m, m.scheduleTokenRecheck()
 			}
-		} else {
-			notify := m.applySnapshot(msg.snapshot)
-			m.countUnknownRechecks()
-			if m.refetchForRules {
-				m.refetchForRules = false
-				return m, tea.Batch(notify, m.startFetch(), m.resumeQuota())
+			if quiet {
+				return m, nil
 			}
-			return m, tea.Batch(notify, m.scheduleAutoRefresh(), m.resumeQuota())
+			return m, m.scheduleAutoRefresh()
 		}
-		if m.err == nil {
-			return m, tea.Batch(m.scheduleAutoRefresh(), m.resumeQuota())
+		m.lastSuccessAt = m.now()
+		notify := m.applySnapshot(msg.snapshot)
+		m.fetchQuiet = false
+		m.countUnknownRechecks()
+		if quiet {
+			return m, notify
 		}
-		return m, m.scheduleAutoRefresh()
+		if m.refetchForRules {
+			m.refetchForRules = false
+			return m, tea.Batch(notify, m.startAutomaticFetch(), m.resumeQuota())
+		}
+		return m, tea.Batch(notify, m.scheduleAutoRefresh(), m.resumeQuota())
 	case previewMsg:
-		// A preview is dropped once its fetch has finished or been replaced,
-		// and when it fails: the full fetch reports errors.
 		if msg.err == nil && msg.generation == m.refreshGeneration && msg.account == m.accountGeneration && m.loading && m.snapshot.Login == "" {
 			m.applySnapshot(msg.snapshot)
 		}
@@ -517,6 +592,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.rerequest != nil {
 			return m, m.updateRerequest(msg)
 		}
+		if m.scheduleEditor != nil {
+			return m, m.updateSchedule(msg)
+		}
 		if m.picker != nil {
 			return m, m.picker.paste(msg.Content, m.pickerViewportHeight())
 		}
@@ -542,6 +620,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.rerequest != nil {
 			return m, m.updateRerequest(msg)
 		}
+		if m.scheduleEditor != nil {
+			return m, m.updateSchedule(msg)
+		}
 	}
 	return m, nil
 }
@@ -556,6 +637,9 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if m.rulesEditor != nil {
 		return m.updateRules(msg)
+	}
+	if m.scheduleEditor != nil {
+		return m.updateSchedule(msg)
 	}
 	if m.snoozeEditor != nil {
 		return m.updateSnooze(msg)
@@ -636,6 +720,10 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleLegend()
 	case key.Matches(msg, k.Rules):
 		return m.openRules()
+	case key.Matches(msg, k.Schedule):
+		return m.openSchedule()
+	case key.Matches(msg, k.Wake):
+		return m.wakeForHour()
 	case key.Matches(msg, k.Snooze):
 		if m.focus == paneSnoozed {
 			return m.wakeNow()
@@ -889,25 +977,24 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 		}
 	}()
 	var alerts []prAlert
+	quiet := m.fetchQuiet
 	m.keepingSelection(func() {
 		m.snapshot = snapshot
 		m.err = nil
-		// Snoozes load once the snapshot names the account they save under.
 		if accountChanged {
 			m.loadSnoozes(snapshot.Login)
 		}
 		if !snapshot.Preview {
 			reset := !strings.EqualFold(m.changesLogin, snapshot.Login)
 			m.changesLogin = snapshot.Login
-			// The first fetch of an account is the baseline: it never alerts.
 			if reset {
 				m.resetReadiness()
 			} else {
 				alerts = m.alerts()
 			}
-			// After alerts, so a pull request woken now alerts only through
-			// its wake.
-			alerts = append(alerts, m.reviewSnoozes(!reset)...)
+			if !quiet {
+				alerts = append(alerts, m.reviewSnoozes(!reset)...)
+			}
 			for _, id := range listIDs {
 				if reset {
 					m.changes[id].reset(m.source(id))
@@ -930,7 +1017,7 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 		m.setFocus(focus)
 	}
 	var tick tea.Cmd
-	if accountChanged {
+	if !snapshot.Preview && !quiet && !m.sleeping {
 		tick = m.scheduleSnoozeTick()
 	}
 	if len(alerts) == 0 {
@@ -1098,6 +1185,8 @@ func (m *model) View() tea.View {
 	switch {
 	case m.rulesEditor != nil && m.width >= minimumWidth && m.height >= minimumHeight:
 		lines = m.rulesLines()
+	case m.scheduleEditor != nil && m.width >= minimumWidth && m.height >= minimumHeight:
+		lines = m.scheduleLines()
 	case m.snoozeEditor != nil && m.width >= minimumWidth && m.height >= minimumHeight:
 		lines = m.snoozeLines()
 	case m.rerequest != nil && m.width >= minimumWidth && m.height >= minimumHeight:
@@ -1108,6 +1197,8 @@ func (m *model) View() tea.View {
 		lines = m.listLines()
 	case m.width < minimumWidth || m.height < minimumHeight:
 		lines = wrapWords("Terminal too small; resize or press Ctrl+C to quit.", m.width)
+	case m.sleeping && m.snapshot.Login == "" && m.err == nil:
+		lines = m.sleepingLines()
 	case m.accounts != nil:
 		lines = m.accountPickerLines()
 	case m.loading && !m.loginActive && !m.refreshing():
@@ -1187,6 +1278,15 @@ func (m *model) errorLines() []string {
 	}
 	if m.switchAccounts {
 		lines = append(lines, "Press a to choose another GitHub CLI account.")
+	}
+	if m.preferenceErr != nil {
+		lines = append(lines, singleLine(m.preferenceErr.Error()))
+	}
+	if m.scheduleErr != nil && m.preferenceErr == nil {
+		lines = append(lines, "Active-hours schedule needs repair.")
+	}
+	if status := m.scheduleStatus(); status != "" {
+		lines = append(lines, status)
 	}
 	if quota := m.quotaText(0); quota != "" {
 		lines = append(lines, quota)
@@ -1270,6 +1370,12 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 	} else if !(layout.single && m.focus != paneMine) && rowCount(&m.panes[paneMine]) > 0 && len(m.legendLines()) == 0 {
 		legend = m.icons.legend(m.rules.Customized())
 	}
+	if status := m.scheduleStatus(); status != "" {
+		fixed = strings.TrimLeft(fixed+"  "+status, " ")
+	}
+	if m.sleeping && m.err != nil {
+		fixed = strings.TrimLeft(fixed+"  Refresh failed: "+singleLine(m.err.Error()), " ")
+	}
 	if m.searching != nil {
 		lines = append(lines, m.searching.View())
 		return append(lines, m.helpLines(keyMap.searchHelp)...)
@@ -1279,11 +1385,17 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 }
 
 // titleLine puts a refresh indicator in the top-right corner while a fetch
-// replaces the rows on screen, and otherwise the countdown when one is given.
+// replaces the rows on screen, otherwise the countdown or activity status.
 // The title is truncated to keep the corner visible.
 func (m *model) titleLine(title, countdown string) string {
 	indicator := countdown
-	if m.refreshing() {
+	if status := m.scheduleStatus(); status != "" {
+		indicator = status
+		if m.sleeping && countdown != "" {
+			indicator += " · " + countdown
+		}
+	}
+	if m.refreshing() && !m.sleeping {
 		indicator = m.spinner.View() + " Refreshing"
 		if m.snapshot.Preview {
 			indicator = m.spinner.View() + " Loading details"

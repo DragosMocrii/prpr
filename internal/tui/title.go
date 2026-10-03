@@ -46,6 +46,14 @@ func (m *model) windowTitle() string {
 			marker = "●"
 		}
 		title = marker + " prpr: " + m.flashText
+	case m.sleeping:
+		title = "prpr · sleeping"
+		if !m.lastSuccessAt.IsZero() {
+			title += " · updated " + m.lastSuccessAt.In(time.Local).Format("15:04")
+		}
+		if m.err != nil && m.keptWhileAsleep() {
+			title += " · stale"
+		}
 	case m.loading && !m.loginActive && m.refreshing() && !m.snapshot.Preview:
 		title = m.titleSpinner() + " prpr · refreshing"
 	case m.loading && !m.loginActive:
@@ -103,7 +111,7 @@ func (m *model) needYouCount() int {
 // or the terminal reports that it has focus. A new flash replaces the one
 // shown.
 func (m *model) startFlash(text string) tea.Cmd {
-	if !m.setTitle || m.terminalFocus == focusIn {
+	if !m.setTitle || m.terminalFocus == focusIn || !m.notificationsAllowed() {
 		return nil
 	}
 	m.flashGeneration++

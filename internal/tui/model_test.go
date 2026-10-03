@@ -33,8 +33,14 @@ func (m *model) applyRepository(repository string) {
 	m.applyScope(preferences.Scope{Repository: repository})
 }
 
+func updateFetch(m *model, msg fetchFinishedMsg) (tea.Model, tea.Cmd) {
+	msg.generation = m.refreshGeneration
+	msg.account = m.accountGeneration
+	return m.Update(msg)
+}
+
 func updateSnapshot(m *model, login string, prs ...github.PullRequest) {
-	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: login, PullRequests: prs}})
+	updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: login, PullRequests: prs}})
 }
 
 func TestFreshAccountPromptsAndPickerCancellationDoesNotChoose(t *testing.T) {
@@ -173,7 +179,7 @@ func TestFailedRefreshDoesNotExposeStaleRows(t *testing.T) {
 	if !m.loading || !m.refreshing() || len(m.panes[paneMine].visible) != 1 {
 		t.Fatalf("refresh did not keep rows under an indicator: loading %t refreshing %t visible %v", m.loading, m.refreshing(), m.panes[paneMine].visible)
 	}
-	m.Update(fetchFinishedMsg{err: errors.New("offline")})
+	updateFetch(m, fetchFinishedMsg{err: errors.New("offline")})
 	if len(m.snapshot.PullRequests) != 0 || m.snapshot.Login != "" || m.loading || m.err == nil {
 		t.Fatalf("failed refresh retained or hid stale state: %+v", m)
 	}

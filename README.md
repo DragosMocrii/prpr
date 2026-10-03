@@ -88,6 +88,14 @@ The title shows the active interval, and its top-right corner counts down to the
 
 The status line shows the remaining GitHub GraphQL quota and its reset time (for example `API 4,981/5,000 · resets 06:14`), read every 10 seconds with a GraphQL query for the rate limit alone, which GitHub does not count against the quota. The quota is shared by everything using your GitHub account. It turns yellow below 20% and red below 5%, is marked `?` when the latest read failed. On narrow terminals the merge legend is dropped first, then the reset time, then the quota shortens to bare numbers and finally hides.
 
+### Active hours
+
+Press `S` to save a weekly active-hours schedule in local time. Choose the weekdays, start, and end; an end earlier than the start continues overnight into the next day. The default schedule is disabled, so existing automatic polling is unchanged until you enable one.
+
+Outside the saved hours, prpr pauses automatic pull-request and quota requests, notifications, and automatic retries. The last successful lists stay visible and are labeled as an old snapshot; a failed one-shot refresh leaves them on screen and shows the error. At the next scheduled opening, prpr fetches both lists together and groups any accumulated alerts as usual. The quota line is labeled paused and shows when it was last read.
+
+While asleep, `r` makes one quiet refresh: it does not notify, poll quota, or restart an automatic timer. `w` wakes for one hour; press `w` again to return to the schedule. If that hour ends inside active hours, normal polling continues until the scheduled close. An unreadable or invalid saved schedule pauses polling until repaired with `S`; `w` remains available for a one-hour manual wake.
+
 The **Bots** column reports automated review bots. By default it covers GitHub Copilot code review, OpenAI Codex, and Claude; `--bots` replaces that list with comma-separated `Name=login` entries, each optionally followed by `:check`, a substring of the bot's check-run names. An empty value hides the column and skips the extra GitHub fields:
 
 ```sh
@@ -102,7 +110,7 @@ prpr --bots ''
 
 Bot reporting costs more GraphQL quota, mostly to read review threads: about 28 points per 100 pull requests listed, against about 3 without bots.
 
-Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository or watchlist choice and the watchlists of each GitHub account, the login of a pinned GitHub CLI account, the icon set chosen with `i`, whether the `L` legend is open, whether `D` shows drafts, the ready-to-merge rules, and the snoozed pull requests of each account; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice. Accounts without watchlists keep the format earlier versions read; once an account saves a watchlist, an account is pinned, `i` saves an icon choice, `L` saves the legend, `D` saves the drafts choice, `z` saves a snooze, or `,` saves rules, prpr 0.1.16 and older refuse to open the file until it is repaired, 0.1.17 drops the pinned account and icon choice the next time it saves, 0.1.18 and 0.1.19 drop the icon choice, 0.1.22 and older drop the ready-to-merge rules, 0.1.23 and older drop the legend choice, 0.1.24 and older drop the drafts choice, and 0.1.28 and older drop the snoozes. Rules prpr cannot read, such as a misspelled condition, are kept in the file as written while prpr uses the defaults and says so, until you save rules with `,`.
+Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository or watchlist choice and the watchlists of each GitHub account, the login of a pinned GitHub CLI account, the icon set chosen with `i`, whether the `L` legend is open, whether `D` shows drafts, the ready-to-merge rules, the snoozed pull requests of each account, and the active-hours schedule saved with `S`; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice. Accounts without watchlists keep the format earlier versions read; once an account saves a watchlist, an account is pinned, `i` saves an icon choice, `L` saves the legend, `D` saves the drafts choice, `z` saves a snooze, `,` saves rules, or `S` saves a schedule, prpr 0.1.16 and older refuse to open the file until it is repaired, 0.1.17 drops the pinned account and icon choice the next time it saves, 0.1.18 and 0.1.19 drop the icon choice, 0.1.22 and older drop the ready-to-merge rules, 0.1.23 and older drop the legend choice, 0.1.24 and older drop the drafts choice, 0.1.28 and older drop the snoozes, and 0.1.30 and older drop the active-hours schedule. Rules prpr cannot read, such as a misspelled condition, are kept in the file as written while prpr uses the defaults and says so, until you save rules with `,`.
 
 If startup reports invalid preferences, back up, repair, or remove only the reported `prpr/preferences.json` file before retrying. Do not remove GitHub CLI credentials to repair app preferences.
 
@@ -126,7 +134,9 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `p`: find and select a repository or watchlist to filter every list; choose `All repositories` to clear the filter. See [Watchlists](#watchlists).
 - `c`: clear the repository filter and show all authored open PRs and review requests.
 - In the repository picker, type to search (Left/Right move within the query), Enter to apply, Esc to cancel, Ctrl+U to clear, and Ctrl+R to reload accessible repositories. Enter `owner/repo` to check a repository outside the browsed list. Space marks repositories for a watchlist, and Ctrl+E and Ctrl+D edit and delete the watchlist under the cursor.
-- `r`: refresh as the pinned GitHub CLI account, or gh's active one, and restart the auto-refresh timer.
+- `r`: refresh once without notifications or quota polling while asleep; otherwise refresh as the pinned GitHub CLI account, or gh's active one, and restart the auto-refresh timer.
+- `S`: set or edit the saved weekly active-hours schedule; see [Active hours](#active-hours).
+- `w`: wake for one hour, or return to the saved schedule early.
 - `a`: choose the GitHub CLI account prpr uses; see [GitHub accounts](#github-accounts).
 - `o`: open the selected pull request in the browser. GitHub CLI picks the browser: its `browser` setting, `GH_BROWSER`, or `BROWSER`, else the system default. With an account pinned, prpr opens the URL itself in the same order, so the browser never receives the account's token.
 - `y`: copy the selected pull request's URL to the clipboard. The copy is sent as an OSC 52 terminal sequence, so it also works over SSH and in containers, but terminals without OSC 52 support, such as macOS Terminal, ignore it; copy the URL shown below the table instead.
@@ -290,6 +300,7 @@ prpr sets the terminal title, which most terminals show on the tab or window:
 - `⠋ prpr · loading` or `⠋ prpr · refreshing`, with a spinner, while lists load;
 - `prpr · 3 need you` when pull requests in the repository filter are ready to merge, have changes requested or failing CI, or await your review (attention categories 1–3 and 6), else `prpr`;
 - `prpr · sign-in needed` or `prpr · error` when a refresh fails;
+- `prpr · sleeping` while automatic requests and alerts are paused outside active hours.
 - `● prpr: <alert>` alternating with `○`, when a refresh finds the changes that [Notifications](#notifications) describe, whether or not notifications are on. The flashing stops when the terminal window gains focus, on a key press or click, or after 5 minutes, and is skipped while the terminal reports that it has focus. Terminals that do not report focus flash until a key press or the time limit.
 
 The VS Code terminal shows the title on its tab only with `"terminal.integrated.tabs.title": "${process} ${sequence}"` (or `"${sequence}"`) in VS Code's settings; inside tmux, enable `set -g set-titles on`, and `set -g focus-events on` so focus stops the flashing. prpr clears the title on exit; terminals do not let it restore the previous one, but most shells set their own at the next prompt. `--title=false` turns all of this off, including focus reports.

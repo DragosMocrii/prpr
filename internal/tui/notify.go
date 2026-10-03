@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -168,35 +170,59 @@ func alertText(alerts []prAlert) string {
 	return strconv.Itoa(len(alerts)) + " updates — " + strings.Join(parts, "; ")
 }
 
-// desktopNotifiedMsg reports a failed desktop notification.
-type desktopNotifiedMsg struct{ err error }
+// desktopNotifiedMsg reports a failed desktop notification for its activity generation.
+type desktopNotifiedMsg struct {
+	err        error
+	generation uint64
+}
 
-// notifyAlerts posts one notification for a refresh's alerts: through the
-// desktop notifier when prpr runs where one reaches the desktop, else as an
-// OSC 9 terminal sequence. Both ring the bell, which terminals without
-// either, such as VS Code's, show on their tab, and the text is repeated in
-// the status line.
+// notifyAlerts posts one grouped notification while this activity generation
+// remains live.
 func (m *model) notifyAlerts(alerts []prAlert) tea.Cmd {
-	if !m.notify || len(alerts) == 0 {
+	if !m.notify || len(alerts) == 0 || !m.notificationsAllowed() {
 		return nil
 	}
 	text := alertText(alerts)
 	m.setNotice(text)
-	if m.desktopNotify == nil {
-		return tea.Raw(ansi.Notify("prpr: "+text) + "\a")
+	ctx := m.activityCtx
+	if ctx == nil {
+		ctx = m.ctx
 	}
-	ctx, desktop := m.ctx, m.desktopNotify
-	return tea.Batch(tea.Raw("\a"), func() tea.Msg {
+	generation, deadline, now := m.activityGeneration, m.activityDeadline, m.now
+	allowed := func() bool {
+		return ctx.Err() == nil && (deadline.IsZero() || now().Before(deadline))
+	}
+	if m.desktopNotify == nil {
+		raw := tea.Raw(ansi.Notify("prpr: "+text) + "\a")
+		return func() tea.Msg {
+			if !allowed() {
+				return nil
+			}
+			return raw()
+		}
+	}
+	desktop := m.desktopNotify
+	bell := tea.Raw("\a")
+	return tea.Batch(func() tea.Msg {
+		if !allowed() {
+			return nil
+		}
+		return bell()
+	}, func() tea.Msg {
+		if !allowed() {
+			return nil
+		}
 		if err := desktop(ctx, "prpr", text); err != nil {
-			return desktopNotifiedMsg{err}
+			return desktopNotifiedMsg{err: err, generation: generation}
 		}
 		return nil
 	})
 }
 
-// handleDesktopNotified falls back to terminal notifications after the
-// desktop notifier fails.
 func (m *model) handleDesktopNotified(msg desktopNotifiedMsg) {
+	if msg.generation != m.activityGeneration || errors.Is(msg.err, context.Canceled) || errors.Is(msg.err, context.DeadlineExceeded) {
+		return
+	}
 	m.desktopNotify = nil
 	m.setNotice(singleLine(msg.err.Error()) + "; using terminal notifications")
 }

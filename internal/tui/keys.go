@@ -35,6 +35,9 @@ type keyMap struct {
 	Legend          key.Binding
 	Rules           key.Binding
 	RulesCancel     key.Binding
+	Schedule        key.Binding
+	Wake            key.Binding
+	ScheduleCancel  key.Binding
 	Snooze          key.Binding
 	Undo            key.Binding
 	Rerequest       key.Binding
@@ -111,6 +114,9 @@ func defaultKeyMap() keyMap {
 		Legend:          key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "show legend")),
 		Rules:           key.NewBinding(key.WithKeys(","), key.WithHelp(",", "ready rules")),
 		RulesCancel:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel without saving")),
+		Schedule:        key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "active hours")),
+		Wake:            key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "wake 1h")),
+		ScheduleCancel:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel without saving")),
 		Snooze:          key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "snooze")),
 		Undo:            key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "undo snooze")),
 		Rerequest:       key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "request reviews again")),
@@ -177,6 +183,16 @@ func (m *model) syncKeys() {
 	details := m.detailsShown()
 	// The details screen keeps row movement, opening, refresh, and quit.
 	listing := viewing && !details
+	scheduleControls := !m.loginActive && m.picker == nil && m.accounts == nil && m.rulesEditor == nil && m.snoozeEditor == nil && m.rerequest == nil && !details
+	k.Schedule.SetEnabled(scheduleControls && idle)
+	k.Wake.SetEnabled(scheduleControls && (!m.manualWakeUntil.IsZero() ||
+		(idle && (m.scheduleErr != nil || m.scheduleConfig.Enabled && !m.pollingAllowed()))))
+	k.ScheduleCancel.SetEnabled(m.scheduleEditor != nil)
+	if !m.manualWakeUntil.IsZero() {
+		k.Wake.SetHelp("w", "use schedule")
+	} else {
+		k.Wake.SetHelp("w", "wake 1h")
+	}
 
 	k.ChoiceUp.SetEnabled(scopeChoice)
 	k.ChoiceDown.SetEnabled(scopeChoice)
@@ -186,6 +202,11 @@ func (m *model) syncKeys() {
 	k.NextPane.SetEnabled(listing)
 	k.PrevPane.SetEnabled(listing)
 	k.Refresh.SetEnabled(idle && m.err == nil && m.picker == nil)
+	if m.sleeping {
+		k.Refresh.SetHelp("r", "refresh once")
+	} else {
+		k.Refresh.SetHelp("r", "refresh")
+	}
 	k.ClearMarks.SetEnabled(listing && m.hasMarks())
 	k.Details.SetEnabled(rows && !details)
 	for _, binding := range []*key.Binding{&k.Search, &k.Drafts, &k.QuickFailing, &k.QuickReady} {
@@ -311,11 +332,11 @@ func (h helpKeys) ShortHelp() []key.Binding  { return h.short }
 func (h helpKeys) FullHelp() [][]key.Binding { return h.full }
 
 func (k keyMap) scopeChoiceHelp() helpKeys {
-	return helpKeys{short: []key.Binding{k.ChoiceUp, k.ChoiceDown, k.Continue, k.Account, k.Quit}}
+	return helpKeys{short: []key.Binding{k.ChoiceUp, k.ChoiceDown, k.Continue, k.Account, k.Schedule, k.Wake, k.Quit}}
 }
 
 func (k keyMap) errorHelp() helpKeys {
-	return helpKeys{short: []key.Binding{k.Login, k.Retry, k.Account, k.Quit}}
+	return helpKeys{short: []key.Binding{k.Login, k.Retry, k.Account, k.Schedule, k.Wake, k.Quit}}
 }
 
 func (k keyMap) listHelp() helpKeys {
@@ -327,6 +348,7 @@ func (k keyMap) listHelp() helpKeys {
 			{t.PageUp, t.PageDown, t.HalfPageUp, t.HalfPageDown},
 			{k.Pages.PrevPage, k.Pages.NextPage, k.Icons, k.Rules, k.Rerequest},
 			{k.NextPane, k.PrevPane, k.Account, k.Legend},
+			{k.Schedule, k.Wake},
 			{k.Details, k.Open, k.CopyURL, k.Snooze, k.Undo},
 			{k.Search, k.Categories, k.ClearFilters},
 			{k.Drafts, k.QuickFailing, k.QuickReady},
@@ -347,6 +369,12 @@ func (k keyMap) rulesHelp() helpKeys {
 
 func (k keyMap) snoozeHelp() helpKeys {
 	return helpKeys{short: []key.Binding{k.RulesCancel, k.ForceQuit}}
+}
+func (k keyMap) scheduleHelp() helpKeys {
+	return helpKeys{short: []key.Binding{k.ScheduleCancel, k.ForceQuit}}
+}
+func (k keyMap) sleepingHelp() helpKeys {
+	return helpKeys{short: []key.Binding{k.Refresh, k.Schedule, k.Wake, k.Quit}}
 }
 
 func (k keyMap) searchHelp() helpKeys {

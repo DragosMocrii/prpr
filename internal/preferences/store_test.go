@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DragosMocrii/prpr/internal/readiness"
+	"github.com/DragosMocrii/prpr/internal/schedule"
 )
 
 func TestOpenSaveAndReopenDistinguishesMissingFromAll(t *testing.T) {
@@ -537,5 +538,135 @@ func TestSaveSnoozesRejectsInvalidEntries(t *testing.T) {
 		if err := store.SaveSnoozes("alice", []Snooze{bad}); err == nil {
 			t.Errorf("SaveSnoozes(%+v) = nil, want an error", bad)
 		}
+	}
+}
+func TestScheduleDefaultRoundTripAndUnrelatedSaves(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults := schedule.Default()
+	if got := store.Schedule(); got.Enabled || got.Start != defaults.Start || got.End != defaults.End || !slices.Equal(got.Days, defaults.Days) || store.ScheduleErr() != nil {
+		t.Fatalf("new store schedule = %+v, err %v", got, store.ScheduleErr())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("opening a new store wrote preferences: %v", err)
+	}
+	config := schedule.Config{Enabled: true, Days: []string{"mon", "wed", "fri"}, Start: "08:30", End: "19:15"}
+	if err := store.SaveSchedule(config); err != nil {
+		t.Fatal(err)
+	}
+	config.Days[0] = "sun"
+	got := store.Schedule()
+	if !got.Enabled || got.Start != "08:30" || got.End != "19:15" || !slices.Equal(got.Days, []string{"mon", "wed", "fri"}) {
+		t.Fatalf("saved schedule = %+v", got)
+	}
+	got.Days[0] = "sun"
+	if store.Schedule().Days[0] != "mon" {
+		t.Fatal("Schedule exposed the store's weekday slice")
+	}
+	if err := store.SaveLegend(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save("alice", "acme/api"); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = reopened.Schedule()
+	if !got.Enabled || got.Start != "08:30" || got.End != "19:15" || !slices.Equal(got.Days, []string{"mon", "wed", "fri"}) {
+		t.Fatalf("schedule lost across unrelated app/account saves: %+v", got)
+	}
+}
+
+func TestUnreadableScheduleIsFailClosedAndPreserved(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	const raw = `{"enabled":true,"days":["monday"],"start":"09:00","end":"18:00"}`
+	if err := os.WriteFile(path, []byte(`{"app":{"schedule":`+raw+`}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.ScheduleErr() == nil || store.Schedule().Enabled {
+		t.Fatalf("invalid saved schedule was not reported and disabled: %+v, %v", store.Schedule(), store.ScheduleErr())
+	}
+	if err := store.SavePinnedAccount("alice"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string]json.RawMessage
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	var app map[string]json.RawMessage
+	if err := json.Unmarshal(saved[appKey], &app); err != nil {
+		t.Fatal(err)
+	}
+	var retained schedule.Config
+	if err := json.Unmarshal(app["schedule"], &retained); err != nil || retained.Enabled != true || !slices.Equal(retained.Days, []string{"monday"}) || retained.Start != "09:00" || retained.End != "18:00" {
+		t.Fatalf("unrelated save changed invalid schedule raw value: %+v, %v", retained, err)
+	}
+	for _, bad := range []string{"null", "5", `{"enabled":true,"days":[],"start":"09:00","end":"18:00"}`} {
+		if err := os.WriteFile(path, []byte(`{"app":{"schedule":`+bad+`}}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Open(path)
+		if err != nil {
+			t.Errorf("Open with schedule %s = %v", bad, err)
+			continue
+		}
+		if loaded.ScheduleErr() == nil {
+			t.Errorf("Open with schedule %s reported no schedule error", bad)
+		}
+	}
+}
+
+func TestFailedScheduleSaveLeavesDiskAndStoreUnchanged(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "preferences.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := schedule.Config{Enabled: true, Days: []string{"tue"}, Start: "10:00", End: "16:00"}
+	if err := store.SaveSchedule(original); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := filepath.Join(root, "not-a-directory")
+	if err := os.WriteFile(blocked, []byte("block"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store.path = filepath.Join(blocked, "preferences.json")
+	replacement := schedule.Config{Enabled: true, Days: []string{"sat"}, Start: "11:00", End: "17:00"}
+	if err := store.SaveSchedule(replacement); err == nil {
+		t.Fatal("SaveSchedule unexpectedly succeeded through a file parent")
+	}
+	if got := store.Schedule(); got.Start != original.Start || got.End != original.End || !slices.Equal(got.Days, original.Days) {
+		t.Fatalf("failed save changed cached schedule to %+v", got)
+	}
+	if after, err := os.ReadFile(path); err != nil || string(after) != string(before) {
+		t.Fatalf("failed save changed disk: err %v, data %s", err, after)
+	}
+}
+
+func TestSaveScheduleRejectsInvalidConfig(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "preferences.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveSchedule(schedule.Config{Enabled: false, Days: nil, Start: "09:00", End: "18:00"}); err == nil {
+		t.Fatal("SaveSchedule accepted invalid retained fields")
 	}
 }

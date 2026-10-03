@@ -24,7 +24,7 @@ func (m *model) detailsShown() bool {
 
 func (m *model) detailsOpen() bool {
 	if !m.details || (m.loading && !m.loginActive && !m.refreshing()) ||
-		m.err != nil || m.picker != nil || m.accounts != nil || m.rulesEditor != nil || m.snoozeEditor != nil || m.rerequest != nil || !m.scopeChosen {
+		(m.err != nil && !m.keptWhileAsleep()) || m.picker != nil || m.accounts != nil || m.rulesEditor != nil || m.snoozeEditor != nil || m.rerequest != nil || m.scheduleEditor != nil || !m.scopeChosen {
 		return false
 	}
 	_, ok := m.selectedPR()

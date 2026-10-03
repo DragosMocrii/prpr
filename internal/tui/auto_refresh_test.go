@@ -24,6 +24,8 @@ func autoRefreshModel(t *testing.T, interval time.Duration) *model {
 }
 
 func finishFetch(m *model, msg fetchFinishedMsg) tea.Cmd {
+	msg.generation = m.refreshGeneration
+	msg.account = m.accountGeneration
 	_, cmd := m.Update(msg)
 	return cmd
 }

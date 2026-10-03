@@ -97,18 +97,26 @@ func (m *model) chooseAccount(login string) tea.Cmd {
 	m.pinnedAccount = login
 	m.useAccount(login)
 	m.accountGeneration++
+	m.refreshGeneration++
+	if m.fetchCancel != nil {
+		m.fetchCancel()
+		m.fetchCancel = nil
+	}
+	m.invalidateQuota()
+	m.lastSuccessAt = time.Time{}
 	if err := m.preferences.SavePinnedAccount(login); err != nil {
 		m.preferenceErr = fmt.Errorf("Account choice not saved: %w", err)
 		m.keepPreferenceErr = true
 	}
-	// The rows on screen belong to the previous account.
 	m.snapshot = github.Snapshot{}
 	m.err = nil
 	m.details = false
 	m.searching = nil
 	m.quotaKnown, m.quotaStale = false, false
 	m.rebuildVisiblePRs()
-	return m.startFetch()
+	// The quota chain was invalidated above; start one for the new account
+	// so a failed first fetch does not leave polling stopped.
+	return tea.Batch(m.startFetch(), m.pollQuota())
 }
 
 // accountLabel names the account in titles, marking a pinned one.
@@ -193,7 +201,7 @@ func (m *model) awaitingToken() bool {
 // scheduleTokenRecheck starts waiting for a new token after an
 // authentication failure. Any fetch or account choice ends the wait.
 func (m *model) scheduleTokenRecheck() tea.Cmd {
-	if !m.awaitingToken() {
+	if !m.awaitingToken() || !m.pollingAllowed() {
 		return nil
 	}
 	generation, account := m.refreshGeneration, m.accountGeneration
@@ -203,7 +211,7 @@ func (m *model) scheduleTokenRecheck() tea.Cmd {
 }
 
 func (m *model) tokenWaitCurrent(generation, account uint64) bool {
-	return generation == m.refreshGeneration && account == m.accountGeneration && m.awaitingToken()
+	return generation == m.refreshGeneration && account == m.accountGeneration && m.awaitingToken() && m.pollingAllowed()
 }
 
 func (m *model) handleTokenRecheck(msg tokenRecheckMsg) tea.Cmd {
@@ -223,7 +231,8 @@ func (m *model) handleTokenChecked(msg tokenCheckedMsg) tea.Cmd {
 		return nil
 	}
 	if msg.changed && !m.loginActive && m.accounts == nil {
-		return m.startFetch()
+		m.err = nil
+		return m.startAutomaticFetch()
 	}
 	return m.scheduleTokenRecheck()
 }

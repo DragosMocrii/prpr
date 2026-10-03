@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"strings"
@@ -17,57 +18,104 @@ import (
 const quotaPollInterval = 10 * time.Second
 
 type rateLimitMsg struct {
-	limit github.RateLimit
-	err   error
-	// account is the accountGeneration the quota was read for.
-	account uint64
+	limit      github.RateLimit
+	err        error
+	account    uint64
+	generation uint64
 }
 
-type quotaTickMsg struct{}
+type quotaTickMsg struct {
+	account    uint64
+	generation uint64
+}
 
-// pollQuota reads the quota once. Only one poll chain runs: each result
-// schedules the next tick.
+// pollQuota starts one cancellable quota chain. Each request schedules the
+// next generation-tagged tick only after its result arrives.
 func (m *model) pollQuota() tea.Cmd {
-	client, ctx, account := m.client, m.ctx, m.accountGeneration
-	return func() tea.Msg {
-		limit, err := client.RateLimit(ctx)
-		return rateLimitMsg{limit: limit, err: err, account: account}
-	}
-}
-
-// quotaBlocked reports whether polling should pause: login owns the terminal,
-// or the account needs a login before GitHub requests can succeed.
-func (m *model) quotaBlocked() bool {
-	var authErr *github.AuthError
-	return m.loginActive || errors.As(m.err, &authErr)
-}
-
-// handleQuota advances the poll chain, pausing it while quotaBlocked.
-func (m *model) handleQuota(msg tea.Msg) tea.Cmd {
-	// A quota read as another account still continues the chain.
-	if result, ok := msg.(rateLimitMsg); ok && result.account == m.accountGeneration {
-		if result.err != nil {
-			m.quotaStale = true
-		} else {
-			m.quota, m.quotaKnown, m.quotaStale = result.limit, true, false
-		}
-	}
-	if m.quotaBlocked() {
+	if !m.pollingAllowed() || m.quotaBlocked() {
 		m.quotaPaused = true
 		return nil
 	}
-	if _, ok := msg.(quotaTickMsg); ok {
-		return m.pollQuota()
-	}
-	return tea.Tick(quotaPollInterval, func(time.Time) tea.Msg { return quotaTickMsg{} })
-}
-
-// resumeQuota restarts a paused poll chain.
-func (m *model) resumeQuota() tea.Cmd {
-	if !m.quotaPaused || m.quotaBlocked() {
+	if m.quotaRunning {
 		return nil
 	}
-	m.quotaPaused = false
+	m.quotaGeneration++
+	m.quotaRunning, m.quotaPaused = true, false
+	base := m.activityCtx
+	if base == nil {
+		base = m.ctx
+	}
+	ctx, cancel := context.WithCancel(base)
+	m.quotaCancel = cancel
+	return m.readQuota(ctx, m.quotaGeneration, m.accountGeneration)
+}
+
+func (m *model) readQuota(ctx context.Context, generation, account uint64) tea.Cmd {
+	client, deadline, now := m.client, m.activityDeadline, m.now
+	return func() tea.Msg {
+		if ctx.Err() != nil || !deadline.IsZero() && !now().Before(deadline) {
+			return rateLimitMsg{err: context.Canceled, account: account, generation: generation}
+		}
+		limit, err := client.RateLimit(ctx)
+		return rateLimitMsg{limit: limit, err: err, account: account, generation: generation}
+	}
+}
+
+// quotaBlocked reports whether polling should pause for sleep, login, or auth.
+func (m *model) quotaBlocked() bool {
+	var authErr *github.AuthError
+	return !m.pollingAllowed() || m.loginActive || errors.As(m.err, &authErr)
+}
+
+func (m *model) pauseQuota() {
+	m.invalidateQuota()
+}
+
+// handleQuota advances the single poll chain and rejects every obsolete result.
+func (m *model) handleQuota(msg tea.Msg) tea.Cmd {
+	if m.quotaBlocked() {
+		m.pauseQuota()
+		return nil
+	}
+	switch msg := msg.(type) {
+	case rateLimitMsg:
+		if msg.generation != m.quotaGeneration || msg.account != m.accountGeneration {
+			return nil
+		}
+		if msg.err != nil {
+			if !errors.Is(msg.err, context.Canceled) && !errors.Is(msg.err, context.DeadlineExceeded) {
+				m.quotaStale = true
+			}
+		} else {
+			m.quota, m.quotaKnown, m.quotaStale, m.quotaFetchedAt = msg.limit, true, false, m.now()
+		}
+	case quotaTickMsg:
+		if msg.generation != m.quotaGeneration || msg.account != m.accountGeneration {
+			return nil
+		}
+		base := m.activityCtx
+		if base == nil {
+			base = m.ctx
+		}
+		if m.quotaCancel != nil {
+			m.quotaCancel()
+		}
+		ctx, cancel := context.WithCancel(base)
+		m.quotaCancel = cancel
+		return m.readQuota(ctx, msg.generation, msg.account)
+	default:
+		return nil
+	}
+	generation, account := m.quotaGeneration, m.accountGeneration
+	return tea.Tick(quotaPollInterval, func(time.Time) tea.Msg {
+		return quotaTickMsg{generation: generation, account: account}
+	})
+}
+
+func (m *model) resumeQuota() tea.Cmd {
+	if !m.quotaPaused || m.quotaBlocked() || m.quotaRunning {
+		return nil
+	}
 	return m.pollQuota()
 }
 
@@ -90,6 +138,12 @@ func (m *model) quotaText(level int) string {
 		text = "API " + groupThousands(q.Remaining) + "/" + groupThousands(q.Limit) + stale
 	default:
 		text = strconv.Itoa(q.Remaining) + "/" + strconv.Itoa(q.Limit) + stale
+	}
+	if m.sleeping {
+		text += " · paused"
+		if !m.quotaFetchedAt.IsZero() {
+			text += " as of " + m.quotaFetchedAt.In(time.Local).Format("15:04")
+		}
 	}
 	switch {
 	case q.Remaining*20 < q.Limit:

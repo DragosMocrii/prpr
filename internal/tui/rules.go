@@ -93,7 +93,7 @@ func (m *model) applyRules(rules readiness.Rules) tea.Cmd {
 			return nil
 		}
 		if m.snapshot.Login != "" {
-			return m.startFetch()
+			return m.startAutomaticFetch()
 		}
 		return nil
 	}

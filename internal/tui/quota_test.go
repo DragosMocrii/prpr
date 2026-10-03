@@ -26,11 +26,22 @@ func statusText(m *model) string {
 	// The status line sits directly above the help line.
 	return ansi.Strip(lines[len(lines)-2])
 }
+func updateQuota(m *model, msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case rateLimitMsg:
+		msg.generation, msg.account = m.quotaGeneration, m.accountGeneration
+		return m.Update(msg)
+	case quotaTickMsg:
+		msg.generation, msg.account = m.quotaGeneration, m.accountGeneration
+		return m.Update(msg)
+	}
+	return m.Update(msg)
+}
 
 func TestQuotaPollUpdatesStatusAndSchedulesNextPoll(t *testing.T) {
 	m := quotaModel(t, 100)
 	reset := time.Date(2026, 10, 1, 6, 14, 0, 0, time.Local)
-	_, cmd := m.Update(rateLimitMsg{limit: github.RateLimit{Limit: 5000, Remaining: 4981, Reset: reset}})
+	_, cmd := updateQuota(m, rateLimitMsg{limit: github.RateLimit{Limit: 5000, Remaining: 4981, Reset: reset}})
 	if cmd == nil {
 		t.Fatal("quota result did not schedule the next poll")
 	}
@@ -41,17 +52,17 @@ func TestQuotaPollUpdatesStatusAndSchedulesNextPoll(t *testing.T) {
 	if !strings.HasSuffix(status, "06:14") {
 		t.Fatalf("quota not right-aligned: %q", status)
 	}
-	if _, cmd := m.Update(quotaTickMsg{}); cmd == nil {
+	if _, cmd := updateQuota(m, quotaTickMsg{}); cmd == nil {
 		t.Fatal("quota tick did not poll")
 	}
-	_, cmd = m.Update(rateLimitMsg{err: errors.New("offline")})
+	_, cmd = updateQuota(m, rateLimitMsg{err: errors.New("offline")})
 	if cmd == nil {
 		t.Fatal("failed poll did not schedule a retry")
 	}
 	if status := statusText(m); !strings.Contains(status, "4,981/5,000?") {
 		t.Fatalf("stale quota not marked: %q", status)
 	}
-	m.Update(rateLimitMsg{limit: github.RateLimit{Limit: 5000, Remaining: 4000, Reset: reset}})
+	updateQuota(m, rateLimitMsg{limit: github.RateLimit{Limit: 5000, Remaining: 4000, Reset: reset}})
 	if status := statusText(m); !strings.Contains(status, "4,000/5,000 ") {
 		t.Fatalf("fresh quota still marked stale: %q", status)
 	}
@@ -60,7 +71,7 @@ func TestQuotaPollUpdatesStatusAndSchedulesNextPoll(t *testing.T) {
 func TestQuotaPollingPausesForLoginAndResumesAfterFetch(t *testing.T) {
 	m := quotaModel(t, 100)
 	m.loginActive, m.loading = true, true
-	if _, cmd := m.Update(quotaTickMsg{}); cmd != nil || !m.quotaPaused {
+	if _, cmd := updateQuota(m, quotaTickMsg{}); cmd != nil || !m.quotaPaused {
 		t.Fatal("quota polled while login had the terminal")
 	}
 	m.Update(loginFinishedMsg{})
@@ -70,15 +81,15 @@ func TestQuotaPollingPausesForLoginAndResumesAfterFetch(t *testing.T) {
 	if cmd := finishFetch(m, aliceSnapshot()); cmd != nil {
 		t.Fatal("fetch started a second quota poll chain")
 	}
-	m.Update(fetchFinishedMsg{err: &github.AuthError{Err: errors.New("logged out")}})
-	if _, cmd := m.Update(rateLimitMsg{limit: github.RateLimit{Limit: 5000, Remaining: 1}}); cmd != nil || !m.quotaPaused {
+	updateFetch(m, fetchFinishedMsg{err: &github.AuthError{Err: errors.New("logged out")}})
+	if _, cmd := updateQuota(m, rateLimitMsg{limit: github.RateLimit{Limit: 5000, Remaining: 1}}); cmd != nil || !m.quotaPaused {
 		t.Fatal("quota kept polling after an authentication failure")
 	}
 }
 
 func TestQuotaDropsLegendThenResetThenShortensAsWidthShrinks(t *testing.T) {
 	m := quotaModel(t, 100)
-	m.Update(rateLimitMsg{limit: github.RateLimit{Limit: 5000, Remaining: 4981, Reset: time.Date(2026, 10, 1, 6, 14, 0, 0, time.Local)}})
+	updateQuota(m, rateLimitMsg{limit: github.RateLimit{Limit: 5000, Remaining: 4981, Reset: time.Date(2026, 10, 1, 6, 14, 0, 0, time.Local)}})
 	stage := func() int {
 		status := statusText(m)
 		switch {
@@ -114,8 +125,8 @@ func TestQuotaDropsLegendThenResetThenShortensAsWidthShrinks(t *testing.T) {
 
 func TestQuotaShownOnErrorScreen(t *testing.T) {
 	m := quotaModel(t, 100)
-	m.Update(rateLimitMsg{limit: github.RateLimit{Limit: 5000, Remaining: 0, Reset: time.Date(2026, 10, 1, 6, 14, 0, 0, time.Local)}})
-	m.Update(fetchFinishedMsg{err: errors.New("API rate limit exceeded")})
+	updateQuota(m, rateLimitMsg{limit: github.RateLimit{Limit: 5000, Remaining: 0, Reset: time.Date(2026, 10, 1, 6, 14, 0, 0, time.Local)}})
+	updateFetch(m, fetchFinishedMsg{err: errors.New("API rate limit exceeded")})
 	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "API 0/5,000") {
 		t.Fatalf("error screen lacks quota:\n%s", view)
 	}

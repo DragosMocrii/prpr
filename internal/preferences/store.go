@@ -14,6 +14,7 @@ import (
 
 	"github.com/DragosMocrii/prpr/internal/github"
 	"github.com/DragosMocrii/prpr/internal/readiness"
+	"github.com/DragosMocrii/prpr/internal/schedule"
 )
 
 // Scope is an account's saved choice of what both lists show: one
@@ -129,6 +130,10 @@ type Store struct {
 	rules    readiness.Rules
 	rulesRaw json.RawMessage
 	rulesErr error
+	// Invalid saved schedules remain in scheduleRaw until the user repairs them.
+	schedule    schedule.Config
+	scheduleRaw json.RawMessage
+	scheduleErr error
 }
 
 // appKey holds settings that belong to the app rather than to an account.
@@ -136,20 +141,21 @@ type Store struct {
 const appKey = "app"
 
 type appJSON struct {
-	Account string          `json:"account,omitempty"`
-	Icons   string          `json:"icons,omitempty"`
-	Legend  bool            `json:"legend,omitempty"`
-	Drafts  bool            `json:"drafts,omitempty"`
-	Ready   json.RawMessage `json:"ready,omitempty"`
+	Account  string          `json:"account,omitempty"`
+	Icons    string          `json:"icons,omitempty"`
+	Legend   bool            `json:"legend,omitempty"`
+	Drafts   bool            `json:"drafts,omitempty"`
+	Ready    json.RawMessage `json:"ready,omitempty"`
+	Schedule json.RawMessage `json:"schedule,omitempty"`
 }
 
 func (a appJSON) empty() bool {
-	return a.Account == "" && a.Icons == "" && !a.Legend && !a.Drafts && len(a.Ready) == 0
+	return a.Account == "" && a.Icons == "" && !a.Legend && !a.Drafts && len(a.Ready) == 0 && len(a.Schedule) == 0
 }
 
 // app is the app settings as saved.
 func (s *Store) app() appJSON {
-	return appJSON{Account: s.pinned, Icons: s.icons, Legend: s.legend, Drafts: s.drafts, Ready: s.rulesRaw}
+	return appJSON{Account: s.pinned, Icons: s.icons, Legend: s.legend, Drafts: s.drafts, Ready: s.rulesRaw, Schedule: s.scheduleRaw}
 }
 
 // accountJSON is an account's value when it has watchlists, snoozes, or a
@@ -164,7 +170,7 @@ type accountJSON struct {
 }
 
 func Open(path string) (*Store, error) {
-	store := &Store{path: path, accounts: make(map[string]account), rules: readiness.DefaultRules()}
+	store := &Store{path: path, accounts: make(map[string]account), rules: readiness.DefaultRules(), schedule: schedule.Default()}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return store, nil
@@ -189,6 +195,23 @@ func Open(path string) (*Store, error) {
 				return nil, fmt.Errorf("decode preferences %q: %q has an unknown icon set %q", path, appKey, app.Icons)
 			}
 			store.pinned, store.icons, store.legend, store.drafts = app.Account, app.Icons, app.Legend, app.Drafts
+			if len(app.Schedule) != 0 {
+				store.scheduleRaw = app.Schedule
+				config := schedule.Default()
+				trimmed := strings.TrimSpace(string(app.Schedule))
+				if !strings.HasPrefix(trimmed, "{") {
+					store.scheduleErr = fmt.Errorf("active-hours schedule in %q must be an object", path)
+				} else if err := json.Unmarshal(app.Schedule, &config); err != nil {
+					store.scheduleErr = fmt.Errorf("active-hours schedule in %q not read: %w", path, err)
+				} else if _, err := schedule.Compile(config); err != nil {
+					store.scheduleErr = fmt.Errorf("active-hours schedule in %q not read: %w", path, err)
+				} else {
+					store.schedule = config
+				}
+				if store.scheduleErr != nil {
+					store.schedule = schedule.Default()
+				}
+			}
 			// Rules that cannot be read leave the defaults in use and the
 			// rest of the preferences readable.
 			if len(app.Ready) != 0 {
@@ -431,6 +454,35 @@ func (s *Store) Rules() readiness.Rules { return s.rules.Clone() }
 
 // RulesErr says why saved rules could not be read; nil when they were.
 func (s *Store) RulesErr() error { return s.rulesErr }
+
+// Schedule returns the saved active-hours configuration, or its defaults.
+func (s *Store) Schedule() schedule.Config {
+	config := s.schedule
+	config.Days = slices.Clone(config.Days)
+	return config
+}
+
+// ScheduleErr reports why a saved active-hours configuration could not be read.
+func (s *Store) ScheduleErr() error { return s.scheduleErr }
+
+// SaveSchedule validates and persists the active-hours configuration.
+func (s *Store) SaveSchedule(config schedule.Config) error {
+	if _, err := schedule.Compile(config); err != nil {
+		return fmt.Errorf("save preferences %q: %w", s.path, err)
+	}
+	data, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("encode preferences %q: %w", s.path, err)
+	}
+	app := s.app()
+	app.Schedule = data
+	if err := s.writeAll(s.accounts, app); err != nil {
+		return err
+	}
+	s.schedule, s.scheduleRaw, s.scheduleErr = config, data, nil
+	s.schedule.Days = slices.Clone(config.Days)
+	return nil
+}
 
 // SaveRules saves the ready-to-merge rules, replacing any that could not be
 // read.

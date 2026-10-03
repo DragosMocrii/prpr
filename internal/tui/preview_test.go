@@ -67,7 +67,7 @@ func TestPreviewShowsRowsUntilTheFullFetchReplacesThem(t *testing.T) {
 		t.Error("refresh enabled while details load")
 	}
 
-	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{full, conflicted}}})
+	updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: []github.PullRequest{full, conflicted}}})
 	view = ansi.Strip(strings.Join(assertBounded(t, m, 140, 30), "\n"))
 	if strings.Contains(view, "Loading details") || strings.Contains(view, "…") {
 		t.Fatalf("preview kept after the full fetch:\n%s", view)
@@ -105,7 +105,7 @@ func TestFailedFetchClearsPreviewRows(t *testing.T) {
 	one := changePR(1, "acme/a")
 	generation := startPreviewedFetch(t, m)
 	m.Update(previewMsg{generation: generation, snapshot: previewOf(one)})
-	m.Update(fetchFinishedMsg{err: errors.New("network down")})
+	updateFetch(m, fetchFinishedMsg{err: errors.New("network down")})
 	if view := ansi.Strip(m.View().Content); strings.Contains(view, one.URL) {
 		t.Fatalf("preview rows kept after a failed fetch:\n%s", view)
 	}
@@ -113,7 +113,7 @@ func TestFailedFetchClearsPreviewRows(t *testing.T) {
 
 func TestPreviewAfterAnErrorKeepsTheChangeBaseline(t *testing.T) {
 	m := changesModel(t, changePR(1, "acme/a"), changePR(2, "acme/a"))
-	m.Update(fetchFinishedMsg{err: errors.New("network down")})
+	updateFetch(m, fetchFinishedMsg{err: errors.New("network down")})
 	two := changePR(2, "acme/a")
 	generation := startPreviewedFetch(t, m)
 	m.Update(previewMsg{generation: generation, snapshot: previewOf(two)})
@@ -145,7 +145,7 @@ func TestScopeCanBeChosenFromAPreview(t *testing.T) {
 	if m.picker == nil {
 		t.Fatal("picker did not open from the preview")
 	}
-	m.Update(fetchFinishedMsg{err: errors.New("network down")})
+	updateFetch(m, fetchFinishedMsg{err: errors.New("network down")})
 	if m.picker != nil {
 		t.Fatal("picker left open over the error")
 	}
