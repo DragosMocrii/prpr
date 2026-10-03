@@ -77,11 +77,15 @@ var (
 	trunkTestPR    = regexp.MustCompile(`(?:testing on PR|tested on PR|PR) \[#(\d+)\]`)
 	trunkFailCheck = regexp.MustCompile("required check \\[`([^`]+)`\\]")
 	trunkLink      = regexp.MustCompile(`\]\((https://app\.trunk\.io/[^)\s]*)\)`)
+	// trunkUnchecked is the template's unchecked submit box, which stays
+	// however the template's first line is worded.
+	trunkUnchecked = regexp.MustCompile(`-\s*\[ \]\s*<!-- End PR Submit Checkbox -->`)
 )
 
 // trunkEntry reads Trunk's comment: the first by trunk-io holding the
-// marker. The unsubmitted template, a merged pull request (which is closed),
-// and no comment at all give nil; text it does not recognize is Unknown.
+// marker. The unsubmitted template (its first line, or its unchecked submit
+// box), a merged pull request (which is closed), and no comment at all give
+// nil; text it does not recognize is Unknown.
 func trunkEntry(comments []queueComment) *QueueEntry {
 	for _, comment := range comments {
 		if !strings.EqualFold(comment.Author, trunkLogin) || !strings.Contains(comment.Body, trunkMarker) {
@@ -89,7 +93,7 @@ func trunkEntry(comments []queueComment) *QueueEntry {
 		}
 		_, rest, _ := strings.Cut(comment.Body, trunkMarker)
 		line := firstLine(rest)
-		if line == "" || strings.HasPrefix(line, "Merging to") || strings.HasPrefix(line, "😎") {
+		if line == "" || strings.HasPrefix(line, "Merging to") || strings.HasPrefix(line, "😎") || trunkUnchecked.MatchString(rest) {
 			return nil
 		}
 		entry := &QueueEntry{Provider: "Trunk", State: QueueUnknown}

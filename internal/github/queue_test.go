@@ -33,6 +33,7 @@ func TestTrunkCommentStates(t *testing.T) {
 		{"❌ This stack was removed from the merge queue because it failed tests. PR [#77](https://www.github.com/acme/api/pull/77) was used for testing.", QueueRemovedFailed, "tested on #77"},
 		{"🚫 This pull request was removed from the merge queue because it was canceled by Pat Example (a GitHub user). See more details [here](https://app.trunk.io/acme/merge-queue/x/12).", QueueRemovedCanceled, ""},
 		{"🦄 Something Trunk says one day", QueueUnknown, ""},
+		{"✨ Submitted to Merge by Pat Example (@pat).\n\n<!-- Start PR Submit Checkbox -->\n- [x] <!-- End PR Submit Checkbox -->Submitted.", QueueSubmitted, ""},
 	} {
 		entry := trunkEntry(trunkComment(tc.line))
 		if entry == nil || entry.Provider != "Trunk" || entry.State != tc.state || entry.Detail != tc.detail {
@@ -44,11 +45,12 @@ func TestTrunkCommentStates(t *testing.T) {
 func TestTrunkCommentsThatAreNotQueueEntries(t *testing.T) {
 	template := "<!-- Trunk Merge -->\nMerging to `main` in this repository is managed by Trunk.\n\n<!-- Start PR Submit Checkbox -->\n- [ ] <!-- End PR Submit Checkbox -->To merge this pull request, check the box to the left or comment `/trunk merge` below."
 	for name, comments := range map[string][]queueComment{
-		"none":      nil,
-		"template":  {{Author: "trunk-io", Body: template}},
-		"merged":    {{Author: "trunk-io", Body: "<!-- Trunk Merge -->\n😎 Merged successfully - [details](https://app.trunk.io/acme/merge-queue/x/12)."}},
-		"no marker": {{Author: "trunk-io", Body: "🧪 Running tests on this pull request"}},
-		"impostor":  {{Author: "pat", Body: "<!-- Trunk Merge -->\n🧪 Running tests on this pull request"}},
+		"none":              nil,
+		"template":          {{Author: "trunk-io", Body: template}},
+		"reworded template": {{Author: "trunk-io", Body: "<!-- Trunk Merge -->\nThis repository merges through Trunk.\n\n<!-- Start PR Submit Checkbox -->\n- [ ] <!-- End PR Submit Checkbox -->Check the box to merge."}},
+		"merged":            {{Author: "trunk-io", Body: "<!-- Trunk Merge -->\n😎 Merged successfully - [details](https://app.trunk.io/acme/merge-queue/x/12)."}},
+		"no marker":         {{Author: "trunk-io", Body: "🧪 Running tests on this pull request"}},
+		"impostor":          {{Author: "pat", Body: "<!-- Trunk Merge -->\n🧪 Running tests on this pull request"}},
 	} {
 		if entry := trunkEntry(comments); entry != nil {
 			t.Errorf("%s: entry %+v, want none", name, entry)
