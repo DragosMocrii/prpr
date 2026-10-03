@@ -33,11 +33,12 @@ func (m *model) legendSections() []legendSection {
 	item := legendItem
 	var sections []legendSection
 	queuePane := slices.Contains(m.drawnPanes(), paneQueue)
+	snoozePane := slices.Contains(m.drawnPanes(), paneSnoozed)
 	if ic.nerd {
-		columns := []string{"State", "Merge", "Age", "Bots", "CI", "Review", "Comments", "Size", "Queue"}
+		columns := []string{"State", "Merge", "Age", "Bots", "CI", "Review", "Comments", "Size", "Queue", "Wakes"}
 		var items []string
 		for _, column := range columns {
-			if (column == "Bots" && !m.bots) || (column == "Queue" && !queuePane) {
+			if (column == "Bots" && !m.bots) || (column == "Queue" && !queuePane) || (column == "Wakes" && !snoozePane) {
 				continue
 			}
 			items = append(items, item(ic.header(column), column))
@@ -104,6 +105,11 @@ func (m *model) legendSections() []legendSection {
 			item(removedQueueTag(ic, github.QueueRemovedCanceled), "removed: canceled"),
 		}})
 	}
+	if snoozePane || m.wokeShown() {
+		sections = append(sections, legendSection{"Snoozed", []string{
+			item(wokeTag(ic, "reason"), "woke from a snooze"),
+		}})
+	}
 	sections = append(sections,
 		legendSection{"Marks", []string{
 			item(markText(markNew, false), "new"),
@@ -125,6 +131,25 @@ func (m *model) removedQueueShown() bool {
 	for _, index := range m.panes[paneMine].visible {
 		if removedQueueTag(m.icons, queueState(&m.snapshot.PullRequests[index])) != "" {
 			return true
+		}
+	}
+	return false
+}
+
+// wokeShown reports whether a visible row of My PRs, Merge queue, or Review
+// requested carries a woke tag.
+func (m *model) wokeShown() bool {
+	for _, id := range []paneID{paneMine, paneQueue, paneReview} {
+		for _, index := range m.panes[id].visible {
+			var pr *github.PullRequest
+			if id == paneReview {
+				pr = &m.snapshot.ReviewRequests[index]
+			} else {
+				pr = &m.snapshot.PullRequests[index]
+			}
+			if _, ok := m.woke[keyOf(pr)]; ok {
+				return true
+			}
 		}
 	}
 	return false

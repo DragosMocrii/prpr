@@ -28,6 +28,9 @@ type iconSet struct {
 	// empty in the Unicode set, which writes words.
 	queueSubmitted, queueQueued, queueTesting, queueFailing, queuePassed, queueRemoved string
 	star, pin, bell                                                                    string
+	// woke is the tag of a pull request that woke from a snooze; empty in the
+	// Unicode set, which writes words.
+	woke string
 	// gap separates an icon from a number or mark after it. Nerd Font icons
 	// are often drawn wider than the one cell the terminal gives them, so
 	// whatever follows directly would be drawn over them.
@@ -67,6 +70,7 @@ var nerdIcons = iconSet{
 		"State": "", "Merge": "", "Age": "", "Bots": "",
 		"CI": "", "Review": "", "Comments": "", "Size": "",
 		"Queue": "\uf4db", // git_merge_queue
+		"Wakes": "\uf4ee", // moon
 	},
 }
 

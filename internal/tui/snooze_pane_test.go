@@ -220,3 +220,35 @@ func TestSnoozedGoneRowsIndexBothGoneLists(t *testing.T) {
 		t.Fatalf("x kept closed snoozes %v or the Snoozed pane", m.snoozeClosed)
 	}
 }
+
+func TestSnoozeLegendOnlyWithSnoozedOrWokeRows(t *testing.T) {
+	mine, review := snoozePRs()
+	for _, nerd := range []bool{false, true} {
+		m := newPaneModel(t, 140, 40, mine, review)
+		if nerd {
+			m.icons = &nerdIcons
+		}
+		has := func() bool {
+			for _, section := range m.legendSections() {
+				if section.label == "Snoozed" {
+					return true
+				}
+			}
+			return false
+		}
+		if has() {
+			t.Fatalf("nerd=%v: Snoozed legend without snoozes", nerd)
+		}
+		snoozeFor(m, preferences.Snooze{Repository: "acme/api", Number: 1, List: preferences.SnoozeMine,
+			Until: time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)})
+		if !has() {
+			t.Fatalf("nerd=%v: no Snoozed legend with a snoozed row", nerd)
+		}
+		delete(m.snoozes, prKey{"acme/api", 1})
+		m.woke = map[prKey]string{{"acme/api", 1}: "snooze ended"}
+		m.rebuildVisiblePRs()
+		if !has() {
+			t.Fatalf("nerd=%v: no Snoozed legend with a woke tag on screen", nerd)
+		}
+	}
+}

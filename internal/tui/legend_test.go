@@ -5,11 +5,13 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/DragosMocrii/prpr/internal/github"
+	"github.com/DragosMocrii/prpr/internal/preferences"
 	"github.com/DragosMocrii/prpr/internal/readiness"
 )
 
@@ -194,6 +196,9 @@ func TestEveryIconIsInTheLegend(t *testing.T) {
 		m.icons = set
 		m.bots = true
 		m.rules = readiness.Rules{Default: readiness.Rule{Approvals: 1}}
+		// A snoozed pull request puts the Snoozed pane and its Wakes column on screen.
+		snoozeFor(m, preferences.Snooze{Repository: mine[0].Repository, Number: mine[0].Number, List: preferences.SnoozeMine,
+			Until: time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)})
 		pressL(m)
 		if legend := ansi.Strip(strings.Join(m.legendLines(), "\n")); strings.Contains(legend, "taller terminal") {
 			t.Fatalf("nerd %t: legend cut short:\n%s", set.nerd, legend)

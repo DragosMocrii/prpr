@@ -113,6 +113,8 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `f` / `b` / Page Down / Page Up / Space: move by a page; `d` / `u`: move by half a page; `g` / `G` / Home / End: jump to the first or last pull request.
 - Left / Right: jump to the previous or next page shown in the page indicator.
 - Tab / Shift+Tab: switch between **My PRs**, **Merge queue** (while it has rows), and **Review requested**. Each list keeps its own selection and scroll position; navigation keys move only the focused list.
+- `z`: snooze the selected pull request, or wake it when it is in **Snoozed**; see [Snoozing](#snoozing).
+- `U`: undo the last snooze.
 - `/`: search every list; see [Search and quick filters](#search-and-quick-filters).
 - `D`: show or hide draft pull requests in every list, and save the choice; see [Drafts](#drafts).
 - `F` / `M`: show only PRs with failing CI, or PRs ready to merge; press again to show all.
@@ -188,6 +190,14 @@ Pull requests you have handed to a merge queue move to a **Merge queue** list be
 When Trunk removes a pull request, because its tests failed or someone canceled it, it returns to **My PRs** tagged `queue failed` or `queue canceled` until Trunk's comment changes, and a failed removal sends a notification while notifications are on (`--notify` or `n`). A pull request Trunk shows as submitted still waits on its own checks and reviews, so it alerts on failing CI or requested changes like a pull request in **My PRs**; further along, the queue owns it and it alerts only when removed for failed tests. Pull requests in the queue count in no attention category and not in the terminal title. `--queues=github` or `--queues=trunk` reads one queue; `--queues=` reads none and hides the list. prpr reads the first 10 comments of each of your open pull requests to find Trunk's, which is almost always the first.
 
 Reading Trunk's comment costs more GraphQL quota: with Trunk enabled, each full fetch reads up to 10 comment bodies per open pull request of yours. `--queues=github` or `--queues=` avoids it.
+
+### Snoozing
+
+`z` hides the selected pull request from **My PRs**, **Merge queue**, or **Review requested** until you want it back. It asks how long: until activity (a status change, at most 7 days), 1 hour, tomorrow 9:00, next Monday 9:00, or a time you type: `45m`, `3h`, `2d`, `1w`, `tomorrow`, `fri`, `14:30`, or `2026-10-10 14:00`. A snooze ends within a year. Snoozed pull requests appear in a **Snoozed** list, which exists only while it has rows, with the wake time and the list each came from; `z` on one there wakes it now, and `U` undoes the last snooze.
+
+A snooze wakes on time, or earlier on a status change, never on comments, bot activity, or any other update. For your pull requests the changes are: ready to merge, failing CI, changes requested, approved, conflicts, or removal from a merge queue. For a review request: new commits, an author reply, a dismissed review, or a pending request, including a re-request. A pull request that wakes returns to its list with a `woke:` tag naming the reason. prpr checks timed wakes every full fetch and with a timer that is never more than a minute ahead.
+
+Snoozed rows count in no attention category and not in the terminal title, and they send notifications only when they wake, never on an account's first fetch or for snoozes already over when prpr starts. A snoozed pull request that closes stays in **Snoozed** as a gone row, and its snooze is deleted. Snoozes are saved for each GitHub account in the preferences file, under `snoozed`.
 
 ### Details
 

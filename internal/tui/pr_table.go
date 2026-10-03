@@ -230,7 +230,11 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			}
 		}
 		if reason, ok := m.woke[keyOf(pr)]; ok && id != paneSnoozed {
-			name = "woke: " + singleLine(reason) + " · " + name
+			sep := " · "
+			if ic.nerd {
+				sep = " "
+			}
+			name = wokeTag(ic, singleLine(reason)) + sep + name
 		}
 		if id == paneSnoozed {
 			rows = append(rows, m.snoozedRow(pr, gone, layout, mark, changed(cellName, name), now))
@@ -433,6 +437,16 @@ func removedQueueTag(ic *iconSet, state github.QueueState) string {
 		return lipgloss.NewStyle().Faint(true).Render(text)
 	}
 	return coloredIcon(text, color)
+}
+
+// wokeTag marks a pull request that woke from a snooze, shown before the
+// name: yellow, as words in the Unicode set and as an icon and the reason in
+// the Nerd set.
+func wokeTag(ic *iconSet, reason string) string {
+	if ic.nerd {
+		return coloredIcon(ic.woke+" "+reason, "3")
+	}
+	return coloredIcon("woke: "+reason, "3")
 }
 
 // reviewStatusText names where a reviewed pull request stands, for
