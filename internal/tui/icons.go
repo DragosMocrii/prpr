@@ -62,6 +62,7 @@ var nerdIcons = iconSet{
 	queueFailing:   "\uf421", // alert
 	queuePassed:    "\uf49e", // check_circle
 	queueRemoved:   "\uf468", // circle_slash
+	woke:           "\uf522", // sun
 	star:           "", pin: "", bell: "", gap: " ",
 	// Ready to merge, changes requested, failing CI, conflicts, bot threads,
 	// awaiting your review, and status unknown.

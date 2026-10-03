@@ -112,7 +112,7 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `k` / Up: select the previous pull request.
 - `f` / `b` / Page Down / Page Up / Space: move by a page; `d` / `u`: move by half a page; `g` / `G` / Home / End: jump to the first or last pull request.
 - Left / Right: jump to the previous or next page shown in the page indicator.
-- Tab / Shift+Tab: switch between **My PRs**, **Merge queue** (while it has rows), and **Review requested**. Each list keeps its own selection and scroll position; navigation keys move only the focused list.
+- Tab / Shift+Tab: switch between **My PRs**, **Merge queue** and **Snoozed** (while they have rows), and **Review requested**. Each list keeps its own selection and scroll position; navigation keys move only the focused list.
 - `z`: snooze the selected pull request, or wake it when it is in **Snoozed**; see [Snoozing](#snoozing).
 - `U`: undo the last snooze.
 - `/`: search every list; see [Search and quick filters](#search-and-quick-filters).

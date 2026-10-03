@@ -231,6 +231,9 @@ func TestSnoozeLegendOnlyWithSnoozedOrWokeRows(t *testing.T) {
 		has := func() bool {
 			for _, section := range m.legendSections() {
 				if section.label == "Snoozed" {
+					if nerd && (nerdIcons.woke == "" || !strings.HasPrefix(ansi.Strip(section.items[0]), nerdIcons.woke)) {
+						t.Fatalf("Nerd Snoozed legend entry %q does not start with the woke icon", section.items[0])
+					}
 					return true
 				}
 			}
