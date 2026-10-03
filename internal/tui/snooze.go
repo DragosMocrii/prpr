@@ -708,6 +708,22 @@ func (m *model) reviewSnoozes(alert bool) []prAlert {
 // scheduleSnoozeTick starts a timer for the earliest snooze end, at most
 // snoozeCheckInterval ahead. Every call starts a new generation.
 func (m *model) scheduleSnoozeTick() tea.Cmd {
+	return m.scheduleSnoozeTickWhen(false)
+}
+
+// snoozeTickDelay is how long to wait before checking a snooze ending at
+// until: at most snoozeCheckInterval, and zero for one already due, unless
+// idle (no rows to wake against), when a due snooze would only spin.
+func snoozeTickDelay(until, now time.Time, idle bool) time.Duration {
+	if idle {
+		return snoozeCheckInterval
+	}
+	return min(max(until.Sub(now), 0), snoozeCheckInterval)
+}
+
+// scheduleSnoozeTickWhen is scheduleSnoozeTick, waiting a full
+// snoozeCheckInterval when idle.
+func (m *model) scheduleSnoozeTickWhen(idle bool) tea.Cmd {
 	m.snoozeGeneration++
 	if len(m.snoozes) == 0 {
 		return nil
@@ -719,7 +735,7 @@ func (m *model) scheduleSnoozeTick() tea.Cmd {
 		}
 	}
 	generation := m.snoozeGeneration
-	delay := min(max(earliest.Sub(m.now()), 0), snoozeCheckInterval)
+	delay := snoozeTickDelay(earliest, m.now(), idle)
 	return tea.Tick(delay, func(time.Time) tea.Msg { return snoozeTickMsg{generation: generation} })
 }
 
@@ -732,19 +748,18 @@ func (m *model) handleSnoozeTick(msg snoozeTickMsg) tea.Cmd {
 	now := m.now()
 	// With no rows to alert for, a due snooze waits for the next full fetch,
 	// whose time check wakes it with its alert.
-	due := m.snapshot.Login != "" && m.err == nil
-	if !due {
-		return m.scheduleSnoozeTick()
+	if m.snapshot.Login == "" || m.err != nil {
+		return m.scheduleSnoozeTickWhen(true)
 	}
-	due = false
+	anyDue := false
 	for _, s := range m.snoozes {
 		if !s.Until.After(now) {
-			due = true
+			anyDue = true
 			break
 		}
 	}
 	var alerts []prAlert
-	if due {
+	if anyDue {
 		m.keepingSelection(func() {
 			alerts = m.wakeDue(true)
 			m.rebuildVisiblePRs()

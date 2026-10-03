@@ -179,6 +179,32 @@ func TestTimerWakeAfterAFailedFetchWaitsForTheNextFetch(t *testing.T) {
 	}
 }
 
+func TestSnoozeTickDelay(t *testing.T) {
+	due := snoozeNow.Add(-time.Minute)
+	if got := snoozeTickDelay(due, snoozeNow, false); got != 0 {
+		t.Fatalf("due snooze delay = %v, want 0", got)
+	}
+	if got := snoozeTickDelay(snoozeNow.Add(time.Hour), snoozeNow, false); got != snoozeCheckInterval {
+		t.Fatalf("far snooze delay = %v, want %v", got, snoozeCheckInterval)
+	}
+	if got := snoozeTickDelay(due, snoozeNow, true); got != snoozeCheckInterval {
+		t.Fatalf("waiting delay = %v, want %v", got, snoozeCheckInterval)
+	}
+}
+
+func TestTickWhileAFetchFailedSchedulesTheNextTickAndDropsOlderOnes(t *testing.T) {
+	m, _, _ := snoozedModel(t, snoozeNow.Add(time.Hour), preferences.SnoozeMine, 2)
+	m.Update(fetchFinishedMsg{err: errors.New("network down")})
+	m.now = func() time.Time { return snoozeNow.Add(2 * time.Hour) }
+	before := m.snoozeGeneration
+	if cmd := m.handleSnoozeTick(snoozeTickMsg{generation: before}); cmd == nil {
+		t.Fatal("no next tick scheduled")
+	}
+	if m.snoozeGeneration != before+1 {
+		t.Fatalf("generation = %d, want %d", m.snoozeGeneration, before+1)
+	}
+}
+
 func TestReturningSnoozedReviewRequestAlertsAgain(t *testing.T) {
 	m, mine, review := snoozedModel(t, snoozeNow.Add(24*time.Hour), preferences.SnoozeMine, 2)
 	snoozeFor(m, preferences.Snooze{Repository: "acme/web", Number: 7, List: preferences.SnoozeReview,
