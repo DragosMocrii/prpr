@@ -151,6 +151,10 @@ type model struct {
 	// baseline without marking, alerting, or waking snoozes: bots or queues
 	// changed, so its differences come from the settings, not GitHub.
 	settingsBaseline bool
+	// sessionBots and sessionQueues are the bots and merge queues in effect,
+	// which Settings shows even when saving them failed.
+	sessionBots   []github.Bot
+	sessionQueues []github.Queue
 	// settingsNotice is what Settings says about its last change.
 	settingsNotice string
 	// setTitle sets the terminal title. flashText is an alert the title
@@ -289,6 +293,8 @@ func newModel(ctx context.Context, client *github.Client, preferences *preferenc
 		rules:          readiness.DefaultRules(),
 		scheduleConfig: preferences.Schedule(),
 		scheduleErr:    preferences.ScheduleErr(),
+		sessionBots:    preferences.Bots(),
+		sessionQueues:  preferences.Queues(),
 	}
 	if window, err := schedule.Compile(m.scheduleConfig); err == nil {
 		m.scheduleWindow = window

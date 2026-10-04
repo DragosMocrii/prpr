@@ -226,3 +226,47 @@ func TestBotsFieldScrollsWithinTheTerminalWidth(t *testing.T) {
 		t.Fatalf("problem not on the row:\n%s", settingsView(m))
 	}
 }
+
+func TestSettingsShowsTheSessionValueAfterAFailedSave(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "preferences.json")
+	if err := os.WriteFile(path, []byte(`{"github.com/alice":""}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := preferences.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := testModel(store, 120, 30)
+	updateSnapshot(m, "alice", botPR(1))
+	pressMsg(m, letter(","))
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	moveTo(t, m, "Review bots")
+	press(m, tea.Key{Code: tea.KeyEnter})
+	m.settings.editing.SetValue("")
+	press(m, tea.Key{Code: tea.KeyEnter})
+	if !strings.Contains(settingsView(m), "Setting not saved") {
+		t.Fatalf("the save did not fail:\n%s", settingsView(m))
+	}
+	moveTo(t, m, "Review bots")
+	if row := rowLine(t, m, "Review bots"); !strings.Contains(row, "none") {
+		t.Fatalf("the row shows the stored bots, not the session's: %q", row)
+	}
+}
+
+func rowLine(t *testing.T, m *model, label string) string {
+	t.Helper()
+	for _, line := range m.settingsLines() {
+		if l := ansi.Strip(line); strings.Contains(l, label) {
+			return l
+		}
+	}
+	t.Fatalf("no %q row:\n%s", label, settingsView(m))
+	return ""
+}

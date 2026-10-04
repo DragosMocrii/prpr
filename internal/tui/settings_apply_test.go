@@ -158,3 +158,24 @@ func TestRefreshChangeAfterAnAuthFailureDoesNotRetry(t *testing.T) {
 		t.Fatalf("auth failure retried: cmd %v due %v", cmd != nil, m.refreshDue)
 	}
 }
+
+func TestBotsChangeAfterAFailedFetchStartsABaselineFetch(t *testing.T) {
+	m := newPaneModel(t, 140, 40, []github.PullRequest{botPR(1)}, nil)
+	m.startFetch()
+	updateFetch(m, fetchFinishedMsg{err: errors.New("boom")})
+	if m.snapshot.Login != "" || m.err == nil {
+		t.Fatalf("the fetch did not fail: login %q err %v", m.snapshot.Login, m.err)
+	}
+	if _, err := m.applyBots(""); err != nil {
+		t.Fatal(err)
+	}
+	if !m.loading || !m.settingsBaseline {
+		t.Fatalf("no baseline fetch: loading %v baseline %v", m.loading, m.settingsBaseline)
+	}
+	changed := botPR(1, github.BotReview{Name: "Copilot"})
+	changed.Title = "renamed"
+	updateSnapshot(m, "alice", changed)
+	if len(m.changes[paneMine].marks) != 0 {
+		t.Fatalf("the baseline fetch marked %v", m.changes[paneMine].marks)
+	}
+}

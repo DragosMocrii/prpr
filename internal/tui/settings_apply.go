@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -52,6 +53,7 @@ func (m *model) applyBots(text string) (tea.Cmd, error) {
 		m.client.SetBots(bots)
 	}
 	m.bots = len(bots) > 0
+	m.sessionBots = bots
 	m.settingSaved(m.preferences.SaveBots(text))
 	m.rebuildPRTable(false)
 	return m.settingsFetch(), nil
@@ -62,6 +64,7 @@ func (m *model) applyQueues(queues []github.Queue) tea.Cmd {
 	if m.client != nil {
 		m.client.SetQueues(queues)
 	}
+	m.sessionQueues = slices.Clone(queues)
 	m.settingSaved(m.preferences.SaveQueues(queues))
 	return m.settingsFetch()
 }
@@ -70,10 +73,12 @@ func (m *model) applyQueues(queues []github.Queue) tea.Cmd {
 // the old ones, so it is replaced; the new one's result becomes the change
 // baseline without marking or alerting.
 func (m *model) settingsFetch() tea.Cmd {
-	if !m.loading && m.snapshot.Login == "" {
+	// A failed fetch keeps the change baseline, so the next result must
+	// replace it too; before any fetch, the first one resets anyway.
+	m.settingsBaseline = true
+	if !m.loading && m.snapshot.Login == "" && m.err == nil {
 		return nil
 	}
-	m.settingsBaseline = true
 	return m.startFetch()
 }
 

@@ -115,7 +115,7 @@ func settingRows() []settingRow {
 		{kind: settingText, label: "Review bots", errKey: "bots",
 			value: func(m *model) string {
 				var names []string
-				for _, bot := range m.preferences.Bots() {
+				for _, bot := range m.sessionBots {
 					names = append(names, bot.Name)
 				}
 				if len(names) == 0 {
@@ -123,11 +123,11 @@ func settingRows() []settingRow {
 				}
 				return strings.Join(names, ", ")
 			},
-			change: func(m *model) tea.Cmd { return m.settings.openBotsField(m.preferences.BotsText(), m.width) }},
+			change: func(m *model) tea.Cmd { return m.settings.openBotsField(github.FormatBots(m.sessionBots), m.width) }},
 		{kind: settingChecklist, label: "Merge queues", errKey: "queues",
 			value: func(m *model) string {
 				var names []string
-				for _, q := range m.preferences.Queues() {
+				for _, q := range m.sessionQueues {
 					names = append(names, queueName(q))
 				}
 				if len(names) == 0 {
@@ -137,7 +137,7 @@ func settingRows() []settingRow {
 			},
 			change: func(m *model) tea.Cmd {
 				// A non-nil list marks the checklist open, even with no queues.
-				m.settings.queues, m.settings.queueCursor = append([]github.Queue{}, m.preferences.Queues()...), 0
+				m.settings.queues, m.settings.queueCursor = append([]github.Queue{}, m.sessionQueues...), 0
 				return nil
 			}},
 		{kind: settingHeading, label: "Editors"},
