@@ -48,6 +48,18 @@ func ParseBots(value string) ([]Bot, error) {
 	return bots, nil
 }
 
+// FormatBots writes bots as ParseBots reads them.
+func FormatBots(bots []Bot) string {
+	entries := make([]string, len(bots))
+	for i, bot := range bots {
+		entries[i] = bot.Name + "=" + bot.Login
+		if bot.Check != "" {
+			entries[i] += ":" + bot.Check
+		}
+	}
+	return strings.Join(entries, ",")
+}
+
 // botLogin drops the [bot] suffix that reactions show but reviews omit.
 func botLogin(login string) string {
 	return strings.TrimSuffix(login, "[bot]")

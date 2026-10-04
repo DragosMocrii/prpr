@@ -1,6 +1,7 @@
 package github
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -120,5 +121,31 @@ func TestDecodeBotReviews(t *testing.T) {
 		if pr.Bots != nil {
 			t.Errorf("PR %d reports bots with none configured: %+v", pr.Number, pr.Bots)
 		}
+	}
+}
+
+func TestFormatBotsRoundTripsParseBots(t *testing.T) {
+	for _, value := range []string{DefaultBots, "", "Bot=some-bot", "A=a-bot:Check name,B=b"} {
+		bots, err := ParseBots(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, err := ParseBots(FormatBots(bots))
+		if err != nil || !reflect.DeepEqual(again, bots) {
+			t.Errorf("ParseBots(FormatBots(%q)) = %+v, %v; want %+v", value, again, err, bots)
+		}
+	}
+}
+
+func TestSetBotsReplacesTheClientsBots(t *testing.T) {
+	c := &Client{}
+	bots, _ := ParseBots(DefaultBots)
+	c.SetBots(bots)
+	if got := c.Bots(); !reflect.DeepEqual(got, bots) {
+		t.Fatalf("Bots() = %+v", got)
+	}
+	c.SetBots(nil)
+	if got := c.Bots(); len(got) != 0 {
+		t.Fatalf("Bots() after SetBots(nil) = %+v", got)
 	}
 }

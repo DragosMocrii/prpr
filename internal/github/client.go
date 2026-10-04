@@ -86,10 +86,12 @@ type Snapshot struct {
 
 type Client struct {
 	path string
-	bots []Bot
 	// mu guards the pinned account and its token, which requests read from
-	// several goroutines.
+	// several goroutines, and the settings fetches read: bots, needs, and
+	// queues.
 	mu sync.Mutex
+	// bots are the review bots fetches judge.
+	bots []Bot
 	// login is the pinned account, or "" to follow gh's active account;
 	// token is its token once read.
 	login string
@@ -366,8 +368,20 @@ func NewClient(bots []Bot) (*Client, error) {
 	return &Client{path: path, bots: bots}, nil
 }
 
-// Bots returns the configured review bots.
-func (c *Client) Bots() []Bot { return c.bots }
+// Bots returns the review bots fetches judge.
+func (c *Client) Bots() []Bot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bots
+}
+
+// SetBots replaces the review bots; a fetch already running keeps the ones
+// it started with.
+func (c *Client) SetBots(bots []Bot) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bots = bots
+}
 
 // Fetch checks authentication, then fetches both lists, and the required
 // checks of authored pull requests when [Needs] asks for them; every query
@@ -384,8 +398,9 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 		}
 		return Snapshot{}, &AuthError{Err: err}
 	}
-	bots, needs := len(c.bots) > 0, c.currentNeeds()
-	snapshot, err := c.run(ctx, pullRequestsQuery(bots, needs, c.currentQueues()), reviewRequestsQuery(bots), reviewedQuery(bots, time.Now()), c.bots)
+	bots := c.Bots()
+	needs := c.currentNeeds()
+	snapshot, err := c.run(ctx, pullRequestsQuery(len(bots) > 0, needs, c.currentQueues()), reviewRequestsQuery(len(bots) > 0), reviewedQuery(len(bots) > 0, time.Now()), bots)
 	if err != nil || !needs.RequiredChecks {
 		return snapshot, err
 	}
