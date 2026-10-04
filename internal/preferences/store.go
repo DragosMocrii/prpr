@@ -183,6 +183,8 @@ type Store struct {
 	schedule    schedule.Config
 	scheduleRaw json.RawMessage
 	scheduleErr error
+	// settings are the app settings that used to be flags.
+	settings settings
 }
 
 // appKey holds settings that belong to the app rather than to an account.
@@ -196,15 +198,24 @@ type appJSON struct {
 	Drafts   bool            `json:"drafts,omitempty"`
 	Ready    json.RawMessage `json:"ready,omitempty"`
 	Schedule json.RawMessage `json:"schedule,omitempty"`
+	Refresh  string          `json:"refresh,omitempty"`
+	Bots     *string         `json:"bots,omitempty"`
+	Queues   json.RawMessage `json:"queues,omitempty"`
+	Notify   bool            `json:"notify,omitempty"`
+	Mouse    bool            `json:"mouse,omitempty"`
+	Title    *bool           `json:"title,omitempty"`
 }
 
 func (a appJSON) empty() bool {
-	return a.Account == "" && a.Icons == "" && !a.Legend && !a.Drafts && len(a.Ready) == 0 && len(a.Schedule) == 0
+	return a.Account == "" && a.Icons == "" && !a.Legend && !a.Drafts && len(a.Ready) == 0 && len(a.Schedule) == 0 &&
+		a.Refresh == "" && a.Bots == nil && a.Queues == nil && !a.Notify && !a.Mouse && a.Title == nil
 }
 
 // app is the app settings as saved.
 func (s *Store) app() appJSON {
-	return appJSON{Account: s.pinned, Icons: s.icons, Legend: s.legend, Drafts: s.drafts, Ready: s.rulesRaw, Schedule: s.scheduleRaw}
+	app := appJSON{Account: s.pinned, Icons: s.icons, Legend: s.legend, Drafts: s.drafts, Ready: s.rulesRaw, Schedule: s.scheduleRaw}
+	s.settings.encode(&app)
+	return app
 }
 
 // accountJSON is an account's value when it has watchlists, snoozes,
@@ -222,7 +233,7 @@ type accountJSON struct {
 }
 
 func Open(path string) (*Store, error) {
-	store := &Store{path: path, accounts: make(map[string]account), rules: readiness.DefaultRules(), schedule: schedule.Default()}
+	store := &Store{path: path, accounts: make(map[string]account), rules: readiness.DefaultRules(), schedule: schedule.Default(), settings: defaultSettings()}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return store, nil
@@ -247,6 +258,7 @@ func Open(path string) (*Store, error) {
 				return nil, fmt.Errorf("decode preferences %q: %q has an unknown icon set %q", path, appKey, app.Icons)
 			}
 			store.pinned, store.icons, store.legend, store.drafts = app.Account, app.Icons, app.Legend, app.Drafts
+			store.settings = decodeSettings(app, path)
 			if len(app.Schedule) != 0 {
 				store.scheduleRaw = app.Schedule
 				config := schedule.Default()
@@ -737,7 +749,6 @@ func (s *Store) writeAll(accounts map[string]account, app appJSON) error {
 	}
 	return s.write(data)
 }
-
 func (s *Store) write(data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
 		return fmt.Errorf("create preferences directory for %q: %w", s.path, err)
