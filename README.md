@@ -117,8 +117,15 @@ While asleep, `r` makes one quiet refresh: it does not notify, poll quota, or re
 
 The **Bots** column reports automated review bots. By default it covers GitHub Copilot code review, OpenAI Codex, and Claude; Review bots in [Settings](#settings) replaces that list with comma-separated `Name=login` entries, each optionally followed by `:check`, a substring of the bot's check-run names. An empty value hides the column and skips the extra GitHub fields:
 
+The default list is:
+
 ```
 Copilot=copilot-pull-request-reviewer:copilot-pull-request-reviewer,Codex=chatgpt-codex-connector,Claude=claude:Claude Code Review
+```
+
+A single bot is just:
+
+```
 Rabbit=coderabbitai
 ```
 
