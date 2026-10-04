@@ -84,7 +84,7 @@ func settingRows() []settingRow {
 			change: func(m *model) tea.Cmd { m.toggleIcons(); return nil }},
 		{kind: settingToggle, label: "Show drafts", shortcut: "D",
 			value:  func(m *model) string { return onOff(m.showDrafts) },
-			change: func(m *model) tea.Cmd { m.toggleDrafts(); m.settingsNotice = "Saved."; return nil }},
+			change: func(m *model) tea.Cmd { m.toggleDrafts(); return nil }},
 		{kind: settingToggle, label: "Legend", shortcut: "L",
 			value: func(m *model) string {
 				if m.legend {
@@ -92,7 +92,7 @@ func settingRows() []settingRow {
 				}
 				return "hidden"
 			},
-			change: func(m *model) tea.Cmd { m.toggleLegend(); m.settingsNotice = "Saved."; return nil }},
+			change: func(m *model) tea.Cmd { m.toggleLegend(); return nil }},
 		{kind: settingToggle, label: "Mouse", shortcut: "m",
 			value:  func(m *model) string { return onOff(m.mouse) },
 			change: func(m *model) tea.Cmd { m.applyMouse(!m.mouse); return nil }},
@@ -123,7 +123,7 @@ func settingRows() []settingRow {
 				}
 				return strings.Join(names, ", ")
 			},
-			change: func(m *model) tea.Cmd { return m.settings.openBotsField(m.preferences.BotsText()) }},
+			change: func(m *model) tea.Cmd { return m.settings.openBotsField(m.preferences.BotsText(), m.width) }},
 		{kind: settingChecklist, label: "Merge queues", errKey: "queues",
 			value: func(m *model) string {
 				var names []string
@@ -178,13 +178,23 @@ func (m *model) openSettings() tea.Cmd {
 	return nil
 }
 
-func (e *settingsEditor) openBotsField(value string) tea.Cmd {
+func (e *settingsEditor) openBotsField(value string, width int) tea.Cmd {
 	input := textinput.New()
 	input.Prompt = ""
+	input.SetWidth(max(width-2-e.labelWidth()-3-1, 10))
 	input.SetValue(value)
 	input.CursorEnd()
 	e.editing, e.problem = &input, ""
 	return input.Focus()
+}
+
+// labelWidth is the width of the widest setting label.
+func (e *settingsEditor) labelWidth() int {
+	width := 0
+	for _, row := range e.rows {
+		width = max(width, ansi.StringWidth(row.label))
+	}
+	return width
 }
 
 // step moves the cursor to the next setting in dir, skipping headings.
@@ -281,14 +291,11 @@ func (m *model) settingsLines() []string {
 		help = m.shortHelp(m.keys.settingsQueuesHelp())
 	}
 	status := settingsFaint.Render(m.settingsNotice)
-	if e.problem != "" {
-		status = settingsBad.Render(singleLine(e.problem))
+	if m.settingsNotice == "Not saved." && m.preferenceErr != nil {
+		status = settingsBad.Render(singleLine(m.preferenceErr.Error()))
 	}
 	footer := []string{"", status, help}
-	labelWidth := 0
-	for _, row := range e.rows {
-		labelWidth = max(labelWidth, ansi.StringWidth(row.label))
-	}
+	labelWidth := e.labelWidth()
 	var body []string
 	cursorLine := 0
 	for i, row := range e.rows {
@@ -304,7 +311,10 @@ func (m *model) settingsLines() []string {
 			marker = "> "
 		}
 		value := row.value(m)
+		prefix := 2 + labelWidth + 3
 		if i == e.cursor && e.editing != nil {
+			// The field scrolls within the room the row leaves.
+			e.editing.SetWidth(max(m.width-prefix-1, 10))
 			value = e.editing.View()
 		}
 		if row.kind == settingEditor {
@@ -320,6 +330,10 @@ func (m *model) settingsLines() []string {
 			}
 		}
 		body = append(body, line)
+		if i == e.cursor && e.editing != nil && e.problem != "" {
+			// Under the field, which pads itself to its width.
+			body = append(body, strings.Repeat(" ", prefix)+settingsBad.Render(singleLine(e.problem)))
+		}
 		if i == e.cursor && e.queues != nil {
 			for j, q := range queueChoices {
 				box := "[ ]"
@@ -339,7 +353,7 @@ func (m *model) settingsLines() []string {
 	top := max(cursorLine-1, 0)
 	e.offset = min(e.offset, top)
 	e.offset = max(e.offset, cursorLine-height+1, 0)
-	if e.queues != nil {
+	if e.queues != nil || e.problem != "" {
 		e.offset = max(e.offset, cursorLine+len(queueChoices)-height+1)
 	}
 	end := min(e.offset+height, len(body))

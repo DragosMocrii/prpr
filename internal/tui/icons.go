@@ -114,11 +114,7 @@ func (m *model) toggleIcons() {
 		m.icons = &nerdIcons
 		m.setNotice("Nerd Font icons on — press i again if you see boxes")
 	}
-	if err := m.preferences.SaveIcons(m.icons.name()); err != nil {
-		m.settingSaved(err)
-	} else {
-		m.settingsNotice = "Saved."
-	}
+	m.settingSaved(m.preferences.SaveIcons(m.icons.name()))
 	m.rebuildPRTable(false)
 }
 

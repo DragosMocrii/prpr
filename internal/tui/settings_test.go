@@ -178,3 +178,51 @@ func TestSettingsFitsANarrowShortTerminal(t *testing.T) {
 		t.Fatalf("the cursor row scrolled out of view:\n%s", settingsView(m))
 	}
 }
+
+func TestSettingsShowsAFailedSave(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "preferences.json")
+	if err := os.WriteFile(path, []byte(`{"github.com/alice":""}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := preferences.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := testModel(store, 120, 30)
+	updateSnapshot(m, "alice", botPR(1))
+	pressMsg(m, letter(","))
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	moveTo(t, m, "Show drafts")
+	press(m, tea.Key{Code: tea.KeySpace, Text: " "})
+	if !strings.Contains(settingsView(m), "Setting not saved") {
+		t.Fatalf("no failure shown:\n%s", settingsView(m))
+	}
+}
+
+func TestBotsFieldScrollsWithinTheTerminalWidth(t *testing.T) {
+	m := openSettingsModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	moveTo(t, m, "Review bots")
+	press(m, tea.Key{Code: tea.KeyEnter})
+	for _, line := range m.settingsLines() {
+		if ansi.StringWidth(line) > 80 {
+			t.Fatalf("line wider than 80: %q", ansi.Strip(line))
+		}
+	}
+	view := settingsView(m)
+	if !strings.Contains(view, "Claude Code Review") && !strings.Contains(view, github.DefaultBots[len(github.DefaultBots)-8:]) {
+		t.Fatalf("the end of the value is hidden:\n%s", view)
+	}
+	m.settings.editing.SetValue("bad")
+	press(m, tea.Key{Code: tea.KeyEnter})
+	if !strings.Contains(settingsView(m), m.settings.problem) || strings.Contains(ansi.Strip(m.settingsLines()[len(m.settingsLines())-2]), m.settings.problem) {
+		t.Fatalf("problem not on the row:\n%s", settingsView(m))
+	}
+}

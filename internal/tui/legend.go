@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -253,8 +252,6 @@ func (m *model) legendHidden(lines []string) bool {
 // save keeps the new state for the session and shows the warning.
 func (m *model) toggleLegend() {
 	m.legend = !m.legend
-	if err := m.preferences.SaveLegend(m.legend); err != nil {
-		m.preferenceErr = fmt.Errorf("Legend choice not saved: %w", err)
-	}
+	m.settingSaved(m.preferences.SaveLegend(m.legend))
 	m.rebuildPRTable(false)
 }

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -119,9 +118,7 @@ func (m *model) toggleQuick(q quickFilter) {
 // failed save keeps the new choice for the session and shows the warning.
 func (m *model) toggleDrafts() {
 	m.showDrafts = !m.showDrafts
-	if err := m.preferences.SaveShowDrafts(m.showDrafts); err != nil {
-		m.preferenceErr = fmt.Errorf("Drafts choice not saved: %w", err)
-	}
+	m.settingSaved(m.preferences.SaveShowDrafts(m.showDrafts))
 	m.applyFilters()
 }
 
