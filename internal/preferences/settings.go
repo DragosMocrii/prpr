@@ -23,9 +23,9 @@ const (
 // read so a save of another setting does not lose it.
 type settings struct {
 	refresh    time.Duration
-	refreshRaw string
+	refreshRaw json.RawMessage
 	bots       []github.Bot
-	botsRaw    *string
+	botsRaw    json.RawMessage
 	queues     []github.Queue
 	queuesRaw  json.RawMessage
 	notify     bool
@@ -49,23 +49,32 @@ func decodeSettings(app appJSON, path string) settings {
 	if app.Title != nil {
 		s.title = *app.Title
 	}
-	if app.Refresh != "" {
+	// Refresh: must be a JSON string, or nothing (not 300, not null, not an array)
+	if len(app.Refresh) != 0 && string(app.Refresh) != "null" {
 		s.refreshRaw = app.Refresh
-		if d, err := parseRefresh(app.Refresh); err != nil {
-			s.errs["refresh"] = fmt.Errorf("refresh %q in %q not read, using %s: %w", app.Refresh, path, FormatRefresh(DefaultRefresh), err)
+		var refreshStr string
+		if err := json.Unmarshal(app.Refresh, &refreshStr); err != nil {
+			s.errs["refresh"] = fmt.Errorf("refresh in %q not read, using %s: %w", path, FormatRefresh(DefaultRefresh), err)
+		} else if d, err := parseRefresh(refreshStr); err != nil {
+			s.errs["refresh"] = fmt.Errorf("refresh %q in %q not read, using %s: %w", refreshStr, path, FormatRefresh(DefaultRefresh), err)
 		} else {
 			s.refresh = d
 		}
 	}
-	if app.Bots != nil {
+	// Bots: must be a JSON string, or nothing (not 5, not null, not an array)
+	if len(app.Bots) != 0 && string(app.Bots) != "null" {
 		s.botsRaw = app.Bots
-		if bots, err := github.ParseBots(*app.Bots); err != nil {
+		var botsStr string
+		if err := json.Unmarshal(app.Bots, &botsStr); err != nil {
+			s.errs["bots"] = fmt.Errorf("review bots in %q not read, using the defaults: %w", path, err)
+		} else if bots, err := github.ParseBots(botsStr); err != nil {
 			s.errs["bots"] = fmt.Errorf("review bots in %q not read, using the defaults: %w", path, err)
 		} else {
 			s.bots = bots
 		}
 	}
-	if len(app.Queues) != 0 {
+	// Queues: must be a JSON array, or nothing (not null, not a string)
+	if len(app.Queues) != 0 && string(app.Queues) != "null" {
 		s.queuesRaw = app.Queues
 		var names []string
 		if err := json.Unmarshal(app.Queues, &names); err != nil {
@@ -143,9 +152,11 @@ func (s *Store) SaveRefresh(d time.Duration) error {
 		return fmt.Errorf("refresh must be 0 (off) or at least %s", FormatRefresh(MinRefresh))
 	}
 	return s.saveSettings(func(c *settings) {
-		c.refresh, c.refreshRaw = d, ""
+		c.refresh = d
+		c.refreshRaw = nil
 		if d != DefaultRefresh {
-			c.refreshRaw = FormatRefresh(d)
+			// Encode as JSON string
+			c.refreshRaw, _ = json.Marshal(FormatRefresh(d))
 		}
 		delete(c.errs, "refresh")
 	})
@@ -164,10 +175,12 @@ func (s *Store) SaveBots(text string) error {
 		return err
 	}
 	return s.saveSettings(func(c *settings) {
-		c.bots, c.botsRaw = bots, nil
-		if github.FormatBots(bots) != github.FormatBots(defaultSettings().bots) {
-			value := github.FormatBots(bots)
-			c.botsRaw = &value
+		c.bots = bots
+		c.botsRaw = nil
+		formattedBots := github.FormatBots(bots)
+		if formattedBots != github.FormatBots(defaultSettings().bots) {
+			// Encode as JSON string
+			c.botsRaw, _ = json.Marshal(formattedBots)
 		}
 		delete(c.errs, "bots")
 	})
@@ -178,6 +191,14 @@ func (s *Store) Queues() []github.Queue { return slices.Clone(s.settings.queues)
 
 // SaveQueues saves the merge queues; none turns the Merge queue pane off.
 func (s *Store) SaveQueues(queues []github.Queue) error {
+	// Check for duplicates
+	seen := make(map[github.Queue]bool)
+	for _, q := range queues {
+		if seen[q] {
+			return fmt.Errorf("duplicate merge queue %q", q)
+		}
+		seen[q] = true
+	}
 	for _, q := range queues {
 		if q != github.QueueTrunk && q != github.QueueGitHub {
 			return fmt.Errorf("unknown merge queue %q", q)

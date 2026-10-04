@@ -198,8 +198,8 @@ type appJSON struct {
 	Drafts   bool            `json:"drafts,omitempty"`
 	Ready    json.RawMessage `json:"ready,omitempty"`
 	Schedule json.RawMessage `json:"schedule,omitempty"`
-	Refresh  string          `json:"refresh,omitempty"`
-	Bots     *string         `json:"bots,omitempty"`
+	Refresh  json.RawMessage `json:"refresh,omitempty"`
+	Bots     json.RawMessage `json:"bots,omitempty"`
 	Queues   json.RawMessage `json:"queues,omitempty"`
 	Notify   bool            `json:"notify,omitempty"`
 	Mouse    bool            `json:"mouse,omitempty"`
@@ -208,7 +208,7 @@ type appJSON struct {
 
 func (a appJSON) empty() bool {
 	return a.Account == "" && a.Icons == "" && !a.Legend && !a.Drafts && len(a.Ready) == 0 && len(a.Schedule) == 0 &&
-		a.Refresh == "" && a.Bots == nil && a.Queues == nil && !a.Notify && !a.Mouse && a.Title == nil
+		len(a.Refresh) == 0 && len(a.Bots) == 0 && len(a.Queues) == 0 && !a.Notify && !a.Mouse && a.Title == nil
 }
 
 // app is the app settings as saved.
@@ -749,6 +749,7 @@ func (s *Store) writeAll(accounts map[string]account, app appJSON) error {
 	}
 	return s.write(data)
 }
+
 func (s *Store) write(data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
 		return fmt.Errorf("create preferences directory for %q: %w", s.path, err)
