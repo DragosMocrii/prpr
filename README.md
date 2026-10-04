@@ -77,16 +77,35 @@ go install ./cmd/prpr
 
 ## Configuration
 
-All lists refresh automatically 5 minutes after each fetch finishes. Change the interval with `--refresh`, which takes a Go duration of at least `30s`, or turn it off with `0`:
-
-```sh
-prpr --refresh 10m
-prpr --refresh 0
-```
+All lists refresh automatically 5 minutes after each fetch finishes. Change the interval in [Settings](#settings): off, or 1, 2, 5, 10, 15, or 30 minutes.
 
 The title's top-right corner counts down to the next refresh. A manual refresh restarts the timer. GitHub computes merge states in the background and reports them as not yet computed (`?`) until it is done, so while a pull request in the repository filter shows `?`, the next refresh comes sooner: after 15 seconds, then 30, 60, and so on, up to the interval. Auto-refresh waits while the repository picker, the first-run repository prompt, or GitHub login is open, and retries failed fetches except authentication failures, which need `l`.
 
 The status line shows the remaining GitHub GraphQL quota and its reset time (for example `API 4,981/5,000 · resets 06:14`), read every 10 seconds with a GraphQL query for the rate limit alone, which GitHub does not count against the quota. The quota is shared by everything using your GitHub account. It turns yellow below 20% and red below 5%, is marked `?` when the latest read failed. On narrow terminals the selected pull request's status drops its last facts first (see [Selected pull request](#selected-pull-request)), then the reset time, then the quota shortens to bare numbers and finally hides.
+
+### Settings
+
+Press `,` to open Settings, a full-screen list of every app setting with its current value. Up and Down (or `k` and `j`) move between rows; Space or Enter changes a row; Esc closes Settings. Each change applies at once and is saved, and the screen says `Saved.` or why a save failed (`Setting not saved: …`); a failed save keeps the change for the session. Shortcuts that also change a setting (`i`, `D`, `L`, `m`, `n`) still work on the list and save the same way.
+
+| Row | Values |
+|---|---|
+| Icons | Unicode, Nerd Font |
+| Show drafts | off, on |
+| Legend | hidden, shown |
+| Mouse | off, on |
+| Terminal title | on, off |
+| Refresh every | off, 1m, 2m, 5m, 10m, 15m, 30m |
+| Desktop notifications | off, on |
+| Review bots | the `Name=login[:check]` list; empty for none |
+| Merge queues | Trunk, GitHub |
+| Ready-to-merge rules | opens the [rules editor](#ready-to-merge-rules) |
+| Active hours | opens the [active-hours editor](#active-hours) |
+
+Review bots opens a text field: Enter applies a valid list, an invalid one shows its error on the row and keeps the old setting, and Esc reverts. Merge queues opens a checklist: Space toggles Trunk or GitHub, Enter keeps, Esc reverts. The two editor rows open their editor, and closing it returns to Settings. A refresh value saved as something else, such as `90s`, is shown as written until you change it.
+
+Changing the review bots or merge queues starts a full fetch at once. That fetch resets the change baseline, so unread change marks and gone rows are cleared at that moment, and it does not mark, notify, or wake snoozes; the next fetch tracks changes as usual. Changing the refresh interval restarts the timer from now, except during a running fetch or after an authentication failure, where it takes effect at the next fetch.
+
+The settings used to be command-line flags. `--refresh`, `--bots`, `--queues`, `--notify`, `--icons`, and `--title` are gone: passing one stops prpr with a message naming its setting, and `PRPR_ICONS` is ignored. Only `--version` and `-h` remain.
 
 ### Active hours
 
@@ -96,21 +115,16 @@ Outside the saved hours, prpr pauses automatic pull-request and quota requests, 
 
 While asleep, `r` makes one quiet refresh: it does not notify, poll quota, or restart an automatic timer. `w` wakes for one hour; press `w` again to return to the schedule. If that hour ends inside active hours, normal polling continues until the scheduled close. An unreadable or invalid saved schedule pauses polling until repaired with `S`; `w` remains available for a one-hour manual wake.
 
-The **Bots** column reports automated review bots. By default it covers GitHub Copilot code review, OpenAI Codex, and Claude; `--bots` replaces that list with comma-separated `Name=login` entries, each optionally followed by `:check`, a substring of the bot's check-run names. An empty value hides the column and skips the extra GitHub fields:
+The **Bots** column reports automated review bots. By default it covers GitHub Copilot code review, OpenAI Codex, and Claude; Review bots in [Settings](#settings) replaces that list with comma-separated `Name=login` entries, each optionally followed by `:check`, a substring of the bot's check-run names. An empty value hides the column and skips the extra GitHub fields:
 
-```sh
-prpr --bots 'Copilot=copilot-pull-request-reviewer:copilot-pull-request-reviewer,Codex=chatgpt-codex-connector,Claude=claude:Claude Code Review'
-prpr --bots 'Rabbit=coderabbitai'
-prpr --bots ''
 ```
-
-`--queues` chooses the merge queues to read, `trunk` and `github` by default; see [Merge queue](#merge-queue).
-
-`--notify` starts with desktop notifications on; see [Notifications](#notifications). `--icons nerd` draws Nerd Font icons; see [Icons](#icons). `--title=false` leaves the terminal title alone; see [Terminal title](#terminal-title).
+Copilot=copilot-pull-request-reviewer:copilot-pull-request-reviewer,Codex=chatgpt-codex-connector,Claude=claude:Claude Code Review
+Rabbit=coderabbitai
+```
 
 Bot reporting costs more GraphQL quota, mostly to read review threads: about 28 points per 100 pull requests listed, against about 3 without bots.
 
-Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository, organization, or watchlist choice and the watchlists of each GitHub account, the login of a pinned GitHub CLI account, the icon set chosen with `i`, whether the `L` legend is open, whether `D` shows drafts, the ready-to-merge rules, the snoozed pull requests of each account and the 🙏 each one dismissed with `X`, and the active-hours schedule saved with `S`; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice. Earlier versions read a saved organization choice as no choice and prompt again. Accounts without watchlists keep the format earlier versions read; once an account saves a watchlist, an account is pinned, `i` saves an icon choice, `L` saves the legend, `D` saves the drafts choice, `z` saves a snooze, `X` dismisses a 🙏, `,` saves rules, or `S` saves a schedule, prpr 0.1.16 and older refuse to open the file until it is repaired, 0.1.17 drops the pinned account and icon choice the next time it saves, 0.1.18 and 0.1.19 drop the icon choice, 0.1.22 and older drop the ready-to-merge rules, 0.1.23 and older drop the legend choice, 0.1.24 and older drop the drafts choice, 0.1.28 and older drop the snoozes, 0.1.30 and older drop the active-hours schedule, and 0.1.32 and older drop the dismissed 🙏. Rules prpr cannot read, such as a misspelled condition, are kept in the file as written while prpr uses the defaults and says so, until you save rules with `,`.
+Preferences are stored at `prpr/preferences.json` under the directory returned by Go's `os.UserConfigDir()`. On Linux, this is `$XDG_CONFIG_HOME` when it is absolute, or `$HOME/.config` otherwise. The file stores a repository, organization, or watchlist choice and the watchlists of each GitHub account, the login of a pinned GitHub CLI account, the icon set chosen with `i`, whether the `L` legend is open, whether `D` shows drafts, the refresh interval, review bots, merge queues, and whether notifications, the mouse, and the terminal title are on, saved from Settings, the ready-to-merge rules, the snoozed pull requests of each account and the 🙏 each one dismissed with `X`, and the active-hours schedule saved with `S`; it does not contain GitHub credentials. A new account prompts for a choice. Choosing All repositories is saved as an explicit choice. Earlier versions read a saved organization choice as no choice and prompt again. Accounts without watchlists keep the format earlier versions read; once an account saves a watchlist, an account is pinned, `i` saves an icon choice, `L` saves the legend, `D` saves the drafts choice, `z` saves a snooze, `X` dismisses a 🙏, Settings saves a setting or rules, or `S` saves a schedule, prpr 0.1.16 and older refuse to open the file until it is repaired, 0.1.17 drops the pinned account and icon choice the next time it saves, 0.1.18 and 0.1.19 drop the icon choice, 0.1.22 and older drop the ready-to-merge rules, 0.1.23 and older drop the legend choice, 0.1.24 and older drop the drafts choice, 0.1.28 and older drop the snoozes, 0.1.30 and older drop the active-hours schedule, and 0.1.32 and older drop the dismissed 🙏. 0.1.37 and older ignore the settings that Settings saves. Unreadable saved values for the refresh interval, review bots, or merge queues fall back to their defaults with a warning and stay in the file as written until you save that setting; an unreadable notifications, mouse, or terminal title value is invalid preferences, like the other app values. Rules prpr cannot read, such as a misspelled condition, are kept in the file as written while prpr uses the defaults and says so, until you save rules in Settings.
 
 If startup reports invalid preferences, back up, repair, or remove only the reported `prpr/preferences.json` file before retrying. Do not remove GitHub CLI credentials to repair app preferences.
 
@@ -142,11 +156,11 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `o`: open the selected pull request in the browser. GitHub CLI picks the browser: its `browser` setting, `GH_BROWSER`, or `BROWSER`, else the system default. With an account pinned, prpr opens the URL itself in the same order, so the browser never receives the account's token.
 - `y`: copy the selected pull request's URL to the clipboard. The copy is sent as an OSC 52 terminal sequence, so it also works over SSH and in containers, but terminals without OSC 52 support, such as macOS Terminal, ignore it; copy the URL shown below the table instead.
 - `x`: clear every change mark and drop gone rows (shown only while there are marks).
-- `m`: turn mouse mode on or off; see [Mouse](#mouse).
-- `n`: turn notifications on or off; see [Notifications](#notifications).
+- `m`: turn mouse mode on or off, and save the choice; see [Mouse](#mouse).
+- `n`: turn notifications on or off, and save the choice; see [Notifications](#notifications).
 - `i`: switch between Unicode and Nerd Font icons, and save the choice; see [Icons](#icons).
 - `L`: show or hide the icon legend under the lists, and save the choice; see [Icons](#icons).
-- `,`: edit what ready to merge means, for every repository or one owner's; see [Ready-to-merge rules](#ready-to-merge-rules).
+- `,`: open [Settings](#settings), which holds every app setting and opens the ready-to-merge rules.
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
 
@@ -199,9 +213,9 @@ Search and quick filters combine with the repository filter and apply to every l
 
 Pull requests you have handed to a merge queue move to a **Merge queue** list between **My PRs** and **Review requested**, which appears only while it has rows. prpr reads two queues, both through GitHub: [Trunk](https://trunk.io), from the comment Trunk keeps on each pull request, and GitHub's own merge queue. No Trunk token is needed. Each row shows the state (`submitted`, `queued`, `testing`, `failing`, `passed`, or `?` for wording prpr does not recognize) and a detail such as the pull request Trunk tests on; furthest along comes first (passed, failing, testing, queued, submitted, then `?`). A merged pull request closes and leaves the list as a gone row. When every open pull request of yours is queued, **My PRs** says so.
 
-When Trunk removes a pull request, because its tests failed or someone canceled it, it returns to **My PRs** tagged `queue failed` or `queue canceled` until Trunk's comment changes, and a failed removal sends a notification while notifications are on (`--notify` or `n`). A pull request Trunk shows as submitted still waits on its own checks and reviews, so it alerts on failing CI or requested changes like a pull request in **My PRs**; further along, the queue owns it and it alerts only when removed for failed tests. Pull requests in the queue count in no attention category and not in the terminal title. `--queues=github` or `--queues=trunk` reads one queue; `--queues=` reads none and hides the list. prpr reads the first 10 comments of each of your open pull requests to find Trunk's, which is almost always the first.
+When Trunk removes a pull request, because its tests failed or someone canceled it, it returns to **My PRs** tagged `queue failed` or `queue canceled` until Trunk's comment changes, and a failed removal sends a notification while notifications are on (`n`, or Settings). A pull request Trunk shows as submitted still waits on its own checks and reviews, so it alerts on failing CI or requested changes like a pull request in **My PRs**; further along, the queue owns it and it alerts only when removed for failed tests. Pull requests in the queue count in no attention category and not in the terminal title. Merge queues in [Settings](#settings) chooses which queue to read; with none, prpr reads none and hides the list. prpr reads the first 10 comments of each of your open pull requests to find Trunk's, which is almost always the first.
 
-Reading Trunk's comment costs more GraphQL quota: with Trunk enabled, each full fetch reads up to 10 comment bodies per open pull request of yours. `--queues=github` or `--queues=` avoids it.
+Reading Trunk's comment costs more GraphQL quota: with Trunk enabled, each full fetch reads up to 10 comment bodies per open pull request of yours. Turning Trunk off in Settings avoids it.
 
 ### Requesting reviews again
 
@@ -233,7 +247,7 @@ Up and Down (`k`/`j`) move to the previous or next pull request in the same list
 
 ### Ready-to-merge rules
 
-By default, ready to merge means GitHub's merge button is green. That follows branch protection for you, so it can be green while your team still waits on an approval, for example when you may bypass the rules. Press `,` to choose your own conditions, which must all hold:
+By default, ready to merge means GitHub's merge button is green. That follows branch protection for you, so it can be green while your team still waits on an approval, for example when you may bypass the rules. Open them from Settings (`,`, then Ready-to-merge rules) to choose your own conditions, which must all hold:
 
 - GitHub's merge button is green (on by default).
 - Required checks passed: the head commit's checks that branch protection requires, read with one extra query per 10 pull requests.
@@ -294,7 +308,7 @@ A watchlist is a named group of repositories, such as "My services" or "Open sou
 
 ### Icons
 
-prpr draws its symbols with Unicode characters that common fonts include. With a [Nerd Font](https://www.nerdfonts.com/) (version 3 or later) set in your terminal, `i` switches to GitHub's octicons from the font, and saves the choice; `i` again switches back, so if you see empty boxes, your terminal's font has no Nerd Font glyphs. Terminals do not report their font, so prpr cannot detect one. `--icons nerd|unicode` or `PRPR_ICONS=nerd|unicode` picks the set for one run, ahead of the saved choice; `--icons` wins over `PRPR_ICONS`.
+prpr draws its symbols with Unicode characters that common fonts include. With a [Nerd Font](https://www.nerdfonts.com/) (version 3 or later) set in your terminal, `i` switches to GitHub's octicons from the font, and saves the choice; `i` again switches back, so if you see empty boxes, your terminal's font has no Nerd Font glyphs. Terminals do not report their font, so prpr cannot detect one. `i`, or Icons in [Settings](#settings), picks the set.
 
 ![The same tour with Nerd Font icons](docs/demo-nerd.gif)
 
@@ -314,11 +328,11 @@ prpr sets the terminal title, which most terminals show on the tab or window:
 - `prpr · sleeping` while automatic requests and alerts are paused outside active hours.
 - `● prpr: <alert>` alternating with `○`, when a refresh finds the changes that [Notifications](#notifications) describe, whether or not notifications are on. The flashing stops when the terminal window gains focus, on a key press or click, or after 5 minutes, and is skipped while the terminal reports that it has focus. Terminals that do not report focus flash until a key press or the time limit.
 
-The VS Code terminal shows the title on its tab only with `"terminal.integrated.tabs.title": "${process} ${sequence}"` (or `"${sequence}"`) in VS Code's settings; inside tmux, enable `set -g set-titles on`, and `set -g focus-events on` so focus stops the flashing. prpr clears the title on exit; terminals do not let it restore the previous one, but most shells set their own at the next prompt. `--title=false` turns all of this off, including focus reports.
+The VS Code terminal shows the title on its tab only with `"terminal.integrated.tabs.title": "${process} ${sequence}"` (or `"${sequence}"`) in VS Code's settings; inside tmux, enable `set -g set-titles on`, and `set -g focus-events on` so focus stops the flashing. prpr clears the title on exit; terminals do not let it restore the previous one, but most shells set their own at the next prompt. Turn Terminal title off in [Settings](#settings) to stop all of this, including focus reports.
 
 ### Notifications
 
-Notifications are off unless prpr starts with `--notify`; `n` turns them on or off for the session, and the title shows `notify` while they are on. After each refresh, prpr sends one desktop notification if, since the previous refresh:
+Notifications are off until you turn on Desktop notifications in [Settings](#settings) or press `n`; either saves the choice, and the title shows `notify` while they are on. After each refresh, prpr sends one desktop notification if, since the previous refresh:
 
 - one of your pull requests became ready to merge (the green `✓`, by your [rules](#ready-to-merge-rules)), its CI started failing, or a reviewer requested changes;
 - a new review request arrived, or a pull request you reviewed needs you again (`new commits`, `replied`, `dismissed`, `activity`). Starting to wait on the author never alerts.
@@ -331,7 +345,7 @@ Every notification also rings the terminal bell, which is what terminals without
 
 ### Mouse
 
-Mouse mode is off at start, so the terminal handles the mouse as usual. Press `m` to turn it on for the session:
+Mouse mode is off until you turn it on with `m` or Mouse in [Settings](#settings), which saves the choice, so the terminal handles the mouse as usual until then:
 
 - Hovering highlights the row under the pointer. It does not move the selection or clear change marks.
 - Clicking a row selects it and focuses its list; clicking a list title focuses that list. Moving off a row this way clears its mark, as the keys do.

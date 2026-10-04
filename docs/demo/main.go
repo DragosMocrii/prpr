@@ -4,7 +4,7 @@
 //
 //	go run . -font /path/to/DejaVuSansMono.ttf -bold /path/to/DejaVuSansMono-Bold.ttf -emoji /path/to/png/72
 //
-// -icons nerd records Nerd Font icons, which -font must then hold.
+// -icons nerd saves Nerd Font icons in the run's preferences, which -font must then hold.
 //
 // The font must cover the box-drawing and status glyphs prpr draws; DejaVu
 // Sans Mono does. Emoji such as 🙏 are drawn from Noto Emoji's color images
@@ -98,7 +98,7 @@ func main() {
 	regular := flag.String("font", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "monospace TrueType font")
 	bold := flag.String("bold", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", "bold variant of -font")
 	fallback := flag.String("fallback", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "font for glyphs -font lacks, such as the braille spinner")
-	icons := flag.String("icons", "unicode", "prpr's icon set: unicode or nerd")
+	icons := flag.String("icons", "unicode", "prpr's icon set, saved in the run's preferences: unicode or nerd")
 	emoji := flag.String("emoji", "", "directory of Noto Emoji images named emoji_u<codepoint>.png, for 🙏; without it, 🙏 is a box")
 	out := flag.String("o", "../demo.gif", "output GIF")
 	flag.Parse()
@@ -126,7 +126,11 @@ func record(regularPath, boldPath, fallbackPath, emojiPath, icons, out string) e
 		}
 	}
 	// A saved All repositories choice skips the first-run scope prompt.
-	if err := os.WriteFile(filepath.Join(config, "prpr", "preferences.json"), []byte(`{"github.com/alice": ""}`), 0o600); err != nil {
+	prefs := `{"github.com/alice": ""}`
+	if icons == "nerd" {
+		prefs = `{"github.com/alice": "", "app": {"icons": "nerd"}}`
+	}
+	if err := os.WriteFile(filepath.Join(config, "prpr", "preferences.json"), []byte(prefs), 0o600); err != nil {
 		return err
 	}
 	for _, build := range [][]string{
@@ -142,7 +146,7 @@ func record(regularPath, boldPath, fallbackPath, emojiPath, icons, out string) e
 
 	cmd := exec.Command(filepath.Join(bin, "prpr"))
 	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"XDG_CONFIG_HOME="+config, "DEMO_STATE="+state, "TERM=xterm-256color", "COLORTERM=truecolor", "PRPR_ICONS="+icons)
+		"XDG_CONFIG_HOME="+config, "DEMO_STATE="+state, "TERM=xterm-256color", "COLORTERM=truecolor")
 	tty, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
 	if err != nil {
 		return err
