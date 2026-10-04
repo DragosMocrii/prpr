@@ -52,8 +52,8 @@ func TestMouseModeIsOffByDefaultAndToggles(t *testing.T) {
 	if selected, _ := m.selectedPR(); selected.Number != 1 {
 		t.Fatalf("click with mouse mode off selected #%d", selected.Number)
 	}
-	help := func() string { return ansi.Strip(strings.Join(m.helpLines(keyMap.listHelp), "\n")) }
-	if !strings.Contains(help(), "mouse on") {
+	help := func() string { return ansi.Strip(strings.Join(m.helpBody(200), "\n")) }
+	if !strings.Contains(help(), "enable mouse") {
 		t.Fatalf("help does not offer mouse mode: %s", help())
 	}
 
@@ -61,7 +61,7 @@ func TestMouseModeIsOffByDefaultAndToggles(t *testing.T) {
 	if mode := m.View().MouseMode; mode != tea.MouseModeAllMotion {
 		t.Fatalf("mouse mode after m = %v", mode)
 	}
-	if !strings.Contains(help(), "mouse off") {
+	if !strings.Contains(help(), "disable mouse") {
 		t.Fatalf("help does not offer turning mouse mode off: %s", help())
 	}
 	// Other screens leave the mouse to the terminal.

@@ -94,7 +94,7 @@ func (m *model) detailsLines() []string {
 	if m.preferenceErr != nil {
 		fixed = m.preferenceErr.Error()
 	}
-	footer := append([]string{singleLine(pr.URL), m.statusLine(fixed, "")}, m.helpLines(keyMap.detailsHelp)...)
+	footer := append([]string{singleLine(pr.URL), m.statusLine(fixed, nil)}, m.helpLines(keyMap.detailsHelp)...)
 	room := max(m.height-len(lines)-len(footer), 0)
 	if len(body) > room {
 		body = body[:room]
@@ -127,11 +127,7 @@ func (m *model) detailsModalLines() []string {
 		Padding(0, 1).Width(width).Render(strings.Join(content, "\n"))
 	x := (m.width - lipgloss.Width(box)) / 2
 	y := max(1, (m.height-3-lipgloss.Height(box))/2)
-	canvas := lipgloss.NewCompositor(
-		lipgloss.NewLayer(strings.Join(base, "\n")),
-		lipgloss.NewLayer(box).X(x).Y(y).Z(1),
-	)
-	return strings.Split(canvas.Render(), "\n")
+	return overlay(base, box, x, y)
 }
 
 type detailRowText struct {
@@ -385,4 +381,149 @@ func plural(n int, noun string) string {
 		return "1 " + noun
 	}
 	return strconv.Itoa(n) + " " + noun + "s"
+}
+
+// rowStatus words the focused pane's selected row for the status line, most
+// important first; the line drops facts from the end to fit. Like the
+// details, it names a blocker only when the data proves it.
+func (m *model) rowStatus() []string {
+	pr, gone, ok := m.paneRow(m.focus, m.focused().table.Cursor())
+	switch {
+	case !ok:
+		return nil
+	case gone:
+		return []string{"No longer listed"}
+	case m.snapshot.Preview:
+		return []string{loadingDetails}
+	}
+	var facts []string
+	list := m.focus
+	if list == paneSnoozed {
+		if s, ok := m.snoozes[keyOf(pr)]; ok {
+			facts = append(facts, "Snoozed until "+wakeText(s, m.now()))
+		}
+		list = m.snoozeList(pr)
+	}
+	if pr.Queue != nil && list != paneReview {
+		facts = append(facts, "Queue: "+queueDetail(pr.Queue))
+	}
+	review := reviewStatus(pr.ReviewDecision, pr.Approvals)
+	if list == paneReview {
+		facts = append(facts, m.requestStatus(pr))
+		// A review is required of every pending request; others' verdicts
+		// are the news.
+		if pr.ReviewDecision == "REVIEW_REQUIRED" {
+			review = ""
+		}
+	} else {
+		facts = append(facts, m.mergeStatus(pr))
+		// A blocked merge already names the review decision.
+		if pr.MergeState == "BLOCKED" && !pr.Draft {
+			switch pr.ReviewDecision {
+			case "REVIEW_REQUIRED", "CHANGES_REQUESTED":
+				review = ""
+			}
+		}
+	}
+	facts = append(facts, checksStatus(pr.Checks))
+	if review != "" {
+		facts = append(facts, review)
+	}
+	if m.bots {
+		for _, bot := range pr.Bots {
+			if status := botStatus(bot); status != "" {
+				facts = append(facts, singleLine(bot.Name)+": "+status)
+			}
+		}
+	}
+	return facts
+}
+
+// mergeStatus is the Merge column in words, after the rules: a pull request
+// GitHub would merge that the rules do not pass yet says so.
+func (m *model) mergeStatus(pr *github.PullRequest) string {
+	switch {
+	case pr.Mergeable == "CONFLICTING" || pr.MergeState == "DIRTY":
+		return "Has conflicts"
+	case pr.Draft:
+		return "Draft"
+	case mergeReady(pr.Draft, pr.Mergeable, pr.MergeState) && m.ready(pr):
+		return "Ready to merge"
+	case mergeReady(pr.Draft, pr.Mergeable, pr.MergeState):
+		return "Mergeable, rules not met"
+	}
+	switch pr.MergeState {
+	case "BEHIND":
+		return "Behind the base branch"
+	case "BLOCKED":
+		switch pr.ReviewDecision {
+		case "REVIEW_REQUIRED":
+			return "Blocked: needs an approving review"
+		case "CHANGES_REQUESTED":
+			return "Blocked: changes requested"
+		}
+		return "Not mergeable yet"
+	case "", "UNKNOWN":
+		return "Merge state unknown"
+	}
+	return "Merge state " + singleLine(pr.MergeState)
+}
+
+// requestStatus says where a review row stands for the viewer.
+func (m *model) requestStatus(pr *github.PullRequest) string {
+	switch {
+	case m.pleading(pr):
+		return "Your review asked again"
+	case pr.ReviewStatus == github.ReviewRequested:
+		return "Your review requested"
+	case pr.ReviewStatus == github.ReviewNewCommits:
+		return "New commits since your review"
+	case pr.ReviewStatus == github.ReviewApproved:
+		return "You approved; waiting on the author"
+	case pr.ReviewStatus == github.ReviewBackInDraft:
+		return "Back in draft since your review"
+	}
+	text := reviewStatusText(pr.ReviewStatus)
+	if text == "" {
+		return "Review requested"
+	}
+	return strings.ToUpper(text[:1]) + text[1:]
+}
+
+func checksStatus(state string) string {
+	switch state {
+	case "SUCCESS":
+		return "CI passing"
+	case "FAILURE", "ERROR":
+		return "CI failing"
+	case "PENDING", "EXPECTED":
+		return "CI running"
+	}
+	return "No CI"
+}
+
+// reviewStatus is the review decision, empty when GitHub gives none.
+func reviewStatus(decision string, approvals int) string {
+	switch decision {
+	case "APPROVED":
+		return fmt.Sprintf("approved (%d)", approvals)
+	case "CHANGES_REQUESTED":
+		return "changes requested"
+	case "REVIEW_REQUIRED":
+		return "review required"
+	}
+	return ""
+}
+
+// botStatus is a bot's state when it needs attention, else empty.
+func botStatus(review github.BotReview) string {
+	switch review.State {
+	case github.BotConcerns:
+		return plural(review.Concerns, "open thread")
+	case github.BotFailed:
+		return "check failed"
+	case github.BotRunning:
+		return "running"
+	}
+	return ""
 }

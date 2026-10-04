@@ -180,3 +180,70 @@ func TestWideTerminalsShowDetailsOverTheList(t *testing.T) {
 		t.Fatalf("narrow details are not full screen:\n%s", view)
 	}
 }
+
+// statusFor selects pull request number in pane id and words it.
+func statusFor(t *testing.T, m *model, id paneID, number int) string {
+	t.Helper()
+	m.setFocus(id)
+	for row := range rowCount(&m.panes[id]) {
+		if pr, _, ok := m.paneRow(id, row); ok && pr.Number == number {
+			m.panes[id].table.SetCursor(row)
+			return strings.Join(m.rowStatus(), " · ")
+		}
+	}
+	t.Fatalf("#%d is not in pane %d", number, id)
+	return ""
+}
+
+func TestRowStatusWordsTheSelectedRow(t *testing.T) {
+	reviews := attentionReviews()
+	reviews[0].RequestedAgain, reviews[0].ReviewStatus = true, github.ReviewRequested
+	reviews[1].ReviewStatus, reviews[1].ReviewDecision, reviews[1].Approvals = github.ReviewNewCommits, "APPROVED", 1
+	m := newPaneModel(t, 200, 30, attentionPRs(), reviews)
+	m.bots = true
+	for _, tc := range []struct {
+		id     paneID
+		number int
+		want   string
+	}{
+		{paneMine, 1, "Ready to merge · CI passing · approved (0)"},
+		// The blocker is named once, from the review decision.
+		{paneMine, 2, "Blocked: changes requested · CI failing"},
+		{paneMine, 3, "Has conflicts · No CI · Copilot: 2 open threads"},
+		{paneMine, 4, "Merge state unknown · No CI"},
+		{paneReview, 10, "Your review asked again · No CI"},
+		{paneReview, 11, "New commits since your review · No CI · approved (1)"},
+	} {
+		if got := statusFor(t, m, tc.id, tc.number); got != tc.want {
+			t.Errorf("#%d status = %q, want %q", tc.number, got, tc.want)
+		}
+	}
+	// Without a review decision, a blocked merge names no blocker.
+	unnamed := attentionPRs()[1]
+	unnamed.ReviewDecision = ""
+	updateSnapshot(m, "alice", unnamed)
+	if got := statusFor(t, m, paneMine, 2); !strings.HasPrefix(got, "Not mergeable yet") {
+		t.Fatalf("blocked without a decision = %q", got)
+	}
+}
+
+func TestRowStatusDropsFactsToFitAndYieldsToNotices(t *testing.T) {
+	m := newPaneModel(t, 200, 30, attentionPRs(), nil)
+	m.bots = true
+	statusFor(t, m, paneMine, 3)
+	line := func() string {
+		lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+		return lines[len(lines)-2]
+	}
+	if got := line(); !strings.Contains(got, "Has conflicts · No CI · Copilot: 2 open threads") {
+		t.Fatalf("status line = %q", got)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 30})
+	if got := line(); !strings.HasPrefix(got, "Has conflicts · No CI") || strings.Contains(got, "Copilot") || strings.Contains(got, "…") {
+		t.Fatalf("narrow status line = %q, want whole facts from the front", got)
+	}
+	m.notice = "Copied"
+	if got := line(); strings.Contains(got, "Has conflicts") {
+		t.Fatalf("a notice shares the line with the status: %q", got)
+	}
+}

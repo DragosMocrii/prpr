@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -116,14 +117,42 @@ func (m *model) summaryLine() string {
 			counts[i] = m.categoryCount(i + 1)
 		}
 	}
-	if line := m.summaryText(counts, false); lipgloss.Width(line) <= m.width {
+	// Labels shorten one at a time, the longest first, then all go, before
+	// the line is cut.
+	levels := make([]int, len(attentionCategories))
+	byLength := make([]int, len(attentionCategories))
+	for i := range byLength {
+		byLength[i] = i
+	}
+	slices.SortStableFunc(byLength, func(a, b int) int {
+		return len(attentionCategories[b].label) - len(attentionCategories[a].label)
+	})
+	for _, i := range byLength {
+		if line := m.summaryText(counts, levels); lipgloss.Width(line) <= m.width {
+			return line
+		}
+		levels[i] = summaryShort
+	}
+	if line := m.summaryText(counts, levels); lipgloss.Width(line) <= m.width {
 		return line
 	}
-	return m.summaryText(counts, true)
+	for i := range levels {
+		levels[i] = summaryCounts
+	}
+	return m.summaryText(counts, levels)
 }
 
-func (m *model) summaryText(counts []int, short bool) string {
+// Summary levels of a category, from widest to narrowest.
+const (
+	summaryFull   = iota // full label
+	summaryShort         // short label
+	summaryCounts        // icon and count only
+)
+
+// summaryText draws the summary with each category at its level.
+func (m *model) summaryText(counts, levels []int) string {
 	key := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	bracket := lipgloss.NewStyle().Faint(true)
 	var parts []string
 	for i, category := range attentionCategories {
 		number := i + 1
@@ -134,12 +163,20 @@ func (m *model) summaryText(counts []int, short bool) string {
 		if count == 0 && m.category != number {
 			continue
 		}
-		label := category.label
-		if short {
-			label = category.short
+		// The key is bracketed so it never reads as part of the count.
+		part := bracket.Render("[") + key.Render(strconv.Itoa(number)) + bracket.Render("]") + " " +
+			coloredIcon(m.icons.categories[i], category.color)
+		switch {
+		case levels[i] == summaryFull:
+			part += " " + strconv.Itoa(count) + " " + category.label
+		case levels[i] == summaryShort:
+			part += " " + strconv.Itoa(count) + " " + category.short
+		case m.icons.nerd:
+			// A Nerd icon may draw wider than its cell, so a space follows it.
+			part += " " + strconv.Itoa(count)
+		default:
+			part += strconv.Itoa(count)
 		}
-		icon := coloredIcon(m.icons.categories[i], category.color)
-		part := key.Render(strconv.Itoa(number)) + " " + icon + " " + strconv.Itoa(count) + " " + label
 		if m.category == number {
 			part = restyle(part, reverseOn, reverseOff)
 		}

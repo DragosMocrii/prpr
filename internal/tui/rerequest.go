@@ -307,5 +307,5 @@ func (m *model) handleReviewsRequested(msg reviewsRequestedMsg) {
 func (m *model) rerequestLines() []string {
 	lines := []string{m.titleLine("prpr — "+m.accountLabel()+" — request reviews again", ""), ""}
 	lines = append(lines, strings.Split(m.rerequest.form.View(), "\n")...)
-	return append(lines, "", m.help.ShortHelpView(m.keys.snoozeHelp().short))
+	return append(lines, "", m.shortHelp(m.keys.snoozeHelp()))
 }

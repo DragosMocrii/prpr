@@ -397,7 +397,7 @@ func (m *model) updateSnooze(msg tea.Msg) tea.Cmd {
 func (m *model) snoozeLines() []string {
 	lines := []string{m.titleLine("prpr — "+m.accountLabel()+" — snooze", ""), ""}
 	lines = append(lines, strings.Split(m.snoozeEditor.form.View(), "\n")...)
-	return append(lines, "", m.help.ShortHelpView(m.keys.snoozeHelp().short))
+	return append(lines, "", m.shortHelp(m.keys.snoozeHelp()))
 }
 
 // snooze hides a pull request of list until a time, or until activity.

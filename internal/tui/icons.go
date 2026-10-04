@@ -20,8 +20,8 @@ type iconSet struct {
 	// Bigger variants for CI and review, and the bot states that have no
 	// merge counterpart.
 	passed, failed, botRunning, botFailed string
-	// open and draft replace the State column's words when set.
-	open, draft string
+	// draft tags a draft's name instead of the word when set.
+	draft string
 	// Reviewed pull requests: needing the viewer again, then waiting.
 	newCommits, replied, dismissed, activity, waiting, approved, backInDraft string
 	// Merge queue states, then the tag of a pull request the queue removed;
@@ -58,7 +58,7 @@ var nerdIcons = iconSet{
 	plead: pleadIcon,
 	check: "", cross: "", pending: "", behind: "", unknown: "", none: "",
 	passed: "", failed: "", botRunning: "", botFailed: "",
-	open: "", draft: "",
+	draft:      "",
 	newCommits: "", replied: "", dismissed: "", activity: "",
 	waiting: "", approved: "", backInDraft: "",
 	queueSubmitted: "\uf4fa", // paper_airplane
@@ -73,7 +73,7 @@ var nerdIcons = iconSet{
 	// awaiting your review, and status unknown.
 	categories: [7]string{"\uf419", "\uf52f", "\uf45e", "\uf47f", "\uf477", "\uf4af", "\uf420"},
 	headers: map[string]string{
-		"State": "", "Merge": "", "Age": "", "Bots": "",
+		"Merge": "", "Age": "", "Bots": "",
 		"CI": "", "Review": "", "Comments": "", "Size": "",
 		"Queue": "\uf4db", // git_merge_queue
 		"Wakes": "\uf4ee", // moon
@@ -142,26 +142,10 @@ func (m *model) toggleIcons() {
 	m.rebuildPRTable(false)
 }
 
-// legend explains the Merge column's symbols. With rules of the user's own,
-// a yellow check means only GitHub would merge.
-func (ic *iconSet) legend(rules bool) string {
-	ready := ic.check + " ready  "
-	if rules {
-		ready = ic.check + " ready (yellow: GitHub only)  "
+// draftTag leads a draft's name: the word, or an icon in the Nerd set.
+func (ic *iconSet) draftTag() string {
+	if ic.draft == "" {
+		return lipgloss.NewStyle().Faint(true).Render("draft")
 	}
-	return ready + ic.pending + " blocked  " + ic.behind + " behind  " + ic.cross + " conflicts  " + ic.unknown + " unknown"
-}
-
-// stateText is the State column: words, or an icon in the Nerd set.
-func (ic *iconSet) stateText(draft bool) string {
-	switch {
-	case ic.open == "" && draft:
-		return "draft"
-	case ic.open == "":
-		return "open"
-	case draft:
-		return lipgloss.NewStyle().Faint(true).Render(ic.draft)
-	default:
-		return coloredIcon(ic.open, "2")
-	}
+	return lipgloss.NewStyle().Faint(true).Render(ic.draft)
 }

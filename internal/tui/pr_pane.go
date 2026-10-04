@@ -178,7 +178,7 @@ func (m *model) listChromeHeight() int {
 // listChromeBase is listChromeHeight without the legend, which takes only
 // what is left.
 func (m *model) listChromeBase() int {
-	height := 3 + m.listHelpHeight()
+	height := 4
 	if m.summaryShown() {
 		height++
 	}

@@ -35,7 +35,7 @@ func (m *model) legendSections() []legendSection {
 	queuePane := slices.Contains(m.drawnPanes(), paneQueue)
 	snoozePane := slices.Contains(m.drawnPanes(), paneSnoozed)
 	if ic.nerd {
-		columns := []string{"State", "Merge", "Age", "Bots", "CI", "Review", "Comments", "Size", "Queue", "Wakes"}
+		columns := []string{"Merge", "Age", "Bots", "CI", "Review", "Comments", "Size", "Queue", "Wakes"}
 		var items []string
 		for _, column := range columns {
 			if (column == "Bots" && !m.bots) || (column == "Queue" && !queuePane) || (column == "Wakes" && !snoozePane) {
@@ -45,7 +45,7 @@ func (m *model) legendSections() []legendSection {
 		}
 		sections = append(sections,
 			legendSection{"Columns", items},
-			legendSection{"State", []string{item(ic.stateText(false), "open"), item(ic.stateText(true), "draft")}})
+			legendSection{"Name", []string{item(ic.draftTag(), "draft")}})
 	}
 	merge := func(mergeable, state string) string { return mergeIcon(ic, false, mergeable, state, false) }
 	items := []string{item(mergeIcon(ic, false, "MERGEABLE", "CLEAN", true), "ready")}

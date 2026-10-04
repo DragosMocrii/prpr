@@ -387,5 +387,5 @@ func (m *model) saveRules() tea.Cmd {
 func (m *model) rulesLines() []string {
 	lines := []string{m.titleLine("prpr — "+m.accountLabel()+" — ready-to-merge rules", ""), ""}
 	lines = append(lines, strings.Split(m.rulesEditor.form.View(), "\n")...)
-	return append(lines, "", m.help.ShortHelpView(m.keys.rulesHelp().short))
+	return append(lines, "", m.shortHelp(m.keys.rulesHelp()))
 }

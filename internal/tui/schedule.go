@@ -370,7 +370,7 @@ func (m *model) scheduleLines() []string {
 		lines = append(lines, "Saved schedule could not be read; automatic polling remains paused until repaired.", "")
 	}
 	lines = append(lines, strings.Split(m.scheduleEditor.form.View(), "\n")...)
-	return append(lines, "", m.help.ShortHelpView(m.keys.scheduleHelp().short))
+	return append(lines, "", m.shortHelp(m.keys.scheduleHelp()))
 }
 
 func (m *model) scheduleStatus() string {

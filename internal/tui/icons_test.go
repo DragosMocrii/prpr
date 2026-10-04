@@ -35,9 +35,10 @@ func TestNerdIconsCompactTheColumnsAndKeepWordsElsewhere(t *testing.T) {
 	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: m.snapshot.PullRequests,
 		ReviewRequests: []github.PullRequest{reviewedPR(9, github.ReviewWaitingOnAuthor)}}})
 	unicodeWidth := nameWidth(m, paneMine)
-	row := strings.Join(m.panes[paneMine].table.Rows()[0], " ")
-	if !strings.Contains(row, "open") || strings.ContainsRune(row, '') {
-		t.Fatalf("unicode row = %q", row)
+	rows := m.panes[paneMine].table.Rows()
+	if open, draft := ansi.Strip(strings.Join(rows[0], " ")), ansi.Strip(strings.Join(rows[1], " ")); strings.Contains(open, "open") ||
+		strings.Contains(open, "draft") || !strings.Contains(draft, "draft · ") || strings.ContainsRune(draft, '') {
+		t.Fatalf("unicode rows = %q, %q, want only the draft tagged, in words", open, draft)
 	}
 
 	pressI(m)
@@ -47,10 +48,10 @@ func TestNerdIconsCompactTheColumnsAndKeepWordsElsewhere(t *testing.T) {
 	if got := nameWidth(m, paneMine); got <= unicodeWidth {
 		t.Fatalf("PR name width = %d with Nerd icons, want more than %d", got, unicodeWidth)
 	}
-	rows := m.panes[paneMine].table.Rows()
+	rows = m.panes[paneMine].table.Rows()
 	if mine := strings.Join(rows[0], " ") + strings.Join(rows[1], " "); strings.Contains(mine, "open") || strings.Contains(mine, "draft") ||
-		!strings.ContainsRune(mine, '') || !strings.ContainsRune(mine, '') {
-		t.Fatalf("nerd rows = %q, want state icons instead of words", mine)
+		!strings.ContainsRune(mine, '') {
+		t.Fatalf("nerd rows = %q, want the draft icon instead of the word", mine)
 	}
 	if review := reviewRow(m, 0); strings.Contains(review, "waiting") || !strings.ContainsRune(review, '') {
 		t.Fatalf("nerd review row = %q, want the waiting icon", review)
@@ -79,7 +80,7 @@ func TestNerdIconsCompactTheColumnsAndKeepWordsElsewhere(t *testing.T) {
 func TestEveryNerdIconIsOneCell(t *testing.T) {
 	ic := nerdIcons
 	icons := []string{ic.check, ic.cross, ic.pending, ic.behind, ic.unknown, ic.none, ic.passed, ic.failed, ic.botRunning, ic.botFailed,
-		ic.open, ic.draft, ic.newCommits, ic.replied, ic.dismissed, ic.activity, ic.waiting, ic.approved, ic.backInDraft, ic.star, ic.pin, ic.bell}
+		ic.draft, ic.newCommits, ic.replied, ic.dismissed, ic.activity, ic.waiting, ic.approved, ic.backInDraft, ic.star, ic.pin, ic.bell}
 	for _, header := range ic.headers {
 		icons = append(icons, header)
 	}

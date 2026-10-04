@@ -61,7 +61,7 @@ func TestBotsColumnDropsBeforeAgeButAfterOtherStatistics(t *testing.T) {
 		m.rebuildPRTable(false)
 		columns := m.panes[paneMine].table.Columns()
 		var got []string
-		for _, column := range columns[columnIndex(columns, "State")+1:] {
+		for _, column := range columns[columnIndex(columns, "PR name")+1:] {
 			got = append(got, column.Title)
 		}
 		if len(got) > previous || strings.Join(got, ",") != strings.Join(want[:len(got)], ",") {
@@ -90,7 +90,7 @@ func TestSelectedPRShowsBotBreakdownWhenItFits(t *testing.T) {
 	m.width = 60
 	m.rebuildPRTable(false)
 	view := ansi.Strip(m.View().Content)
-	if strings.Contains(view, "Codex") || !strings.Contains(view, "https://github.com/acme/a/pull/1") {
+	if strings.Contains(view, "Codex ✗2") || !strings.Contains(view, "https://github.com/acme/a/pull/1") {
 		t.Fatalf("narrow view should keep the whole URL and drop the breakdown:\n%s", view)
 	}
 }

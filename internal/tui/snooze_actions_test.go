@@ -208,7 +208,7 @@ func TestHelpListsUndoFromTheStart(t *testing.T) {
 	if !m.keys.Undo.Enabled() || !m.keys.Snooze.Enabled() {
 		t.Fatal("snooze and undo are not enabled before anything is snoozed")
 	}
-	m.help.ShowAll = true
+	m.helpOpen = true
 	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "undo snooze") {
 		t.Fatal("full help does not list U")
 	}

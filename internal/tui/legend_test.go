@@ -166,7 +166,7 @@ func TestLegendDrawsWhatTheTablesDraw(t *testing.T) {
 			drawn = append(drawn, botStateText(ic, github.BotReview{State: state}))
 		}
 		if nerd {
-			drawn = append(drawn, ic.stateText(false), ic.stateText(true), ic.pin, ic.bell, ic.header("CI"),
+			drawn = append(drawn, ic.draftTag(), ic.pin, ic.bell, ic.header("CI"),
 				reviewStatusTag(ic, github.ReviewNewCommits), reviewStatusTag(ic, github.ReviewWaitingOnAuthor))
 		}
 		legend := strings.Join(m.legendLines(), "\n")

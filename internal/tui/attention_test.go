@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -46,7 +47,7 @@ func TestAttentionCategoriesCountProvenStatesOnly(t *testing.T) {
 		t.Fatalf("counts = %v, want %v", got, want)
 	}
 	summary := ansi.Strip(m.summaryLine())
-	for _, want := range []string{"1 ✓ 1 ready to merge", "2 ✗ 1 changes requested", "6 ● 2 awaiting your review", "7 ? 2 status unknown"} {
+	for _, want := range []string{"[1] ✓ 1 ready to merge", "[2] ✗ 1 changes requested", "[6] ● 2 awaiting your review", "[7] ? 2 status unknown"} {
 		if !strings.Contains(summary, want) {
 			t.Errorf("summary %q lacks %q", summary, want)
 		}
@@ -120,24 +121,44 @@ func TestCategoryKeysFilterFocusAndToggle(t *testing.T) {
 
 func TestSummaryLineLayout(t *testing.T) {
 	m := newPaneModel(t, 140, 30, attentionPRs(), attentionReviews())
-	if lines := ansi.Strip(m.View().Content); !strings.Contains(strings.Split(lines, "\n")[1], "1 ✓ 1") {
+	if lines := ansi.Strip(m.View().Content); !strings.Contains(strings.Split(lines, "\n")[1], "[1] ✓ 1") {
 		t.Fatalf("summary is not the second line:\n%s", lines)
 	}
 	for _, size := range [][2]int{{40, 8}, {40, 13}, {60, 14}, {140, 30}} {
 		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		lines := assertBounded(t, m, size[0], size[1])
-		shown := strings.Contains(ansi.Strip(strings.Join(lines, "\n")), "1 ✓ 1")
+		shown := strings.Contains(ansi.Strip(strings.Join(lines, "\n")), "[1] ✓")
 		if want := size[1] >= minSummaryHeight; shown != want {
 			t.Fatalf("summary shown %t at %dx%d, want %t", shown, size[0], size[1], want)
 		}
 	}
 }
 
-func TestNarrowSummaryUsesShortLabels(t *testing.T) {
+func TestNarrowSummaryShortensLabelsThenDropsThem(t *testing.T) {
 	m := newPaneModel(t, 140, 30, attentionPRs(), attentionReviews())
-	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	summary := ansi.Strip(m.summaryLine())
-	if !strings.Contains(summary, "7 ? 2 unknown") || strings.Contains(summary, "ready to merge") {
-		t.Fatalf("narrow summary = %q", summary)
+	// At 140 columns only the longest labels shorten.
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+	if summary := ansi.Strip(m.summaryLine()); !strings.Contains(summary, "bot threads") || !strings.Contains(summary, "failing CI") ||
+		ansi.StringWidth(summary) > 140 {
+		t.Fatalf("summary at 140 columns = %q, want most labels whole", summary)
+	}
+	for _, tc := range []struct {
+		width      int
+		want, lack string
+	}{
+		{124, "[7] ? 2 unknown", "ready to merge"},
+		{80, "[7] ?2", "unknown"},
+	} {
+		m.Update(tea.WindowSizeMsg{Width: tc.width, Height: 30})
+		summary := ansi.Strip(m.summaryLine())
+		if !strings.Contains(summary, tc.want) || strings.Contains(summary, tc.lack) || ansi.StringWidth(summary) > tc.width {
+			t.Fatalf("summary at %d columns = %q, want %q without %q", tc.width, summary, tc.want, tc.lack)
+		}
+		// Every shown category keeps its key and count.
+		for number, count := range categoryCounts(m) {
+			if count > 0 && !strings.Contains(summary, fmt.Sprintf("[%d]", number+1)) {
+				t.Fatalf("summary at %d columns = %q lacks key %d", tc.width, summary, number+1)
+			}
+		}
 	}
 }

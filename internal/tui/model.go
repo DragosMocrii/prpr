@@ -66,10 +66,13 @@ type model struct {
 	rest           restState
 	restGeneration uint64
 	// changesLogin is the account the change baseline belongs to.
-	changesLogin        string
-	focus               paneID
-	keys                keyMap
-	help                help.Model
+	changesLogin string
+	focus        paneID
+	keys         keyMap
+	help         help.Model
+	// helpOpen shows the help overlay, scrolled down helpScroll lines.
+	helpOpen            bool
+	helpScroll          int
 	spinner             spinner.Model
 	darkBackground      bool
 	picker              *repositoryPicker
@@ -426,6 +429,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	scheduleCmd := m.reconcileSchedule()
 	model, cmd := m.update(msg)
 	m.closeStaleDetails()
+	m.closeStaleHelp()
 	postScheduleCmd := m.reconcileSchedule()
 	return model, tea.Batch(scheduleCmd, cmd, postScheduleCmd, m.trackRest(msg), m.schedulePlead())
 }
@@ -644,6 +648,9 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if m.searching != nil {
 		return m.updateSearch(msg)
 	}
+	if m.helpShown() {
+		return m.updateHelp(msg)
+	}
 	m.notice = ""
 	switch {
 	case key.Matches(msg, k.Quit):
@@ -724,8 +731,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, k.Rerequest):
 		return m.rerequestSelected()
 	case key.Matches(msg, k.Help):
-		m.help.ShowAll = !m.help.ShowAll
-		m.rebuildPRTable(false)
+		m.helpOpen, m.helpScroll = true, 0
 	case key.Matches(msg, k.ChoiceUp):
 		m.scopeChoiceCursor = 0
 	case key.Matches(msg, k.ChoiceDown):
@@ -1190,6 +1196,8 @@ func (m *model) View() tea.View {
 		lines = m.rerequestLines()
 	case m.detailsShown():
 		lines = m.detailsView()
+	case m.helpShown():
+		lines = m.helpView()
 	case list:
 		lines = m.listLines()
 	case m.width < minimumWidth || m.height < minimumHeight:
@@ -1218,7 +1226,7 @@ func (m *model) View() tea.View {
 	// scroll the top line away.
 	view.AltScreen = true
 	// Other screens leave the mouse to the terminal.
-	if list && m.mouse {
+	if list && m.mouse && !m.helpShown() {
 		view.MouseMode = tea.MouseModeAllMotion
 	}
 	view.WindowTitle = m.windowTitle()
@@ -1228,26 +1236,6 @@ func (m *model) View() tea.View {
 
 // helpLines renders the help for a screen. Full help is used only when it is
 // toggled on and the screen has a full view.
-func (m *model) helpLines(screen func(keyMap) helpKeys) []string {
-	m.syncKeys()
-	keys := screen(m.keys)
-	m.help.SetWidth(m.width)
-	if m.help.ShowAll && keys.full != nil && m.fullHelpFits(keys) {
-		// help.Model can overflow its width when no ellipsis fits, so pass
-		// only the leading columns that fit.
-		full := m.help.FullHelpView(keys.full[:1])
-		for n := 2; n <= len(keys.full); n++ {
-			view := m.help.FullHelpView(keys.full[:n])
-			if lipgloss.Width(view) > m.width {
-				break
-			}
-			full = view
-		}
-		return strings.Split(full, "\n")
-	}
-	return []string{m.help.ShortHelpView(keys.short)}
-}
-
 func (m *model) scopeChoiceLines() []string {
 	pick, all := "  Pick a repository", "  Show all my PRs"
 	if m.scopeChoiceCursor == 0 {
@@ -1316,9 +1304,6 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 	if filters := m.filterText(); filters != "" {
 		title += " · " + filters
 	}
-	if m.refreshInterval > 0 {
-		title += " · auto " + intervalText(m.refreshInterval)
-	}
 	if m.notify && m.icons.nerd {
 		title += " · " + m.icons.bell
 	} else if m.notify {
@@ -1356,7 +1341,8 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 		}
 	}
 	lines = append(lines, selected)
-	fixed, legend := "", ""
+	fixed := ""
+	var status []string
 	if pane := m.focused(); rowCount(pane) > 0 && pane.pages.TotalPages > 1 {
 		fixed = m.pageIndicator()
 	}
@@ -1366,8 +1352,8 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 		fixed = strings.TrimLeft(fixed+"  "+m.notice, " ")
 	} else if summary := m.changeStatus(m.changeStatusWidth(fixed)); summary != "" {
 		fixed = strings.TrimLeft(fixed+"  "+summary, " ")
-	} else if !(layout.single && m.focus != paneMine) && rowCount(&m.panes[paneMine]) > 0 && len(legendLines) == 0 {
-		legend = m.icons.legend(m.rules.Customized())
+	} else {
+		status = m.rowStatus()
 	}
 	if status := m.scheduleStatus(); status != "" {
 		fixed = strings.TrimLeft(fixed+"  "+status, " ")
@@ -1379,7 +1365,7 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 		lines = append(lines, m.searching.View())
 		return append(lines, m.helpLines(keyMap.searchHelp)...)
 	}
-	lines = append(lines, m.statusLine(fixed, legend))
+	lines = append(lines, m.statusLine(fixed, status))
 	return append(lines, m.helpLines(screen)...)
 }
 
@@ -1448,17 +1434,4 @@ func wrapWords(value string, width int) []string {
 		lines = append(lines, line)
 	}
 	return lines
-}
-
-// intervalText drops the zero units time.Duration.String prints, so 5m0s
-// reads as 5m.
-func intervalText(d time.Duration) string {
-	text := d.String()
-	if strings.HasSuffix(text, "m0s") {
-		text = strings.TrimSuffix(text, "0s")
-	}
-	if strings.HasSuffix(text, "h0m") {
-		text = strings.TrimSuffix(text, "0m")
-	}
-	return text
 }

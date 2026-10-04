@@ -118,7 +118,8 @@ func (m *model) handleMouse(msg tea.MouseMsg) {
 	}
 	mouse := msg.Mouse()
 	m.pointer = pointer{x: mouse.X, y: mouse.Y, known: true}
-	if !m.showingList() {
+	// The help overlay hides the rows a click would land on.
+	if !m.showingList() || m.helpShown() {
 		return
 	}
 	switch msg := msg.(type) {

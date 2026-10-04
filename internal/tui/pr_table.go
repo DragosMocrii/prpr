@@ -73,10 +73,13 @@ type tableLayout struct {
 func (m *model) paneLayout(id paneID) tableLayout {
 	pane := &m.panes[id]
 	review := id == paneReview
-	maxNumberWidth := 6
+	// Number, Repository, and Author are as wide as their longest value.
+	maxNumberWidth, maxRepository, maxAuthor := 6, 0, 0
 	for row := range rowCount(pane) {
 		if pr, _, ok := m.paneRow(id, row); ok {
 			maxNumberWidth = max(maxNumberWidth, ansi.StringWidth(fmt.Sprintf("#%d", pr.Number)))
+			maxRepository = max(maxRepository, ansi.StringWidth(singleLine(pr.Repository)))
+			maxAuthor = max(maxAuthor, ansi.StringWidth(singleLine(pr.Author)))
 		}
 	}
 	width := max(1, m.width)
@@ -84,7 +87,7 @@ func (m *model) paneLayout(id paneID) tableLayout {
 	layout.repositoryColumn = m.selectedRepository == "" && width >= 80
 	repositoryWidth := 0
 	if layout.repositoryColumn {
-		repositoryWidth = min(28, max(12, width/4))
+		repositoryWidth = min(28, max(12, width/4), max(len("Repository"), maxRepository))
 	}
 	ic := m.icons
 	if id == paneQueue {
@@ -130,12 +133,11 @@ func (m *model) paneLayout(id paneID) tableLayout {
 		return layout
 	}
 	lastTitle, lastWidth := ic.header("Merge"), 5
-	stateWidth := 5
 	if ic.nerd {
-		lastWidth, stateWidth = 1, 1
+		lastWidth = 1
 	}
 	if review {
-		lastTitle, lastWidth = "Author", min(16, max(8, width/6))
+		lastTitle, lastWidth = "Author", min(16, max(8, maxAuthor))
 	}
 	columns := make([]table.Column, 0, 6+len(statColumns))
 	// The mark column widens for the asked-again marker while one is shown.
@@ -154,31 +156,62 @@ func (m *model) paneLayout(id paneID) tableLayout {
 	}
 	columns = append(columns, table.Column{Title: "Number", Width: maxNumberWidth})
 	nameColumn := len(columns)
-	columns = append(columns,
-		table.Column{Title: "PR name"},
-		table.Column{Title: ic.header("State"), Width: stateWidth},
-	)
+	columns = append(columns, table.Column{Title: "PR name"})
 	if review {
 		columns = append(columns, table.Column{Title: lastTitle, Width: lastWidth})
 	}
-	nameWidth := remainingWidth(width, columns)
-	// Statistics columns are added in priority order while the name keeps room.
-	for _, stat := range statColumns {
+	// Statistics columns are kept in priority order while the name keeps room,
+	// then drawn in their usual order.
+	kept := make(map[changedCells]bool)
+	withStats := slices.Clone(columns)
+	for _, stat := range paneStatColumns(id) {
 		if stat.bots && !m.bots {
 			continue
 		}
-		candidate := append(columns, table.Column{Title: ic.header(stat.title), Width: stat.columnWidth(ic)})
+		candidate := append(withStats, table.Column{Width: stat.columnWidth(ic)})
 		if remainingWidth(width, candidate) < minStatsNameWidth {
 			break
 		}
-		columns = candidate
-		nameWidth = remainingWidth(width, columns)
-		layout.stats = append(layout.stats, stat)
+		withStats, kept[stat.cell] = candidate, true
 	}
+	for _, stat := range statColumns {
+		if kept[stat.cell] {
+			columns = append(columns, table.Column{Title: ic.header(stat.title), Width: stat.columnWidth(ic)})
+			layout.stats = append(layout.stats, stat)
+		}
+	}
+	nameWidth := remainingWidth(width, columns)
 	layout.fits = nameWidth >= 8
 	columns[nameColumn].Width = max(8, nameWidth)
 	layout.columns = columns
 	return layout
+}
+
+// nameTagSeparator follows a tag in front of a pull request's name.
+func nameTagSeparator(ic *iconSet) string {
+	if ic.nerd {
+		return " "
+	}
+	return " · "
+}
+
+// paneStatColumns is statColumns in a pane's priority order: Review
+// requested gives up Review first, since a pending request mostly shows it
+// as required.
+func paneStatColumns(id paneID) []statColumn {
+	if id != paneReview {
+		return statColumns
+	}
+	stats := make([]statColumn, 0, len(statColumns))
+	var review []statColumn
+	for _, stat := range statColumns {
+		if stat.cell == cellReview {
+			review = append(review, stat)
+			continue
+		}
+		stats = append(stats, stat)
+	}
+	return append(stats, review...)
 }
 
 // Change-mark styles. Each is turned back on after the resets inside a cell.
@@ -225,6 +258,10 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		if all && !layout.repositoryColumn {
 			name = singleLine(pr.Repository) + " — " + name
 		}
+		// A review row back in draft already says so in its status tag.
+		if pr.Draft && pr.ReviewStatus != github.ReviewBackInDraft {
+			name = ic.draftTag() + nameTagSeparator(ic) + name
+		}
 		if review {
 			if status := reviewStatusTag(ic, pr.ReviewStatus); status != "" && ic.nerd {
 				name = status + " " + name
@@ -232,7 +269,8 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 				name = status + " · " + name
 			}
 		}
-		nameCells := cellName
+		// The name carries the draft tag, so it stands for State too.
+		nameCells := cellName | cellState
 		if id == paneMine {
 			// The name stands for the queue in My PRs, even once the entry is gone.
 			nameCells |= cellQueue
@@ -266,7 +304,6 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			rows = append(rows, cells)
 			continue
 		}
-		state := ic.stateText(pr.Draft)
 		// A preview has no merge state, but conflicts are already known.
 		preview := m.snapshot.Preview && !gone
 		last, lastCell := m.mergeCell(pr), cellMerge
@@ -284,7 +321,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		if layout.repositoryColumn {
 			cells = append(cells, singleLine(pr.Repository))
 		}
-		cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(nameCells, name), changed(cellState, state))
+		cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(nameCells, name))
 		if review {
 			cells = append(cells, changed(lastCell, last))
 		}
@@ -687,21 +724,6 @@ func compactCount(n int) string {
 
 func coloredIcon(icon, color string) string {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(icon)
-}
-
-// listHelpHeight counts help lines from the binding layout rather than the
-// current enabled state, which is stale while the picker or scope prompt is
-// shown.
-func (m *model) listHelpHeight() int {
-	keys := m.keys.listHelp()
-	if !m.help.ShowAll || !m.fullHelpFits(keys) {
-		return 1
-	}
-	rows := 1
-	for _, column := range keys.full {
-		rows = max(rows, len(column))
-	}
-	return rows
 }
 
 func prNumberLink(number int, rawURL string) string {

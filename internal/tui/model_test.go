@@ -206,8 +206,8 @@ func TestDisabledKeysDoNothing(t *testing.T) {
 	for _, text := range []string{"p", "c", "l", "?"} {
 		press(m, tea.Key{Code: rune(text[0]), Text: text})
 	}
-	if m.scopeChosen || m.picker != nil || m.loading || m.help.ShowAll {
-		t.Fatalf("scope choice accepted list keys: chosen %t picker %v loading %t help %t", m.scopeChosen, m.picker, m.loading, m.help.ShowAll)
+	if m.scopeChosen || m.picker != nil || m.loading || m.helpOpen {
+		t.Fatalf("scope choice accepted list keys: chosen %t picker %v loading %t help %t", m.scopeChosen, m.picker, m.loading, m.helpOpen)
 	}
 }
 

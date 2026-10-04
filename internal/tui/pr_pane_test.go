@@ -95,8 +95,8 @@ func TestMyPRsLeadWithMergeAndReviewRowsEndWithTheAuthor(t *testing.T) {
 			if mine[0] != "" || mine[1] != m.icons.header("Merge") {
 				t.Errorf("nerd %t, width %d: My PRs columns = %q, want Merge after the mark", nerd, width, mine)
 			}
-			if author := slices.Index(review, "Author"); author != columnIndex(m.panes[paneReview].table.Columns(), m.icons.header("State"))+1 {
-				t.Errorf("nerd %t, width %d: review columns = %q, want Author after State", nerd, width, review)
+			if author := slices.Index(review, "Author"); author != columnIndex(m.panes[paneReview].table.Columns(), "PR name")+1 {
+				t.Errorf("nerd %t, width %d: review columns = %q, want Author after PR name", nerd, width, review)
 			}
 			cell := ansi.Strip(m.panes[paneMine].table.Rows()[0][1])
 			if want := ansi.Strip(m.mergeCell(&m.snapshot.PullRequests[m.panes[paneMine].visible[0]])); cell != want {
@@ -383,22 +383,6 @@ func TestDualLayoutGivesEachPaneHeaderPlusTwoRows(t *testing.T) {
 	}
 	if m := newPaneModel(t, width, 12, manyPRs(30), reviewPRs(30)); !m.layoutPanes().single {
 		t.Fatal("80x12 should use the single-pane layout")
-	}
-}
-
-func TestMergeLegendOnlyWhenMyPRsIsDrawnWithRows(t *testing.T) {
-	const legend = "✓ ready"
-	m := newPaneModel(t, 80, 10, manyPRs(30), reviewPRs(30))
-	press(m, tea.Key{Code: tea.KeyTab})
-	if !m.layoutPanes().single || m.focus != paneReview {
-		t.Fatalf("want single layout on review pane, got %+v focus %d", m.layoutPanes(), m.focus)
-	}
-	if view := ansi.Strip(strings.Join(assertBounded(t, m, 80, 10), "\n")); strings.Contains(view, legend) {
-		t.Fatalf("legend shown without My PRs pane:\n%s", view)
-	}
-	m = newPaneModel(t, 100, 24, manyPRs(3), reviewPRs(2))
-	if view := ansi.Strip(strings.Join(assertBounded(t, m, 100, 24), "\n")); !strings.Contains(view, legend) {
-		t.Fatalf("legend missing in dual layout:\n%s", view)
 	}
 }
 

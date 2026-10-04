@@ -106,7 +106,7 @@ func defaultKeyMap() keyMap {
 		QuickFailing:    key.NewBinding(key.WithKeys("F"), key.WithHelp("F", "failing CI")),
 		QuickReady:      key.NewBinding(key.WithKeys("M"), key.WithHelp("M", "ready to merge")),
 		ClearFilters:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filters")),
-		Categories:      key.NewBinding(key.WithKeys("1", "2", "3", "4", "5", "6", "7"), key.WithHelp("1–7", "summary category")),
+		Categories:      key.NewBinding(key.WithKeys("1", "2", "3", "4", "5", "6", "7"), key.WithHelp("1–7", "filter")),
 		Open:            key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open")),
 		CopyURL:         key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy URL")),
 		Mouse:           key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mouse on")),
@@ -226,9 +226,9 @@ func (m *model) syncKeys() {
 	k.CopyURL.SetEnabled(rows)
 	k.Mouse.SetEnabled(listing)
 	if m.mouse {
-		k.Mouse.SetHelp("m", "mouse off")
+		k.Mouse.SetHelp("m", "disable mouse")
 	} else {
-		k.Mouse.SetHelp("m", "mouse on")
+		k.Mouse.SetHelp("m", "enable mouse")
 	}
 	k.Notify.SetEnabled(listing)
 	k.Icons.SetEnabled(listing)
@@ -249,9 +249,9 @@ func (m *model) syncKeys() {
 		k.Snooze.SetHelp("z", "snooze")
 	}
 	if m.icons.nerd {
-		k.Icons.SetHelp("i", "unicode icons")
+		k.Icons.SetHelp("i", "use Unicode icons")
 	} else {
-		k.Icons.SetHelp("i", "nerd icons")
+		k.Icons.SetHelp("i", "use Nerd icons")
 	}
 	k.Account.SetEnabled(m.switchAccounts && idle && m.picker == nil && m.accounts == nil && !details)
 	choosing := m.accounts != nil
@@ -262,17 +262,17 @@ func (m *model) syncKeys() {
 	k.AccountPicker.Retry.SetEnabled(choosing && !m.accounts.busy)
 	k.AccountPicker.Quit.SetEnabled(choosing)
 	if m.notify {
-		k.Notify.SetHelp("n", "notify off")
+		k.Notify.SetHelp("n", "disable notifications")
 	} else {
-		k.Notify.SetHelp("n", "notify on")
+		k.Notify.SetHelp("n", "enable notifications")
 	}
 	k.Retry.SetEnabled(idle && m.err != nil)
 	k.Login.SetEnabled(idle && m.err != nil)
 	k.Help.SetEnabled(listing)
-	if m.help.ShowAll {
-		k.Help.SetHelp("?", "less")
+	if m.helpOpen {
+		k.Help.SetHelp("?/esc", "close help")
 	} else {
-		k.Help.SetHelp("?", "more")
+		k.Help.SetHelp("?", "help")
 	}
 	k.Quit.SetEnabled(m.picker == nil)
 	for _, binding := range []*key.Binding{
@@ -325,79 +325,93 @@ func (m *model) syncKeys() {
 	}
 }
 
-// helpKeys adapts a screen's bindings to help.KeyMap.
+// helpKeys is a screen's help line: short keys in priority order, dropped
+// from the end to fit, then pinned keys, which always stay.
 type helpKeys struct {
-	short []key.Binding
-	full  [][]key.Binding
+	short  []key.Binding
+	pinned []key.Binding
 }
 
-func (h helpKeys) ShortHelp() []key.Binding  { return h.short }
-func (h helpKeys) FullHelp() [][]key.Binding { return h.full }
+// helpGroup is a titled group of the help overlay.
+type helpGroup struct {
+	title string
+	keys  []key.Binding
+}
 
 func (k keyMap) scopeChoiceHelp() helpKeys {
-	return helpKeys{short: []key.Binding{k.ChoiceUp, k.ChoiceDown, k.Continue, k.Account, k.Schedule, k.Wake, k.Quit}}
+	return helpKeys{short: []key.Binding{k.ChoiceUp, k.ChoiceDown, k.Continue, k.Account, k.Schedule, k.Wake}, pinned: []key.Binding{k.Quit}}
 }
 
 func (k keyMap) errorHelp() helpKeys {
-	return helpKeys{short: []key.Binding{k.Login, k.Retry, k.Account, k.Schedule, k.Wake, k.Quit}}
+	return helpKeys{short: []key.Binding{k.Login, k.Retry, k.Account, k.Schedule, k.Wake}, pinned: []key.Binding{k.Quit}}
 }
 
+// listHelp leads with the keys that apply only now, then everyday keys.
+// Every other list key is in the help overlay.
 func (k keyMap) listHelp() helpKeys {
-	t := k.Table
 	return helpKeys{
-		short: []key.Binding{t.LineUp, t.LineDown, k.ClearFilters, k.Details, k.Search, k.NextPane, k.PickRepository, k.Refresh, k.Help, k.Quit, k.Mouse, k.ClearMarks, k.Open, k.Legend},
-		full: [][]key.Binding{
-			{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom},
-			{t.PageUp, t.PageDown, t.HalfPageUp, t.HalfPageDown},
-			{k.Pages.PrevPage, k.Pages.NextPage, k.Icons, k.Rules, k.Rerequest},
-			{k.NextPane, k.PrevPane, k.Account, k.Legend},
-			{k.Schedule, k.Wake},
-			{k.Details, k.Open, k.CopyURL, k.Snooze, k.Undo},
-			{k.Search, k.Categories, k.ClearFilters},
-			{k.Drafts, k.QuickFailing, k.QuickReady},
-			{k.PickRepository, k.AllRepositories, k.Refresh, k.ClearMarks, k.DismissPlead},
-			{k.Mouse, k.Notify, k.Help, k.Quit},
-		},
+		short: []key.Binding{k.ClearFilters, k.DismissPlead, k.ClearMarks,
+			k.Details, k.Open, k.Search, k.NextPane, k.Categories, k.PickRepository, k.Refresh},
+		pinned: []key.Binding{k.Help, k.Quit},
 	}
+}
+
+// listGroups are the help overlay's groups: every list key, enabled or not.
+func (k keyMap) listGroups() []helpGroup {
+	t, p := k.Table, k.Pages
+	return []helpGroup{
+		{"Move", []key.Binding{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom, t.PageUp, t.PageDown,
+			t.HalfPageUp, t.HalfPageDown, p.PrevPage, p.NextPage, k.NextPane, k.PrevPane}},
+		{"This PR", []key.Binding{k.Details, k.Open, k.CopyURL, k.Snooze, k.Undo, k.Rerequest, k.DismissPlead}},
+		{"Filter", []key.Binding{k.Search, k.Categories, k.QuickFailing, k.QuickReady, k.Drafts, k.ClearFilters}},
+		{"View", []key.Binding{k.Legend, k.Icons, k.Mouse, k.Notify, k.ClearMarks}},
+		{"Scope & settings", []key.Binding{k.PickRepository, k.AllRepositories, k.Account, k.Rules,
+			k.Schedule, k.Wake, k.Refresh, k.Quit}},
+	}
+}
+
+func (k keyMap) helpOverlayHelp() helpKeys {
+	t := k.Table
+	return helpKeys{short: []key.Binding{t.LineUp, t.LineDown}, pinned: []key.Binding{k.Help, k.ForceQuit}}
 }
 
 func (k keyMap) detailsHelp() helpKeys {
 	t := k.Table
-	return helpKeys{short: []key.Binding{k.Back, t.LineUp, t.LineDown, k.Open, k.CopyURL, k.Refresh, k.Quit}}
+	return helpKeys{short: []key.Binding{t.LineUp, t.LineDown, k.Open, k.CopyURL, k.Refresh}, pinned: []key.Binding{k.Back, k.Quit}}
 }
 
 func (k keyMap) rulesHelp() helpKeys {
-	return helpKeys{short: []key.Binding{k.RulesCancel, k.ForceQuit}}
+	return helpKeys{pinned: []key.Binding{k.RulesCancel, k.ForceQuit}}
 }
 
 func (k keyMap) snoozeHelp() helpKeys {
-	return helpKeys{short: []key.Binding{k.RulesCancel, k.ForceQuit}}
+	return helpKeys{pinned: []key.Binding{k.RulesCancel, k.ForceQuit}}
 }
 func (k keyMap) scheduleHelp() helpKeys {
-	return helpKeys{short: []key.Binding{k.ScheduleCancel, k.ForceQuit}}
+	return helpKeys{pinned: []key.Binding{k.ScheduleCancel, k.ForceQuit}}
 }
 func (k keyMap) sleepingHelp() helpKeys {
-	return helpKeys{short: []key.Binding{k.Refresh, k.Schedule, k.Wake, k.Quit}}
+	return helpKeys{short: []key.Binding{k.Refresh, k.Schedule, k.Wake}, pinned: []key.Binding{k.Quit}}
 }
 
 func (k keyMap) searchHelp() helpKeys {
 	s := k.SearchInput
-	return helpKeys{short: []key.Binding{s.Apply, s.Cancel, s.Clear, s.Quit}}
+	return helpKeys{short: []key.Binding{s.Apply, s.Clear}, pinned: []key.Binding{s.Cancel, s.Quit}}
 }
 
 func (k keyMap) pickerHelp() helpKeys {
 	p := k.Picker
-	return helpKeys{short: []key.Binding{p.Up, p.Down, p.Apply, p.Mark, p.Edit, p.Delete, p.Cancel, p.Clear, p.Retry, p.Quit}}
+	return helpKeys{short: []key.Binding{p.Up, p.Down, p.Apply, p.Mark, p.Edit, p.Delete, p.Clear, p.Retry}, pinned: []key.Binding{p.Cancel, p.Quit}}
 }
 
 func (k keyMap) accountPickerHelp() helpKeys {
 	a := k.AccountPicker
-	return helpKeys{short: []key.Binding{a.Up, a.Down, a.Apply, a.Cancel, a.Retry, a.Quit}}
+	return helpKeys{short: []key.Binding{a.Up, a.Down, a.Apply, a.Retry}, pinned: []key.Binding{a.Cancel, a.Quit}}
 }
 
 func (k keyMap) watchlistNameHelp() helpKeys {
 	n := k.WatchlistName
-	return helpKeys{short: []key.Binding{n.Apply, n.Cancel, n.Clear, n.Quit}}
+	return helpKeys{short: []key.Binding{n.Apply, n.Clear}, pinned: []key.Binding{n.Cancel, n.Quit}}
 }
 
 // bound reports whether msg is one of the bindings' keys, enabled or not.
@@ -408,18 +422,4 @@ func bound(msg tea.KeyPressMsg, bindings ...key.Binding) bool {
 		}
 	}
 	return false
-}
-
-// fullHelpFits reports whether the full help leaves room for the list header,
-// a minimal table, and the status line.
-func (m *model) fullHelpFits(keys helpKeys) bool {
-	rows := 0
-	for _, column := range keys.full {
-		rows = max(rows, len(column))
-	}
-	chrome := 7
-	if m.summaryShown() {
-		chrome++
-	}
-	return m.height-chrome >= rows
 }

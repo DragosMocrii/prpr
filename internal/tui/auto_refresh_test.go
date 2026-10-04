@@ -113,11 +113,11 @@ func TestAutoRefreshOffSchedulesNothing(t *testing.T) {
 	}
 }
 
-func TestAutoRefreshIntervalShownInTitle(t *testing.T) {
+func TestAutoRefreshCountdownShownInTitle(t *testing.T) {
 	m := autoRefreshModel(t, 90*time.Second)
 	m.startFetch()
 	finishFetch(m, aliceSnapshot())
-	if title := ansi.Strip(m.listLines()[0]); !strings.Contains(title, "auto 1m30s") {
+	if title := ansi.Strip(m.listLines()[0]); !strings.HasSuffix(title, "refresh in 1:30") || strings.Contains(title, "auto") {
 		t.Fatalf("title = %q", title)
 	}
 }
@@ -154,7 +154,7 @@ func TestAutoRefreshCountdownShownAndResetByManualRefresh(t *testing.T) {
 		t.Fatalf("countdown shown while loading: %q", title)
 	}
 	finishFetch(m, aliceSnapshot())
-	if title := titleOf(m); !strings.HasSuffix(title, "refresh in 5:00") || !strings.Contains(title, "auto 5m") {
+	if title := titleOf(m); !strings.HasSuffix(title, "refresh in 5:00") {
 		t.Fatalf("title after fetch = %q", title)
 	}
 	now = now.Add(28*time.Second + 500*time.Millisecond)

@@ -49,8 +49,8 @@ func TestTableFilterPreservesPRIdentityAndClickableNumber(t *testing.T) {
 	if strings.Contains(row[1]+row[3]+row[4], "\x1b]8;") {
 		t.Fatalf("hyperlink leaked into neighboring cells: %q %q %q", row[1], row[3], row[4])
 	}
-	if row[4] != "open" || ansi.Strip(row[1]) != "?" {
-		t.Fatalf("state/unknown merge cells = %q %q", row[4], row[1])
+	if ansi.Strip(row[3]) != "second" || ansi.Strip(row[1]) != "?" {
+		t.Fatalf("name/unknown merge cells = %q %q", row[3], row[1])
 	}
 }
 
@@ -73,16 +73,16 @@ func TestAllTableShowsRepositoryIdentityAndIndependentStatuses(t *testing.T) {
 		{Number: 3, Repository: "acme/c", Title: "unknown", Mergeable: "new-value"},
 	})
 	columns := m.panes[paneMine].table.Columns()
-	if len(columns) < 6 || columns[1].Title != "Merge" || columns[2].Title != "Repository" || columns[3].Title != "Number" || columns[4].Title != "PR name" || columns[5].Title != "State" {
+	if len(columns) < 6 || columns[1].Title != "Merge" || columns[2].Title != "Repository" || columns[3].Title != "Number" || columns[4].Title != "PR name" || columnIndex(columns, "State") >= 0 {
 		t.Fatalf("All table columns = %+v", columns)
 	}
 	rows := m.panes[paneMine].table.Rows()
-	if rows[0][5] != "draft" || ansi.Strip(rows[0][1]) != "–" || ansi.Strip(rows[1][1]) != "✗" || ansi.Strip(rows[2][1]) != "?" {
+	if ansi.Strip(rows[0][4]) != "draft · draft" || ansi.Strip(rows[1][4]) != "conflicts" || ansi.Strip(rows[0][1]) != "–" || ansi.Strip(rows[1][1]) != "✗" || ansi.Strip(rows[2][1]) != "?" {
 		t.Fatalf("state/merge rows = %+v", rows)
 	}
 	m.width = 79
 	m.rebuildPRTable(true)
-	if m.panes[paneMine].table.Columns()[2].Title == "Repository" || !strings.HasPrefix(m.panes[paneMine].table.Rows()[0][3], "acme/a — ") {
+	if m.panes[paneMine].table.Columns()[2].Title == "Repository" || !strings.HasPrefix(ansi.Strip(m.panes[paneMine].table.Rows()[0][3]), "draft · acme/a — ") {
 		t.Fatalf("narrow All table lost repository identity: cols %+v row %+v", m.panes[paneMine].table.Columns(), m.panes[paneMine].table.Rows()[0])
 	}
 }
@@ -223,36 +223,6 @@ func TestTableNavigationKeysAndPageIndicator(t *testing.T) {
 	}
 }
 
-func TestFullHelpToggleKeepsScreenBounded(t *testing.T) {
-	m := newTableModel(t, 40, 12, manyPRs(30))
-	shortHeight := m.panes[paneMine].table.Height()
-	press(m, tea.Key{Code: '?', Text: "?"})
-	if !m.help.ShowAll || m.panes[paneMine].table.Height() >= shortHeight {
-		t.Fatalf("full help did not take table rows: showAll %t height %d -> %d", m.help.ShowAll, shortHeight, m.panes[paneMine].table.Height())
-	}
-	for _, size := range [][2]int{{40, 12}, {40, 8}, {120, 24}} {
-		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		view := strings.Split(m.View().Content, "\n")
-		if len(view) > size[1] {
-			t.Fatalf("full help rendered %d lines at %dx%d", len(view), size[0], size[1])
-		}
-		for _, line := range m.helpLines(keyMap.listHelp) {
-			if ansi.StringWidth(line) > size[0] {
-				t.Fatalf("help line needs truncation at %dx%d: %q", size[0], size[1], ansi.Strip(line))
-			}
-		}
-		for _, line := range view {
-			if ansi.StringWidth(line) > size[0] {
-				t.Fatalf("line width %d at %dx%d: %q", ansi.StringWidth(line), size[0], size[1], line)
-			}
-		}
-	}
-	press(m, tea.Key{Code: '?', Text: "?"})
-	if m.help.ShowAll {
-		t.Fatal("second ? did not return to short help")
-	}
-}
-
 func TestEmptyScopeIgnoresTableKeys(t *testing.T) {
 	m := newTableModel(t, 80, 12, manyPRs(3))
 	m.applyRepository("acme/empty")
@@ -287,7 +257,7 @@ func TestStatisticsColumnsDropInPriorityOrderAsWidthShrinks(t *testing.T) {
 	m.now = func() time.Time { return now }
 	stats := func() []string {
 		var titles []string
-		for _, column := range m.panes[paneMine].table.Columns()[6:] {
+		for _, column := range m.panes[paneMine].table.Columns()[5:] {
 			titles = append(titles, column.Title)
 		}
 		return titles
@@ -297,11 +267,11 @@ func TestStatisticsColumnsDropInPriorityOrderAsWidthShrinks(t *testing.T) {
 	if got := strings.Join(stats(), ","); got != "Age,CI,Review,Comments,Size" {
 		t.Fatalf("wide statistics columns = %s", got)
 	}
-	if row[6] != "3d" || ansi.Strip(row[7]) != "✗" || ansi.Strip(row[8]) != "✓2" || row[9] != "7" || row[10] != "+1.2k/-30" {
-		t.Fatalf("statistics cells = %q", row[6:])
+	if row[5] != "3d" || ansi.Strip(row[6]) != "✗" || ansi.Strip(row[7]) != "✓2" || row[8] != "7" || row[9] != "+1.2k/-30" {
+		t.Fatalf("statistics cells = %q", row[5:])
 	}
-	if draft := m.panes[paneMine].table.Rows()[1]; draft[6] != "—" || draft[7] != "–" || draft[8] != "–" {
-		t.Fatalf("unknown statistics shown as known: %q", draft[6:])
+	if draft := m.panes[paneMine].table.Rows()[1]; draft[5] != "—" || draft[6] != "–" || draft[7] != "–" {
+		t.Fatalf("unknown statistics shown as known: %q", draft[5:])
 	}
 	previous := 5
 	for width := 139; width >= 80; width-- {
@@ -336,4 +306,49 @@ func TestAgeTextBoundaries(t *testing.T) {
 	if got := ageText(time.Time{}, now); got != "—" {
 		t.Errorf("zero waiting time = %q", got)
 	}
+}
+
+func TestRepositoryAndAuthorColumnsFitTheirLongestValue(t *testing.T) {
+	review := reviewPRs(2)
+	review[1].Author = "a-rather-long-login-name"
+	m := newPaneModel(t, 140, 30, nil, review)
+	columns := m.panes[paneReview].table.Columns()
+	if got := columns[columnIndex(columns, "Repository")].Width; got != len("Repository") {
+		t.Fatalf("Repository width = %d for acme/b, want the header's %d", got, len("Repository"))
+	}
+	if got := columns[columnIndex(columns, "Author")].Width; got != 16 {
+		t.Fatalf("Author width = %d for a 24-cell login, want the cap 16", got)
+	}
+	review[1].Author = "bo"
+	m = newPaneModel(t, 140, 30, nil, review)
+	columns = m.panes[paneReview].table.Columns()
+	if got := columns[columnIndex(columns, "Author")].Width; got != 8 {
+		t.Fatalf("Author width = %d for short logins, want the floor 8", got)
+	}
+	long := reviewPRs(1)
+	long[0].Repository = "acme/a-repository-with-a-long-name"
+	m = newPaneModel(t, 140, 30, nil, long)
+	columns = m.panes[paneReview].table.Columns()
+	if got := columns[columnIndex(columns, "Repository")].Width; got != 28 {
+		t.Fatalf("Repository width = %d for a long name, want the cap 28", got)
+	}
+}
+
+func TestReviewRequestedDropsReviewFirst(t *testing.T) {
+	m := newPaneModel(t, 140, 30, nil, reviewPRs(2))
+	columns := m.panes[paneReview].table.Columns()
+	if columnIndex(columns, "Review") < 0 || columnIndex(columns, "State") >= 0 {
+		t.Fatalf("wide review columns = %+v", columns)
+	}
+	for width := 139; width >= 80; width-- {
+		m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+		columns := m.panes[paneReview].table.Columns()
+		if columnIndex(columns, "Review") < 0 {
+			if columnIndex(columns, "Size") < 0 {
+				t.Fatalf("width %d dropped Size before Review: %+v", width, columns)
+			}
+			return
+		}
+	}
+	t.Fatal("Review never dropped down to 80 columns")
 }

@@ -155,9 +155,10 @@ func (m *model) changeStatusWidth(fixed string) int {
 	return width
 }
 
-// statusLine joins the always-shown text and the legend, with the quota
-// right-aligned. The legend is dropped first, then quota detail.
-func (m *model) statusLine(fixed, legend string) string {
+// statusLine joins the always-shown text and the selected row's status,
+// with the quota right-aligned. The status drops facts from its end first,
+// then the quota its detail.
+func (m *model) statusLine(fixed string, status []string) string {
 	join := func(parts ...string) string {
 		kept := parts[:0:0]
 		for _, part := range parts {
@@ -167,14 +168,26 @@ func (m *model) statusLine(fixed, legend string) string {
 		}
 		return strings.Join(kept, "  ")
 	}
-	if !m.quotaKnown {
-		return join(fixed, legend)
+	type option struct {
+		facts, level int
 	}
-	for _, option := range []struct {
-		legend string
-		level  int
-	}{{legend, 0}, {"", 0}, {"", 1}, {"", 2}} {
-		left, quota := join(fixed, option.legend), m.quotaText(option.level)
+	var options []option
+	for facts := len(status); facts > 0; facts-- {
+		options = append(options, option{facts, 0})
+	}
+	options = append(options, option{0, 0}, option{0, 1}, option{0, 2})
+	for _, option := range options {
+		left := join(fixed, strings.Join(status[:option.facts], " · "))
+		quota := ""
+		if m.quotaKnown {
+			quota = m.quotaText(option.level)
+		}
+		if quota == "" {
+			if lipgloss.Width(left) <= m.width {
+				return left
+			}
+			continue
+		}
 		minGap := 0
 		if left != "" {
 			minGap = 2
