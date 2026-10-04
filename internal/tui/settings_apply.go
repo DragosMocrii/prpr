@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -26,7 +27,8 @@ func (m *model) settingSaved(err error) {
 func (m *model) applyRefresh(d time.Duration) tea.Cmd {
 	m.refreshInterval = d
 	m.settingSaved(m.preferences.SaveRefresh(d))
-	if m.loading || m.awaitingToken() {
+	var authErr *github.AuthError
+	if m.loading || errors.As(m.err, &authErr) {
 		return nil
 	}
 	// A new generation drops the old timer.

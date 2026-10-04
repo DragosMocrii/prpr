@@ -149,3 +149,12 @@ func TestRefreshChangeDuringATokenWaitKeepsTheWait(t *testing.T) {
 		t.Fatalf("generation %d→%d, interval %v", before, m.refreshGeneration, m.refreshInterval)
 	}
 }
+
+func TestRefreshChangeAfterAnAuthFailureDoesNotRetry(t *testing.T) {
+	m := autoRefreshModel(t, time.Minute)
+	m.startFetch()
+	finishFetch(m, fetchFinishedMsg{err: &github.AuthError{Err: errors.New("logged out")}})
+	if cmd := m.applyRefresh(10 * time.Minute); cmd != nil || !m.refreshDue.IsZero() || m.refreshInterval != 10*time.Minute {
+		t.Fatalf("auth failure retried: cmd %v due %v", cmd != nil, m.refreshDue)
+	}
+}
