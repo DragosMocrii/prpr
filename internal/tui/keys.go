@@ -33,7 +33,8 @@ type keyMap struct {
 	Notify          key.Binding
 	Icons           key.Binding
 	Legend          key.Binding
-	Rules           key.Binding
+	Settings        key.Binding
+	SettingsKeys    settingsKeyMap
 	RulesCancel     key.Binding
 	Schedule        key.Binding
 	Wake            key.Binding
@@ -132,22 +133,32 @@ func defaultKeyMap() keyMap {
 		Notify:          key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "notify on")),
 		Icons:           key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "nerd icons")),
 		Legend:          key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "show legend")),
-		Rules:           key.NewBinding(key.WithKeys(","), key.WithHelp(",", "ready rules")),
-		RulesCancel:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel without saving")),
-		Schedule:        key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "active hours")),
-		Wake:            key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "wake 1h")),
-		ScheduleCancel:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel without saving")),
-		Snooze:          key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "snooze")),
-		Undo:            key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "undo snooze")),
-		Rerequest:       key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "request reviews again")),
-		DismissPlead:    key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "dismiss asked again")),
-		Account:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "account")),
-		Retry:           key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
-		Login:           key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log in to GitHub")),
-		Help:            key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "more")),
-		Quit:            key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
-		ForceQuit:       key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
-		Table:           tableKeys,
+		Settings:        key.NewBinding(key.WithKeys(","), key.WithHelp(",", "settings")),
+		SettingsKeys: settingsKeyMap{
+			Up:     key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
+			Down:   key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+			Change: key.NewBinding(key.WithKeys("space", "enter"), key.WithHelp("space/enter", "change")),
+			Close:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
+			Keep:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "keep")),
+			Revert: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "revert")),
+			Toggle: key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "toggle")),
+			Quit:   key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+		},
+		RulesCancel:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel without saving")),
+		Schedule:       key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "active hours")),
+		Wake:           key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "wake 1h")),
+		ScheduleCancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel without saving")),
+		Snooze:         key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "snooze")),
+		Undo:           key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "undo snooze")),
+		Rerequest:      key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "request reviews again")),
+		DismissPlead:   key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "dismiss asked again")),
+		Account:        key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "account")),
+		Retry:          key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
+		Login:          key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log in to GitHub")),
+		Help:           key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "more")),
+		Quit:           key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
+		ForceQuit:      key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+		Table:          tableKeys,
 		Pages: paginator.KeyMap{
 			PrevPage: key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "prev page")),
 			NextPage: key.NewBinding(key.WithKeys("right"), key.WithHelp("→", "next page")),
@@ -219,7 +230,7 @@ func (m *model) syncKeys() {
 	details := m.detailsShown()
 	// The details screen keeps row movement, opening, refresh, and quit.
 	listing := viewing && !details
-	scheduleControls := !m.loginActive && m.picker == nil && m.accounts == nil && m.rulesEditor == nil && m.snoozeEditor == nil && m.rerequest == nil && !details
+	scheduleControls := !m.loginActive && m.picker == nil && m.accounts == nil && m.rulesEditor == nil && m.settings == nil && m.snoozeEditor == nil && m.rerequest == nil && !details
 	k.Schedule.SetEnabled(scheduleControls && idle)
 	k.Wake.SetEnabled(scheduleControls && (!m.manualWakeUntil.IsZero() ||
 		(idle && (m.scheduleErr != nil || m.scheduleConfig.Enabled && !m.pollingAllowed()))))
@@ -272,7 +283,7 @@ func (m *model) syncKeys() {
 	} else {
 		k.Legend.SetHelp("L", "show legend")
 	}
-	k.Rules.SetEnabled(listing && m.rulesEditor == nil)
+	k.Settings.SetEnabled(listing && m.settings == nil && m.rulesEditor == nil)
 	k.Snooze.SetEnabled(listing && rows && m.snoozeEditor == nil)
 	k.Undo.SetEnabled(listing && m.snoozeEditor == nil)
 	k.Rerequest.SetEnabled(listing && rows && m.focus != paneReview && m.rerequest == nil)
@@ -399,7 +410,7 @@ func (k keyMap) listGroups() []helpGroup {
 		{"This PR", []key.Binding{k.Details, k.Open, k.CopyURL, k.Snooze, k.Undo, k.Rerequest, k.DismissPlead}},
 		{"Filter", []key.Binding{k.Search, k.Categories, k.QuickFailing, k.QuickReady, k.Drafts, k.ClearFilters}},
 		{"View", []key.Binding{k.Legend, k.Icons, k.Mouse, k.Notify, k.ClearMarks}},
-		{"Scope & settings", []key.Binding{k.PickRepository, k.AllRepositories, k.Account, k.Rules,
+		{"Scope & settings", []key.Binding{k.PickRepository, k.AllRepositories, k.Account, k.Settings,
 			k.Schedule, k.Wake, k.Refresh, k.Quit}},
 	}
 }
@@ -464,4 +475,32 @@ func bound(msg tea.KeyPressMsg, bindings ...key.Binding) bool {
 		}
 	}
 	return false
+}
+
+// settingsKeyMap is the Settings screen's keys.
+type settingsKeyMap struct {
+	Up     key.Binding
+	Down   key.Binding
+	Change key.Binding
+	Close  key.Binding
+	// Keep and Revert end editing a field or checklist.
+	Keep   key.Binding
+	Revert key.Binding
+	Toggle key.Binding
+	Quit   key.Binding
+}
+
+func (k keyMap) settingsHelp() helpKeys {
+	s := k.SettingsKeys
+	return helpKeys{short: []key.Binding{s.Up, s.Down, s.Change}, pinned: []key.Binding{s.Close, s.Quit}}
+}
+
+func (k keyMap) settingsFieldHelp() helpKeys {
+	s := k.SettingsKeys
+	return helpKeys{short: []key.Binding{s.Keep}, pinned: []key.Binding{s.Revert, s.Quit}}
+}
+
+func (k keyMap) settingsQueuesHelp() helpKeys {
+	s := k.SettingsKeys
+	return helpKeys{short: []key.Binding{s.Up, s.Down, s.Toggle, s.Keep}, pinned: []key.Binding{s.Revert, s.Quit}}
 }

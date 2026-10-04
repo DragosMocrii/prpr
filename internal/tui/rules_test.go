@@ -157,7 +157,7 @@ func pressKey(m *model, k tea.Key) {
 func TestRulesEditorSavesAnOwnersRuleAndEscCancels(t *testing.T) {
 	m := changesModel(t)
 	fetch(m, []github.PullRequest{cleanPR(1, 0)}, nil)
-	pressKey(m, tea.Key{Code: ',', Text: ","})
+	drive(m, m.openRules())
 	if m.rulesEditor == nil || !strings.Contains(ansi.Strip(m.View().Content), "Ready-to-merge rules") {
 		t.Fatal(", did not open the rule editor")
 	}
@@ -176,7 +176,7 @@ func TestRulesEditorSavesAnOwnersRuleAndEscCancels(t *testing.T) {
 	}
 
 	// Choose acme, the owner of the listed pull request.
-	pressKey(m, tea.Key{Code: ',', Text: ","})
+	drive(m, m.openRules())
 	pressKey(m, tea.Key{Code: tea.KeyDown})
 	pressKey(m, tea.Key{Code: tea.KeyEnter})
 	if m.rulesEditor == nil || m.rulesEditor.stage != rulesEditing || m.rulesEditor.owner != "acme" {
@@ -210,7 +210,7 @@ func TestRulesEditorNamesAnotherOwnerAndRemovesItsRules(t *testing.T) {
 		}
 	}
 	// Default, acme, Another owner….
-	pressKey(m, tea.Key{Code: ',', Text: ","})
+	drive(m, m.openRules())
 	pressKey(m, tea.Key{Code: tea.KeyDown})
 	pressKey(m, tea.Key{Code: tea.KeyDown})
 	pressKey(m, tea.Key{Code: tea.KeyEnter})
@@ -231,7 +231,7 @@ func TestRulesEditorNamesAnotherOwnerAndRemovesItsRules(t *testing.T) {
 		t.Fatalf("globex was not saved: editor %+v", m.rulesEditor)
 	}
 	// globex is now listed after acme; remove its rules.
-	pressKey(m, tea.Key{Code: ',', Text: ","})
+	drive(m, m.openRules())
 	pressKey(m, tea.Key{Code: tea.KeyDown})
 	pressKey(m, tea.Key{Code: tea.KeyDown})
 	pressKey(m, tea.Key{Code: tea.KeyEnter})
@@ -282,7 +282,7 @@ func TestRulesSavedDuringAFetchFetchAgainAfterIt(t *testing.T) {
 func TestRulesEditorFollowsResizes(t *testing.T) {
 	m := changesModel(t)
 	fetch(m, []github.PullRequest{cleanPR(1, 0)}, nil)
-	pressKey(m, tea.Key{Code: ',', Text: ","})
+	drive(m, m.openRules())
 	pressKey(m, tea.Key{Code: tea.KeyEnter})
 	m.Update(tea.WindowSizeMsg{Width: 44, Height: 12})
 	lines := strings.Split(m.View().Content, "\n")

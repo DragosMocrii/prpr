@@ -142,6 +142,8 @@ type model struct {
 	// rulesEditor is the screen that edits them, nil when closed.
 	rules       readiness.Rules
 	rulesEditor *rulesEditor
+	// settings is the Settings screen, nil when closed; editors it opens draw over it.
+	settings *settingsEditor
 	// refetchForRules starts a fetch when the running one finishes, for
 	// rules that need fields it does not select.
 	refetchForRules bool
@@ -309,7 +311,7 @@ func (m *model) Init() tea.Cmd {
 // overlayOpen reports whether the repository picker, the account picker, or
 // a form covers the lists.
 func (m *model) overlayOpen() bool {
-	return m.picker != nil || m.accounts != nil || m.rulesEditor != nil || m.snoozeEditor != nil || m.rerequest != nil || m.scheduleEditor != nil
+	return m.picker != nil || m.accounts != nil || m.rulesEditor != nil || m.snoozeEditor != nil || m.rerequest != nil || m.scheduleEditor != nil || m.settings != nil
 }
 
 func (m *model) startFetch() tea.Cmd {
@@ -620,6 +622,8 @@ func (m *model) updateForm(msg tea.Msg) (tea.Cmd, bool) {
 		return m.updateRerequest(msg), true
 	case m.scheduleEditor != nil:
 		return m.updateSchedule(msg), true
+	case m.settings != nil:
+		return m.updateSettings(msg), true
 	}
 	return nil, false
 }
@@ -721,8 +725,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleIcons()
 	case key.Matches(msg, k.Legend):
 		m.toggleLegend()
-	case key.Matches(msg, k.Rules):
-		return m.openRules()
+	case key.Matches(msg, k.Settings):
+		return m.openSettings()
 	case key.Matches(msg, k.Schedule):
 		return m.openSchedule()
 	case key.Matches(msg, k.Wake):
@@ -1213,6 +1217,8 @@ func (m *model) View() tea.View {
 		lines = m.rulesLines()
 	case m.scheduleEditor != nil && m.width >= minimumWidth && m.height >= minimumHeight:
 		lines = m.scheduleLines()
+	case m.settings != nil && m.width >= minimumWidth && m.height >= minimumHeight:
+		lines = m.settingsLines()
 	case m.snoozeEditor != nil && m.width >= minimumWidth && m.height >= minimumHeight:
 		lines = m.snoozeLines()
 	case m.rerequest != nil && m.width >= minimumWidth && m.height >= minimumHeight:

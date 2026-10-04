@@ -27,7 +27,7 @@ func TestHelpOverlayListsEveryListKey(t *testing.T) {
 		}
 	}
 	for _, binding := range []key.Binding{k.Rerequest, k.DismissPlead, k.Snooze, k.Undo, k.Icons, k.Mouse, k.Notify, k.Legend, k.Drafts,
-		k.QuickFailing, k.QuickReady, k.Rules, k.Schedule, k.Wake, k.Account, k.AllRepositories, k.CopyURL, k.PrevPane} {
+		k.QuickFailing, k.QuickReady, k.Settings, k.Schedule, k.Wake, k.Account, k.AllRepositories, k.CopyURL, k.PrevPane} {
 		if !slices.Contains(grouped, binding.Help().Key) {
 			t.Errorf("%s is in no help group", binding.Help().Key)
 		}
