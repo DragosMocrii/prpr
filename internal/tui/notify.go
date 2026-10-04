@@ -222,7 +222,7 @@ func (m *model) handleDesktopNotified(msg desktopNotifiedMsg) {
 }
 
 func (m *model) toggleNotify() {
-	m.notify = !m.notify
+	m.applyNotify(!m.notify)
 	if m.notify {
 		m.setNotice("Notifications on: alerts when a PR turns ready, fails CI, gets changes requested, requests your review, or needs you again after your review")
 	} else {

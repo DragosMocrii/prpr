@@ -29,11 +29,10 @@ func (m *model) showingList() bool {
 		(m.err == nil || m.keptWhileAsleep()) && !m.overlayOpen() && m.scopeChosen && m.panesFit() && !m.detailsShown()
 }
 
-// toggleMouse turns mouse mode on or off. Off, the terminal handles the mouse
+// toggleMouse turns mouse mode on or off and saves it. Off, the terminal handles the mouse
 // again, so text selection and link clicks need no modifier.
 func (m *model) toggleMouse() {
-	m.mouse = !m.mouse
-	m.pointer = pointer{}
+	m.applyMouse(!m.mouse)
 }
 
 // hitTest maps a screen line of the list screen to a pane. It follows

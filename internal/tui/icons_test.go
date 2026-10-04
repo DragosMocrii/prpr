@@ -123,7 +123,7 @@ func TestFailedIconSaveKeepsTheIconsAndWarns(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 	pressI(m)
-	if !m.icons.nerd || store.Icons() != "" || !strings.Contains(m.View().Content, "Icon choice not saved") {
+	if !m.icons.nerd || store.Icons() != "" || !strings.Contains(m.View().Content, "Setting not saved") {
 		t.Fatalf("nerd %t, saved %q, view %q", m.icons.nerd, store.Icons(), m.View().Content)
 	}
 }

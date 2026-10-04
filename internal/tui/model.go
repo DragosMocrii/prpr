@@ -145,6 +145,12 @@ type model struct {
 	// refetchForRules starts a fetch when the running one finishes, for
 	// rules that need fields it does not select.
 	refetchForRules bool
+	// settingsBaseline makes the next full fetch replace the change
+	// baseline without marking, alerting, or waking snoozes: bots or queues
+	// changed, so its differences come from the settings, not GitHub.
+	settingsBaseline bool
+	// settingsNotice is what Settings says about its last change.
+	settingsNotice string
 	// setTitle sets the terminal title. flashText is an alert the title
 	// flashes until flashUntil, the terminal gains focus, or a key or click;
 	// ticks from an older flashGeneration are dropped.
@@ -988,7 +994,8 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 		}
 		if !snapshot.Preview {
 			m.pruneDismissals()
-			reset := !strings.EqualFold(m.changesLogin, snapshot.Login)
+			reset := !strings.EqualFold(m.changesLogin, snapshot.Login) || m.settingsBaseline
+			m.settingsBaseline = false
 			m.changesLogin = snapshot.Login
 			if reset {
 				m.resetReadiness()

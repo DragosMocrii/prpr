@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-
 	"charm.land/lipgloss/v2"
 )
 
@@ -117,7 +115,9 @@ func (m *model) toggleIcons() {
 		m.setNotice("Nerd Font icons on — press i again if you see boxes")
 	}
 	if err := m.preferences.SaveIcons(m.icons.name()); err != nil {
-		m.preferenceErr = fmt.Errorf("Icon choice not saved: %w", err)
+		m.settingSaved(err)
+	} else {
+		m.settingsNotice = "Saved."
 	}
 	m.rebuildPRTable(false)
 }
