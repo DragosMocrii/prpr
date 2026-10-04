@@ -152,7 +152,7 @@ func laterOf(a, b time.Time) time.Time {
 
 // mergeReviews lists pending review requests first, then reviewed pull
 // requests that need the viewer, then those waiting on others, each in fetch
-// order. A pull request in both lists is a pending request.
+// order. A pull request in both lists is a pending request, requested again.
 func mergeReviews(requests, reviewed []PullRequest) []PullRequest {
 	type key struct {
 		repository string
@@ -162,7 +162,18 @@ func mergeReviews(requests, reviewed []PullRequest) []PullRequest {
 	for _, pr := range requests {
 		pending[key{strings.ToLower(pr.Repository), pr.Number}] = true
 	}
+	again := make(map[key]bool)
+	for _, pr := range reviewed {
+		if k := (key{strings.ToLower(pr.Repository), pr.Number}); pending[k] {
+			again[k] = true
+		}
+	}
 	merged := append([]PullRequest(nil), requests...)
+	for i := range merged {
+		if again[key{strings.ToLower(merged[i].Repository), merged[i].Number}] {
+			merged[i].RequestedAgain = true
+		}
+	}
 	var waiting []PullRequest
 	for _, pr := range reviewed {
 		switch {

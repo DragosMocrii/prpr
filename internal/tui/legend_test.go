@@ -193,7 +193,10 @@ func TestEveryIconIsInTheLegend(t *testing.T) {
 		mine := manyPRs(3)
 		mine[1].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueTesting}
 		mine[2].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueRemovedFailed}
-		m := newPaneModel(t, 240, 80, mine, reviewPRs(1))
+		// A request asked again puts its marker on screen.
+		review := reviewPRs(1)
+		review[0].RequestedAgain = true
+		m := newPaneModel(t, 240, 80, mine, review)
 		m.icons = set
 		m.bots = true
 		m.rules = readiness.Rules{Default: readiness.Rule{Approvals: 1}}

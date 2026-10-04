@@ -186,7 +186,15 @@ type model struct {
 	lastSuccessAt       time.Time
 	scheduleEditor      *scheduleEditor
 	quotaCancel         context.CancelFunc
-	quotaGeneration     uint64
+	// dismissed holds, per review request, the request time at which the
+	// viewer dismissed its request-again marker; it is saved.
+	dismissed map[prKey]time.Time
+	// pleadOff is the marker's blink phase; pleadGeneration drops ticks of
+	// an older chain, and pleadTicking says one runs.
+	pleadOff        bool
+	pleadGeneration uint64
+	pleadTicking    bool
+	quotaGeneration uint64
 }
 
 type fetchFinishedMsg struct {
@@ -419,7 +427,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	model, cmd := m.update(msg)
 	m.closeStaleDetails()
 	postScheduleCmd := m.reconcileSchedule()
-	return model, tea.Batch(scheduleCmd, cmd, postScheduleCmd, m.trackRest(msg))
+	return model, tea.Batch(scheduleCmd, cmd, postScheduleCmd, m.trackRest(msg), m.schedulePlead())
 }
 
 func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -551,6 +559,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleRest(msg)
 	case snoozeTickMsg:
 		return m, m.handleSnoozeTick(msg)
+	case pleadTickMsg:
+		return m, m.handlePleadTick(msg)
 	case flashTickMsg:
 		return m, m.handleFlashTick(msg)
 	case tea.FocusMsg:
@@ -709,6 +719,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.openSnooze()
 	case key.Matches(msg, k.Undo):
 		return m.undoSnooze()
+	case key.Matches(msg, k.DismissPlead):
+		m.dismissPlead()
 	case key.Matches(msg, k.Rerequest):
 		return m.rerequestSelected()
 	case key.Matches(msg, k.Help):
@@ -961,8 +973,10 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 		m.err = nil
 		if accountChanged {
 			m.loadSnoozes(snapshot.Login)
+			m.loadDismissals(snapshot.Login)
 		}
 		if !snapshot.Preview {
+			m.pruneDismissals()
 			reset := !strings.EqualFold(m.changesLogin, snapshot.Login)
 			m.changesLogin = snapshot.Login
 			if reset {

@@ -279,6 +279,12 @@ func TestDecodeReviewPagesWaitsSinceViewerRequest(t *testing.T) {
 			t.Errorf("review request %d waiting since %v, want %v", i, prs[i].WaitingSince, want)
 		}
 	}
+	// Only the first names the viewer twice, case-insensitively: a request again.
+	for i, want := range []bool{true, false, false} {
+		if prs[i].RequestedAgain != want {
+			t.Errorf("review request %d requested again = %t, want %t", i, prs[i].RequestedAgain, want)
+		}
+	}
 }
 
 func TestDecodeRateLimitReadsGraphQLPool(t *testing.T) {

@@ -90,6 +90,50 @@ func validSnooze(s Snooze) error {
 	return nil
 }
 
+// Dismissal records that the viewer dismissed the request-again marker of
+// a review request; a later request shows it again.
+type Dismissal struct {
+	Repository string
+	Number     int
+	Requested  time.Time // the request's time when it was dismissed
+}
+
+// dismissalJSON is a saved dismissal.
+type dismissalJSON struct {
+	Repository string    `json:"repository"`
+	Number     int       `json:"number"`
+	Requested  time.Time `json:"requested"`
+}
+
+// validDismissal reports why a dismissal cannot be saved, or nil.
+func validDismissal(d Dismissal) error {
+	switch {
+	case !github.ValidRepositoryName(d.Repository):
+		return fmt.Errorf("dismissal has invalid repository %q", d.Repository)
+	case d.Number <= 0:
+		return fmt.Errorf("dismissal of %s has invalid number %d", d.Repository, d.Number)
+	}
+	return nil
+}
+
+// decodeDismissals reads saved dismissals, skipping unreadable ones: losing
+// one only shows its marker again.
+func decodeDismissals(raw json.RawMessage) []Dismissal {
+	var entries []json.RawMessage
+	if json.Unmarshal(raw, &entries) != nil {
+		return nil
+	}
+	var dismissals []Dismissal
+	for _, entry := range entries {
+		var saved dismissalJSON
+		if json.Unmarshal(entry, &saved) != nil || validDismissal(Dismissal(saved)) != nil {
+			continue
+		}
+		dismissals = append(dismissals, Dismissal(saved))
+	}
+	return dismissals
+}
+
 func cloneSnoozes(snoozes []Snooze) []Snooze {
 	cloned := slices.Clone(snoozes)
 	for i := range cloned {
@@ -111,6 +155,9 @@ type account struct {
 	snoozes    []Snooze
 	snoozedRaw json.RawMessage
 	snoozeErr  error
+	// dismissed are the review requests whose request-again marker the
+	// viewer dismissed.
+	dismissed []Dismissal
 }
 
 type Store struct {
@@ -158,7 +205,8 @@ func (s *Store) app() appJSON {
 	return appJSON{Account: s.pinned, Icons: s.icons, Legend: s.legend, Drafts: s.drafts, Ready: s.rulesRaw, Schedule: s.scheduleRaw}
 }
 
-// accountJSON is an account's value when it has watchlists, snoozes, or a
+// accountJSON is an account's value when it has watchlists, snoozes,
+// dismissals, or a
 // watchlist scope; otherwise the value is the repository string alone, the
 // format older versions read. An object without repository or watchlist has
 // no saved scope.
@@ -167,6 +215,7 @@ type accountJSON struct {
 	Watchlist  string              `json:"watchlist,omitempty"`
 	Watchlists map[string][]string `json:"watchlists,omitempty"`
 	Snoozed    json.RawMessage     `json:"snoozed,omitempty"`
+	Dismissed  json.RawMessage     `json:"dismissed,omitempty"`
 }
 
 func Open(path string) (*Store, error) {
@@ -276,6 +325,9 @@ func decodeAccount(value json.RawMessage) (account, error) {
 			decoded.snoozedRaw = object.Snoozed
 		}
 	}
+	if len(object.Dismissed) != 0 {
+		decoded.dismissed = decodeDismissals(object.Dismissed)
+	}
 	switch {
 	case object.Repository != nil && object.Watchlist != "":
 		return account{}, errors.New("has both a repository and a watchlist")
@@ -344,7 +396,7 @@ func uniqueRepositories(repositories []string) []string {
 }
 
 func (a account) encode() any {
-	if len(a.watchlists) == 0 && len(a.snoozes) == 0 && a.snoozedRaw == nil && a.chosen && a.scope.Watchlist == "" {
+	if len(a.watchlists) == 0 && len(a.snoozes) == 0 && a.snoozedRaw == nil && len(a.dismissed) == 0 && a.chosen && a.scope.Watchlist == "" {
 		return a.scope.Repository
 	}
 	object := accountJSON{Watchlist: a.scope.Watchlist}
@@ -367,6 +419,13 @@ func (a account) encode() any {
 			saved[i] = snoozeJSON(s)
 		}
 		object.Snoozed, _ = json.Marshal(saved)
+	}
+	if len(a.dismissed) > 0 {
+		saved := make([]dismissalJSON, len(a.dismissed))
+		for i, d := range a.dismissed {
+			saved[i] = dismissalJSON(d)
+		}
+		object.Dismissed, _ = json.Marshal(saved)
 	}
 	return object
 }
@@ -511,6 +570,24 @@ func (s *Store) Watchlists(login string) []Watchlist {
 	return watchlists
 }
 
+// Dismissals returns an account's dismissed request-again markers.
+func (s *Store) Dismissals(login string) []Dismissal {
+	return slices.Clone(s.accounts[accountKey(login)].dismissed)
+}
+
+// SaveDismissals replaces an account's dismissed request-again markers.
+func (s *Store) SaveDismissals(login string, dismissals []Dismissal) error {
+	for _, d := range dismissals {
+		if err := validDismissal(d); err != nil {
+			return fmt.Errorf("save preferences %q: %w", s.path, err)
+		}
+	}
+	return s.change(login, func(a *account) error {
+		a.dismissed = slices.Clone(dismissals)
+		return nil
+	})
+}
+
 // Snoozes returns an account's snoozed pull requests, in saved order.
 func (s *Store) Snoozes(login string) []Snooze {
 	return cloneSnoozes(s.accounts[accountKey(login)].snoozes)
@@ -617,6 +694,7 @@ func (s *Store) change(login string, edit func(*account) error) error {
 	edited := s.accounts[key]
 	edited.watchlists = slices.Clone(edited.watchlists)
 	edited.snoozes = cloneSnoozes(edited.snoozes)
+	edited.dismissed = slices.Clone(edited.dismissed)
 	if err := edit(&edited); err != nil {
 		return fmt.Errorf("save preferences %q: %w", s.path, err)
 	}

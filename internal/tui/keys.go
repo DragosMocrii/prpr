@@ -41,6 +41,7 @@ type keyMap struct {
 	Snooze          key.Binding
 	Undo            key.Binding
 	Rerequest       key.Binding
+	DismissPlead    key.Binding
 	Account         key.Binding
 	Retry           key.Binding
 	Login           key.Binding
@@ -120,6 +121,7 @@ func defaultKeyMap() keyMap {
 		Snooze:          key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "snooze")),
 		Undo:            key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "undo snooze")),
 		Rerequest:       key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "request reviews again")),
+		DismissPlead:    key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "dismiss asked again")),
 		Account:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "account")),
 		Retry:           key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
 		Login:           key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log in to GitHub")),
@@ -240,6 +242,7 @@ func (m *model) syncKeys() {
 	k.Snooze.SetEnabled(listing && rows && m.snoozeEditor == nil)
 	k.Undo.SetEnabled(listing && m.snoozeEditor == nil)
 	k.Rerequest.SetEnabled(listing && rows && m.focus != paneReview && m.rerequest == nil)
+	k.DismissPlead.SetEnabled(listing && rows && m.selectedPleading())
 	if m.focus == paneSnoozed {
 		k.Snooze.SetHelp("z", "wake")
 	} else {
@@ -352,7 +355,7 @@ func (k keyMap) listHelp() helpKeys {
 			{k.Details, k.Open, k.CopyURL, k.Snooze, k.Undo},
 			{k.Search, k.Categories, k.ClearFilters},
 			{k.Drafts, k.QuickFailing, k.QuickReady},
-			{k.PickRepository, k.AllRepositories, k.Refresh, k.ClearMarks},
+			{k.PickRepository, k.AllRepositories, k.Refresh, k.ClearMarks, k.DismissPlead},
 			{k.Mouse, k.Notify, k.Help, k.Quit},
 		},
 	}

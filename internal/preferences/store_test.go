@@ -670,3 +670,57 @@ func TestSaveScheduleRejectsInvalidConfig(t *testing.T) {
 		t.Fatal("SaveSchedule accepted invalid retained fields")
 	}
 }
+
+func TestDismissalsRoundTripAndKeepTheScope(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save("Alice", "acme/api"); err != nil {
+		t.Fatal(err)
+	}
+	requested := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	if err := store.SaveDismissals("Alice", []Dismissal{{Repository: "acme/web", Number: 7, Requested: requested}}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reopened.Dismissals("alice")
+	if len(got) != 1 || got[0].Repository != "acme/web" || got[0].Number != 7 || !got[0].Requested.Equal(requested) {
+		t.Fatalf("dismissals = %+v", got)
+	}
+	if scope, found := reopened.Lookup("alice"); !found || scope.Repository != "acme/api" {
+		t.Fatalf("scope = %+v, %v; dismissals must keep the saved scope", scope, found)
+	}
+	if err := reopened.SaveDismissals("alice", nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"github.com/alice": "acme/api"`) {
+		t.Fatalf("an account without dismissals is not a plain repository again: %s", data)
+	}
+}
+
+func TestUnreadableDismissalsAreSkipped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	data := `{"github.com/alice":{"repository":"acme/api","dismissed":[{"repository":"nope","number":1,"requested":"2026-10-01T12:00:00Z"},{"repository":"acme/web","number":7,"requested":"2026-10-01T12:00:00Z"},{"repository":"acme/web","number":0,"requested":"2026-10-01T12:00:00Z"}]}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Dismissals("alice"); len(got) != 1 || got[0].Number != 7 {
+		t.Fatalf("dismissals = %+v, want only the readable one", got)
+	}
+	if err := store.SaveDismissals("alice", []Dismissal{{Repository: "acme/api", Number: 0, Requested: time.Now()}}); err == nil {
+		t.Fatal("SaveDismissals accepted an invalid number")
+	}
+}

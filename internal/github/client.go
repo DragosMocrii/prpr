@@ -44,6 +44,10 @@ type PullRequest struct {
 	// ReviewStatus places a review-pane pull request; zero for a pending
 	// request and for authored pull requests.
 	ReviewStatus ReviewStatus
+	// RequestedAgain marks a pending review request that asks the viewer
+	// again: the timeline names them in more than one request, or they
+	// reviewed it before. Set only by a full fetch.
+	RequestedAgain bool
 	// ChangesRequested counts the latest reviews that request changes.
 	ChangesRequested int
 	// The fields below are read only for authored pull requests, and only
@@ -315,11 +319,14 @@ func (node *pullRequestNode) pullRequest(login string, bots []Bot) PullRequest {
 	}
 	if login != "" {
 		// Timeline events are chronological, so the last match is the latest request.
+		requests := 0
 		for _, event := range node.RequestEvents.Nodes {
 			if event != nil && event.RequestedReviewer != nil && strings.EqualFold(event.RequestedReviewer.Login, login) {
 				pr.WaitingSince = event.CreatedAt
+				requests++
 			}
 		}
+		pr.RequestedAgain = requests > 1
 	}
 	for _, review := range node.LatestOpinionatedReviews.Nodes {
 		switch {

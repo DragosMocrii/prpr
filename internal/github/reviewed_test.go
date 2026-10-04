@@ -130,6 +130,18 @@ func TestMergeReviewsPutsPendingRequestsFirstAndWaitingLast(t *testing.T) {
 	}
 }
 
+func TestMergeReviewsMarksPendingRequestsTheViewerReviewedAsAgain(t *testing.T) {
+	requests := []PullRequest{{Repository: "acme/a", Number: 1}, {Repository: "acme/a", Number: 2}}
+	reviewed := []PullRequest{{Repository: "ACME/A", Number: 2, ReviewStatus: ReviewWaitingOnAuthor}}
+	merged := mergeReviews(requests, reviewed)
+	if merged[0].RequestedAgain || !merged[1].RequestedAgain {
+		t.Fatalf("requested again = %t %t, want false true", merged[0].RequestedAgain, merged[1].RequestedAgain)
+	}
+	if requests[1].RequestedAgain {
+		t.Fatal("mergeReviews changed its input")
+	}
+}
+
 func TestReviewedQueryBoundsTheSearch(t *testing.T) {
 	query := reviewedQuery(false, time.Date(2026, 10, 2, 1, 0, 0, 0, time.UTC))
 	for _, part := range []string{"reviewed-by:@me", "-author:@me", "is:open", "updated:>=2026-09-02", "headRefOid", "committedDate", "REVIEW_REQUESTED_EVENT"} {

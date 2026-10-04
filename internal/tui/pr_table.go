@@ -66,6 +66,7 @@ type tableLayout struct {
 	stats            []statColumn
 	detail           bool // the queue pane's Detail column is shown
 	from             bool // the Snoozed pane's From column is shown
+	plead            bool // the mark column is wide enough for the asked-again marker
 	fits             bool
 }
 
@@ -137,7 +138,12 @@ func (m *model) paneLayout(id paneID) tableLayout {
 		lastTitle, lastWidth = "Author", min(16, max(8, width/6))
 	}
 	columns := make([]table.Column, 0, 6+len(statColumns))
-	columns = append(columns, table.Column{Title: "", Width: 1})
+	// The mark column widens for the asked-again marker while one is shown.
+	markWidth := 1
+	if review && m.pleadShown() {
+		layout.plead, markWidth = true, pleadWidth
+	}
+	columns = append(columns, table.Column{Title: "", Width: markWidth})
 	// My PRs leads with Merge, so readiness is seen first; the review list
 	// ends with its author instead.
 	if !review {
@@ -298,6 +304,9 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			for i := 1; i < len(cells); i++ {
 				cells[i] = restyle(cells[i], waitingOn, waitingOff)
 			}
+		}
+		if layout.plead {
+			cells[0] = m.pleadMark(pr, gone, markCell)
 		}
 		rows = append(rows, cells)
 	}
