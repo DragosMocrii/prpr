@@ -208,6 +208,9 @@ func TestScheduleEditorCancelsAndPersists(t *testing.T) {
 		if active.scheduleEditor == nil {
 			break
 		}
+		if view := ansiStrip(active.scheduleEditor.form.View()); strings.Contains(view, "Active weekdays") || strings.Contains(view, "Start (HH:mm)") {
+			t.Fatalf("disabling active hours still asked for days or hours: %q", view)
+		}
 		pressKey(active, tea.Key{Code: tea.KeyEnter})
 	}
 	if active.scheduleEditor != nil || active.scheduleConfig.Enabled || active.preferences.Schedule().Enabled || active.sleeping {

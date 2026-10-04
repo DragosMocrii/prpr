@@ -294,9 +294,12 @@ func (m *model) showScheduleForm() tea.Cmd {
 	for i := range dayNames {
 		options[i] = huh.NewOption(dayLabels[i], dayNames[i])
 	}
+	// Days and hours matter only to an enabled schedule; a disabled one keeps
+	// the values it had.
+	disabled := func() bool { return !e.enabled }
 	form := huh.NewForm(
 		huh.NewGroup(huh.NewConfirm().Title("Enable active hours").Description("Pause automatic polling outside this local-time schedule.").Value(&e.enabled)),
-		huh.NewGroup(huh.NewMultiSelect[string]().Title("Active weekdays").Description("Choose the days this window starts (local time, "+zone+").").Options(options...).Value(&e.days)),
+		huh.NewGroup(huh.NewMultiSelect[string]().Title("Active weekdays").Description("Choose the days this window starts (local time, "+zone+").").Options(options...).Value(&e.days)).WithHideFunc(disabled),
 		huh.NewGroup(
 			huh.NewInput().Title("Start (HH:mm)").Description("Inclusive local start time.").Value(&e.start).Validate(func(value string) error {
 				config := schedule.Config{Enabled: true, Days: e.days, Start: value, End: e.end}
@@ -308,7 +311,7 @@ func (m *model) showScheduleForm() tea.Cmd {
 				_, err := schedule.Compile(config)
 				return err
 			}),
-		),
+		).WithHideFunc(disabled),
 	)
 	dark := m.darkBackground
 	form.WithAccessible(false).WithShowHelp(true).WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return rulesTheme(dark) }))
