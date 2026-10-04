@@ -82,6 +82,12 @@ func (m *model) settingsFetch() tea.Cmd {
 	return m.startFetch()
 }
 
+// applyEditor uses and saves the editor e opens a pull request in.
+func (m *model) applyEditor(editor string) {
+	m.editor = editor
+	m.settingSaved(m.preferences.SaveEditor(editor))
+}
+
 // applyNotify turns desktop notifications on or off and saves it.
 func (m *model) applyNotify(on bool) {
 	m.notify = on

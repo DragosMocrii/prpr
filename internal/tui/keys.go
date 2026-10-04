@@ -29,6 +29,7 @@ type keyMap struct {
 	Categories      key.Binding
 	Open            key.Binding
 	CopyURL         key.Binding
+	Editor          key.Binding
 	Mouse           key.Binding
 	Notify          key.Binding
 	Icons           key.Binding
@@ -129,6 +130,7 @@ func defaultKeyMap() keyMap {
 		Categories:      key.NewBinding(key.WithKeys("1", "2", "3", "4", "5", "6", "7"), key.WithHelp("1–7", "filter")),
 		Open:            key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open")),
 		CopyURL:         key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy URL")),
+		Editor:          key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "open in editor")),
 		Mouse:           key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mouse on")),
 		Notify:          key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "notify on")),
 		Icons:           key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "nerd icons")),
@@ -269,6 +271,7 @@ func (m *model) syncKeys() {
 	k.Back.SetEnabled(details)
 	k.Open.SetEnabled(rows)
 	k.CopyURL.SetEnabled(rows)
+	k.Editor.SetEnabled(rows)
 	k.Mouse.SetEnabled(listing)
 	if m.mouse {
 		k.Mouse.SetHelp("m", "disable mouse")
@@ -407,7 +410,7 @@ func (k keyMap) listGroups() []helpGroup {
 	return []helpGroup{
 		{"Move", []key.Binding{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom, t.PageUp, t.PageDown,
 			t.HalfPageUp, t.HalfPageDown, p.PrevPage, p.NextPage, k.NextPane, k.PrevPane}},
-		{"This PR", []key.Binding{k.Details, k.Open, k.CopyURL, k.Snooze, k.Undo, k.Rerequest, k.DismissPlead}},
+		{"This PR", []key.Binding{k.Details, k.Open, k.Editor, k.CopyURL, k.Snooze, k.Undo, k.Rerequest, k.DismissPlead}},
 		{"Filter", []key.Binding{k.Search, k.Categories, k.QuickFailing, k.QuickReady, k.Drafts, k.ClearFilters}},
 		{"View", []key.Binding{k.Legend, k.Icons, k.Mouse, k.Notify, k.ClearMarks}},
 		{"Scope & settings", []key.Binding{k.PickRepository, k.AllRepositories, k.Account, k.Settings,
@@ -422,7 +425,7 @@ func (k keyMap) helpOverlayHelp() helpKeys {
 
 func (k keyMap) detailsHelp() helpKeys {
 	t := k.Table
-	return helpKeys{short: []key.Binding{t.LineUp, t.LineDown, k.Open, k.CopyURL, k.Refresh}, pinned: []key.Binding{k.Back, k.Quit}}
+	return helpKeys{short: []key.Binding{t.LineUp, t.LineDown, k.Open, k.Editor, k.CopyURL, k.Refresh}, pinned: []key.Binding{k.Back, k.Quit}}
 }
 
 func (k keyMap) rulesHelp() helpKeys {

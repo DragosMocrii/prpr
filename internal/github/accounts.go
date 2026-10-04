@@ -206,9 +206,19 @@ func decodeAccounts(data []byte) ([]Account, error) {
 // openURL starts the browser without waiting for it, so a browser that
 // keeps running is neither waited on nor stopped when prpr quits.
 func (c *Client) openURL(ctx context.Context, url string) error {
+	return c.startOpen(ctx, url, "Could not open the browser")
+}
+
+// OpenLink opens a link, such as an editor's, the way openURL does, without
+// gh or the token: an editor's own scheme is not a page gh can open.
+func (c *Client) OpenLink(ctx context.Context, url string) error {
+	return c.startOpen(ctx, url, "Could not open the link")
+}
+
+func (c *Client) startOpen(ctx context.Context, url, failure string) error {
 	cmd := c.openURLCommand(ctx, url)
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("Could not open the browser: %w", err)
+		return fmt.Errorf("%s: %w", failure, err)
 	}
 	go func() { _ = cmd.Wait() }()
 	return nil

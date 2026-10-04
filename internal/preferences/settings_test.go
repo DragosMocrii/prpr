@@ -21,7 +21,7 @@ func TestSettingsDefaultWithoutAFile(t *testing.T) {
 	queues, _ := github.ParseQueues(github.DefaultQueues)
 	if store.Refresh() != DefaultRefresh || !reflect.DeepEqual(store.Bots(), defaults) ||
 		!reflect.DeepEqual(store.Queues(), queues) || store.Notify() || store.Mouse() || !store.Title() ||
-		store.BotsText() != github.DefaultBots || store.SettingsErr() != nil {
+		store.BotsText() != github.DefaultBots || store.Editor() != EditorVSCode || store.SettingsErr() != nil {
 		t.Fatalf("defaults: refresh %v bots %+v queues %v notify %v mouse %v title %v",
 			store.Refresh(), store.Bots(), store.Queues(), store.Notify(), store.Mouse(), store.Title())
 	}
@@ -40,6 +40,7 @@ func TestSettingsRoundTripAndDefaultsAreNotWritten(t *testing.T) {
 		func() error { return store.SaveNotify(true) },
 		func() error { return store.SaveMouse(true) },
 		func() error { return store.SaveTitle(false) },
+		func() error { return store.SaveEditor(EditorGitHubDev) },
 	} {
 		if err := save(); err != nil {
 			t.Fatal(err)
@@ -51,7 +52,7 @@ func TestSettingsRoundTripAndDefaultsAreNotWritten(t *testing.T) {
 	}
 	if reopened.Refresh() != 10*time.Minute || len(reopened.Bots()) != 0 || reopened.BotsText() != "" ||
 		!reflect.DeepEqual(reopened.Queues(), []github.Queue{github.QueueTrunk}) ||
-		!reopened.Notify() || !reopened.Mouse() || reopened.Title() {
+		!reopened.Notify() || !reopened.Mouse() || reopened.Title() || reopened.Editor() != EditorGitHubDev {
 		t.Fatalf("reopened: refresh %v bots %+v queues %v notify %v mouse %v title %v", reopened.Refresh(),
 			reopened.Bots(), reopened.Queues(), reopened.Notify(), reopened.Mouse(), reopened.Title())
 	}
@@ -63,6 +64,7 @@ func TestSettingsRoundTripAndDefaultsAreNotWritten(t *testing.T) {
 		func() error { return reopened.SaveNotify(false) },
 		func() error { return reopened.SaveMouse(false) },
 		func() error { return reopened.SaveTitle(true) },
+		func() error { return reopened.SaveEditor(EditorVSCode) },
 	} {
 		if err := save(); err != nil {
 			t.Fatal(err)
@@ -72,7 +74,7 @@ func TestSettingsRoundTripAndDefaultsAreNotWritten(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"refresh"`, `"bots"`, `"queues"`, `"notify"`, `"mouse"`, `"title"`} {
+	for _, key := range []string{`"refresh"`, `"bots"`, `"queues"`, `"notify"`, `"mouse"`, `"title"`, `"editor"`} {
 		if strings.Contains(string(data), key) {
 			t.Errorf("default %s was written: %s", key, data)
 		}
@@ -81,7 +83,7 @@ func TestSettingsRoundTripAndDefaultsAreNotWritten(t *testing.T) {
 
 func TestUnreadableSettingsFallBackAndStayAsWritten(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "preferences.json")
-	contents := `{"app":{"refresh":"10s","bots":"no-equals","queues":["bors"],"legend":true}}`
+	contents := `{"app":{"refresh":"10s","bots":"no-equals","queues":["bors"],"editor":"atom","legend":true}}`
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -90,10 +92,11 @@ func TestUnreadableSettingsFallBackAndStayAsWritten(t *testing.T) {
 		t.Fatal(err)
 	}
 	defaults, _ := github.ParseBots(github.DefaultBots)
-	if store.Refresh() != DefaultRefresh || !reflect.DeepEqual(store.Bots(), defaults) || len(store.Queues()) != 2 {
-		t.Fatalf("fallbacks: refresh %v bots %+v queues %v", store.Refresh(), store.Bots(), store.Queues())
+	if store.Refresh() != DefaultRefresh || !reflect.DeepEqual(store.Bots(), defaults) || len(store.Queues()) != 2 ||
+		store.Editor() != EditorVSCode {
+		t.Fatalf("fallbacks: refresh %v bots %+v queues %v editor %q", store.Refresh(), store.Bots(), store.Queues(), store.Editor())
 	}
-	for _, key := range []string{"refresh", "bots", "queues"} {
+	for _, key := range []string{"refresh", "bots", "queues", "editor"} {
 		if store.SettingErr(key) == nil {
 			t.Errorf("no error for unreadable %s", key)
 		}
@@ -111,7 +114,7 @@ func TestUnreadableSettingsFallBackAndStayAsWritten(t *testing.T) {
 		t.Fatal(err)
 	}
 	var queues []string
-	if string(saved.App["refresh"]) != `"10s"` || string(saved.App["bots"]) != `"no-equals"` ||
+	if string(saved.App["refresh"]) != `"10s"` || string(saved.App["bots"]) != `"no-equals"` || string(saved.App["editor"]) != `"atom"` ||
 		json.Unmarshal(saved.App["queues"], &queues) != nil || !reflect.DeepEqual(queues, []string{"bors"}) {
 		t.Fatalf("unreadable values not kept: %s", data)
 	}
@@ -135,7 +138,10 @@ func TestSaveSettingsRejectsInvalidValues(t *testing.T) {
 	if err := store.SaveBots("no-equals"); err == nil {
 		t.Error("SaveBots(invalid) succeeded")
 	}
-	if store.Refresh() != DefaultRefresh || store.BotsText() != github.DefaultBots {
+	if err := store.SaveEditor("atom"); err == nil {
+		t.Error("SaveEditor(atom) succeeded")
+	}
+	if store.Refresh() != DefaultRefresh || store.BotsText() != github.DefaultBots || store.Editor() != EditorVSCode {
 		t.Fatal("a rejected save changed the store")
 	}
 }

@@ -4,13 +4,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/DragosMocrii/prpr/internal/github"
+	"github.com/DragosMocrii/prpr/internal/preferences"
 )
+
+// recordLinks makes the model record the editor links it opens.
+func recordLinks(m *model) *[]string {
+	var opened []string
+	m.openLink = func(_ context.Context, link string) error {
+		opened = append(opened, link)
+		return nil
+	}
+	return &opened
+}
 
 // recordOpens makes the model record the URLs it opens, failing with err.
 func recordOpens(m *model, err error) *[]string {
@@ -74,7 +86,7 @@ func TestOpenFailureIsReportedAndOlderResultsKeepNewerNotices(t *testing.T) {
 func TestOpenAndCopyRefuseUnsafeURLsAndNeedARow(t *testing.T) {
 	m := newPaneModel(t, 120, 30, []github.PullRequest{{Number: 7, Repository: "acme/a", URL: "https://evil.test/pull/7"}}, nil)
 	opened := recordOpens(m, nil)
-	for _, key := range []tea.Key{{Code: 'o', Text: "o"}, {Code: 'y', Text: "y"}} {
+	for _, key := range []tea.Key{{Code: 'o', Text: "o"}, {Code: 'e', Text: "e"}, {Code: 'y', Text: "y"}} {
 		if cmd := m.handleKey(tea.KeyPressMsg(key)); cmd != nil {
 			t.Fatalf("%s ran a command for an unsafe URL", key.Text)
 		}
@@ -108,5 +120,48 @@ func TestOpenWorksOnGoneRows(t *testing.T) {
 	m.Update(m.handleKey(tea.KeyPressMsg{Code: 'o', Text: "o"})())
 	if len(*opened) != 1 || (*opened)[0] != manyPRs(2)[1].URL {
 		t.Fatalf("opened %v", *opened)
+	}
+}
+
+func TestEditorOpensTheSelectedPullRequestInTheChosenEditor(t *testing.T) {
+	m := newPaneModel(t, 120, 30, manyPRs(3), nil)
+	browser := recordOpens(m, nil)
+	links := recordLinks(m)
+	press(m, tea.Key{Code: 'j', Text: "j"})
+	pr := manyPRs(3)[1]
+	cmd := m.handleKey(tea.KeyPressMsg{Code: 'e', Text: "e"})
+	if cmd == nil || !strings.Contains(statusText(m), "Opening #2 in VS Code") {
+		t.Fatalf("e: cmd %v, status %q", cmd, statusText(m))
+	}
+	m.Update(cmd())
+	if strings.Contains(statusText(m), "Opening") {
+		t.Fatalf("notice kept after a successful open: %q", statusText(m))
+	}
+
+	// Settings cycles the editor and saves it.
+	pressMsg(m, letter(","))
+	moveTo(t, m, "Editor")
+	for _, want := range []string{"VS Code Insiders", "github.dev"} {
+		press(m, tea.Key{Code: tea.KeySpace, Text: " "})
+		if !strings.Contains(settingsView(m), want) {
+			t.Fatalf("Settings lacks %q:\n%s", want, settingsView(m))
+		}
+	}
+	if m.preferences.Editor() != preferences.EditorGitHubDev {
+		t.Fatalf("saved editor %q", m.preferences.Editor())
+	}
+	press(m, tea.Key{Code: tea.KeyEsc})
+	m.Update(m.handleKey(tea.KeyPressMsg{Code: 'e', Text: "e"})())
+
+	parsed, err := url.Parse((*links)[0])
+	if err != nil || parsed.Scheme != "vscode" || parsed.Host != "github.vscode-pull-request-github" ||
+		parsed.Path != "/open-pull-request-webview" || parsed.Query().Get("uri") != pr.URL {
+		t.Fatalf("VS Code link %q", (*links)[0])
+	}
+	if want := strings.Replace(pr.URL, "https://github.com/", "https://github.dev/", 1); len(*links) != 2 || (*links)[1] != want {
+		t.Fatalf("links %v, want github.dev link %s", *links, want)
+	}
+	if len(*browser) != 0 {
+		t.Fatalf("e went through the browser opener: %v", *browser)
 	}
 }

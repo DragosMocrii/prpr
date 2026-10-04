@@ -96,6 +96,9 @@ func settingRows() []settingRow {
 		{kind: settingToggle, label: "Mouse", shortcut: "m",
 			value:  func(m *model) string { return onOff(m.mouse) },
 			change: func(m *model) tea.Cmd { m.applyMouse(!m.mouse); return nil }},
+		{kind: settingChoice, label: "Editor", errKey: "editor",
+			value:  func(m *model) string { return editorName(m.editor) },
+			change: func(m *model) tea.Cmd { m.applyEditor(nextEditor(m.editor)); return nil }},
 		{kind: settingToggle, label: "Terminal title",
 			value:  func(m *model) string { return onOff(m.setTitle) },
 			change: func(m *model) tea.Cmd { m.applyTitle(!m.setTitle); return nil }},
@@ -169,6 +172,13 @@ func nextRefresh(d time.Duration) time.Duration {
 		}
 	}
 	return refreshChoices[0]
+}
+
+// nextEditor is the editor after editor in preferences.Editors, the last
+// wrapping to the first.
+func nextEditor(editor string) string {
+	i := slices.Index(preferences.Editors, editor)
+	return preferences.Editors[(i+1)%len(preferences.Editors)]
 }
 
 // openSettings opens Settings on its first setting.

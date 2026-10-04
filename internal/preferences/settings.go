@@ -18,9 +18,19 @@ const (
 	MinRefresh = 30 * time.Second
 )
 
+// Editor names, saved as the app key's editor.
+const (
+	EditorVSCode         = "vscode"
+	EditorVSCodeInsiders = "vscode-insiders"
+	EditorGitHubDev      = "github.dev"
+)
+
+// Editors are the editors e can open a pull request in, the default first.
+var Editors = []string{EditorVSCode, EditorVSCodeInsiders, EditorGitHubDev}
+
 // settings are the app settings that were flags: each value, and for
 // refresh, bots, and queues the value as written, kept while it cannot be
-// read so a save of another setting does not lose it.
+// read so a save of another setting does not lose it; editor is like them.
 type settings struct {
 	refresh    time.Duration
 	refreshRaw json.RawMessage
@@ -28,6 +38,8 @@ type settings struct {
 	botsRaw    json.RawMessage
 	queues     []github.Queue
 	queuesRaw  json.RawMessage
+	editor     string
+	editorRaw  json.RawMessage
 	notify     bool
 	mouse      bool
 	title      bool
@@ -38,7 +50,7 @@ type settings struct {
 func defaultSettings() settings {
 	bots, _ := github.ParseBots(github.DefaultBots)
 	queues, _ := github.ParseQueues(github.DefaultQueues)
-	return settings{refresh: DefaultRefresh, bots: bots, queues: queues, title: true, errs: map[string]error{}}
+	return settings{refresh: DefaultRefresh, bots: bots, queues: queues, editor: EditorVSCode, title: true, errs: map[string]error{}}
 }
 
 // decodeSettings reads the settings from the app object; a value that
@@ -85,6 +97,18 @@ func decodeSettings(app appJSON, path string) settings {
 			s.queues = queues
 		}
 	}
+	// Editor: must be a JSON string naming one of Editors, or nothing
+	if len(app.Editor) != 0 && string(app.Editor) != "null" {
+		s.editorRaw = app.Editor
+		var name string
+		if err := json.Unmarshal(app.Editor, &name); err != nil {
+			s.errs["editor"] = fmt.Errorf("editor in %q not read, using VS Code: %w", path, err)
+		} else if !slices.Contains(Editors, name) {
+			s.errs["editor"] = fmt.Errorf("editor %q in %q not read, using VS Code: unknown editor", name, path)
+		} else {
+			s.editor = name
+		}
+	}
 	return s
 }
 
@@ -94,6 +118,7 @@ func (s settings) encode(app *appJSON) {
 	app.Refresh = s.refreshRaw
 	app.Bots = s.botsRaw
 	app.Queues = s.queuesRaw
+	app.Editor = s.editorRaw
 	app.Notify, app.Mouse = s.notify, s.mouse
 	app.Title = nil
 	if !s.title {
@@ -218,6 +243,23 @@ func (s *Store) SaveQueues(queues []github.Queue) error {
 	})
 }
 
+// Editor is the editor e opens a pull request in, one of Editors.
+func (s *Store) Editor() string { return s.settings.editor }
+
+// SaveEditor saves the editor e opens a pull request in.
+func (s *Store) SaveEditor(name string) error {
+	if !slices.Contains(Editors, name) {
+		return fmt.Errorf("unknown editor %q", name)
+	}
+	return s.saveSettings(func(c *settings) {
+		c.editor, c.editorRaw = name, nil
+		if name != EditorVSCode {
+			c.editorRaw, _ = json.Marshal(name)
+		}
+		delete(c.errs, "editor")
+	})
+}
+
 // Notify is whether desktop notifications are on.
 func (s *Store) Notify() bool { return s.settings.notify }
 
@@ -242,14 +284,14 @@ func (s *Store) SaveTitle(on bool) error {
 	return s.saveSettings(func(c *settings) { c.title = on })
 }
 
-// SettingErr says why the saved value of key ("refresh", "bots", or
-// "queues") was not read; nil when it was.
+// SettingErr says why the saved value of key ("refresh", "bots", "queues",
+// or "editor") was not read; nil when it was.
 func (s *Store) SettingErr(key string) error { return s.settings.errs[key] }
 
 // SettingsErr joins every unreadable setting's error; nil when all were read.
 func (s *Store) SettingsErr() error {
 	var errs []error
-	for _, key := range []string{"refresh", "bots", "queues"} {
+	for _, key := range []string{"refresh", "bots", "queues", "editor"} {
 		if err := s.settings.errs[key]; err != nil {
 			errs = append(errs, err)
 		}

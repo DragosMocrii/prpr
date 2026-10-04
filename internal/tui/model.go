@@ -118,6 +118,10 @@ type model struct {
 	pointer pointer
 	// openBrowser opens a pull request URL; it is the client's in the app.
 	openBrowser func(context.Context, string) error
+	// openLink opens an editor link without gh; it is the client's in the app.
+	openLink func(context.Context, string) error
+	// editor is the editor e opens a pull request in, a preferences.Editors name.
+	editor string
 	// notice reports the last open or copy action in the status line until
 	// the next key press. noticeID increments whenever it is set.
 	notice   string
@@ -246,6 +250,7 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m.refreshInterval = preferences.Refresh()
 	m.bots = len(client.Bots()) > 0
 	m.openBrowser = client.OpenInBrowser
+	m.openLink = client.OpenLink
 	m.listReviewers = client.Reviewers
 	m.requestReviews = client.RequestReviews
 	m.notify = preferences.Notify()
@@ -295,6 +300,7 @@ func newModel(ctx context.Context, client *github.Client, preferences *preferenc
 		scheduleErr:    preferences.ScheduleErr(),
 		sessionBots:    preferences.Bots(),
 		sessionQueues:  preferences.Queues(),
+		editor:         preferences.Editor(),
 	}
 	if window, err := schedule.Compile(m.scheduleConfig); err == nil {
 		m.scheduleWindow = window
@@ -721,6 +727,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.openSelected()
 	case key.Matches(msg, k.CopyURL):
 		return m.copySelected()
+	case key.Matches(msg, k.Editor):
+		return m.openSelectedInEditor()
 	case key.Matches(msg, k.Account):
 		return m.openAccountPicker()
 	case key.Matches(msg, k.Mouse):
