@@ -549,6 +549,8 @@ func (m *model) emptyPaneLine(id paneID) string {
 		text += " in " + singleLine(m.watchlist.Name)
 	} else if m.selectedRepository != "" {
 		text += " in " + singleLine(m.selectedRepository)
+	} else if m.owner != "" {
+		text += " in " + ownerLabel(m.owner)
 	}
 	if hidden := m.hiddenDrafts(id); hidden == 1 {
 		text += "; 1 draft hidden, D shows it"

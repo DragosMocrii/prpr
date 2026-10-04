@@ -37,7 +37,10 @@ type model struct {
 	snapshot           github.Snapshot
 	selectedRepository string
 	// watchlist is the watchlist scope; its empty name means none.
-	watchlist   preferences.Watchlist
+	watchlist preferences.Watchlist
+	// owner is the owner scope: every repository of one owner, or "" for
+	// none.
+	owner       string
 	filterLogin string
 	panes       [len(paneIDs)]prPane
 	changes     [2]paneChanges
@@ -845,6 +848,9 @@ func (m *model) updateRepositoryPicker(msg tea.KeyPressMsg) tea.Cmd {
 		case watchlistCandidate:
 			m.closeRepositoryPicker()
 			m.chooseScope(preferences.Scope{Watchlist: candidate.watchlist})
+		case ownerCandidate:
+			m.closeRepositoryPicker()
+			m.chooseScope(preferences.Scope{Owner: candidate.owner})
 		case knownRepositoryCandidate:
 			m.closeRepositoryPicker()
 			m.chooseRepository(candidate.repository)
@@ -1104,13 +1110,19 @@ func (m *model) inRepositoryScope(pr *github.PullRequest) bool {
 			return strings.EqualFold(pr.Repository, repository)
 		})
 	}
+	if m.owner != "" {
+		owner, _, _ := strings.Cut(pr.Repository, "/")
+		return strings.EqualFold(owner, m.owner)
+	}
 	return m.selectedRepository == "" || strings.EqualFold(pr.Repository, m.selectedRepository)
 }
 
-// setScope shows one repository, a watchlist of login's, or All
-// repositories. A watchlist that no longer exists shows All.
+// setScope shows one repository, a watchlist of login's, every repository
+// of an owner, or All repositories. A watchlist that no longer exists shows
+// All.
 func (m *model) setScope(login string, scope preferences.Scope) {
 	m.selectedRepository = scope.Repository
+	m.owner = scope.Owner
 	m.watchlist = preferences.Watchlist{}
 	if scope.Watchlist == "" {
 		return
@@ -1122,6 +1134,9 @@ func (m *model) setScope(login string, scope preferences.Scope) {
 	}
 }
 
+// ownerLabel names an owner scope: every repository of owner.
+func ownerLabel(owner string) string { return singleLine(owner) + "/*" }
+
 // scopeLabel names the scope in the title.
 func (m *model) scopeLabel() string {
 	switch {
@@ -1129,6 +1144,8 @@ func (m *model) scopeLabel() string {
 		return m.icons.star + " " + singleLine(m.watchlist.Name)
 	case m.selectedRepository != "":
 		return singleLine(m.selectedRepository)
+	case m.owner != "":
+		return ownerLabel(m.owner)
 	default:
 		return "All repositories"
 	}

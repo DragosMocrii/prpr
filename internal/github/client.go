@@ -488,19 +488,20 @@ func (c *Client) ResolveRepository(ctx context.Context, fullName string) (string
 }
 
 func ValidRepositoryName(fullName string) bool {
-	parts := strings.Split(fullName, "/")
-	if len(parts) != 2 {
+	owner, name, ok := strings.Cut(fullName, "/")
+	return ok && ValidOwnerName(owner) && ValidOwnerName(name)
+}
+
+// ValidOwnerName reports whether name can be a repository owner: the same
+// characters a repository name part allows.
+func ValidOwnerName(name string) bool {
+	if name == "" || name == "." || name == ".." {
 		return false
 	}
-	for _, part := range parts {
-		if part == "" || part == "." || part == ".." {
+	for _, r := range name {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.') {
 			return false
-		}
-		for _, r := range part {
-			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-				(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.') {
-				return false
-			}
 		}
 	}
 	return true

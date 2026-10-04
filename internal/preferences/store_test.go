@@ -724,3 +724,48 @@ func TestUnreadableDismissalsAreSkipped(t *testing.T) {
 		t.Fatal("SaveDismissals accepted an invalid number")
 	}
 }
+
+func TestOwnerScopeRoundTripsBesideWatchlists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveWatchlist("alice", "", Watchlist{Name: "Kept", Repositories: []string{"acme/a"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveScope("alice", Scope{Owner: "acme"}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scope, found := reopened.Lookup("alice"); !found || scope != (Scope{Owner: "acme"}) {
+		t.Fatalf("reopened scope = %+v, %v", scope, found)
+	}
+	if lists := reopened.Watchlists("alice"); len(lists) != 1 {
+		t.Fatalf("watchlists = %+v", lists)
+	}
+	for _, scope := range []Scope{{Owner: "acme", Repository: "acme/a"}, {Owner: "acme", Watchlist: "Kept"}, {Owner: "not/owner"}} {
+		if err := store.SaveScope("alice", scope); err == nil {
+			t.Errorf("SaveScope(%+v) succeeded", scope)
+		}
+	}
+}
+
+func TestOpenRejectsInvalidOwnerScopes(t *testing.T) {
+	for _, contents := range []string{
+		`{"alice":{"owner":"bad owner"}}`,
+		`{"alice":{"owner":"acme","repository":"acme/a"}}`,
+		`{"alice":{"owner":"acme","watchlist":"Same","watchlists":{"Same":["acme/a"]}}}`,
+	} {
+		path := filepath.Join(t.TempDir(), "preferences.json")
+		if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Open(path); err == nil {
+			t.Errorf("Open(%s) succeeded, want an error", contents)
+		}
+	}
+}

@@ -18,10 +18,12 @@ import (
 )
 
 // Scope is an account's saved choice of what both lists show: one
-// repository, a watchlist by name, or All repositories when both are empty.
+// repository, a watchlist by name, every repository of an owner, or All
+// repositories when all are empty. At most one is set.
 type Scope struct {
 	Repository string
 	Watchlist  string
+	Owner      string
 }
 
 // Watchlist is a named set of repositories.
@@ -206,13 +208,14 @@ func (s *Store) app() appJSON {
 }
 
 // accountJSON is an account's value when it has watchlists, snoozes,
-// dismissals, or a
-// watchlist scope; otherwise the value is the repository string alone, the
-// format older versions read. An object without repository or watchlist has
-// no saved scope.
+// dismissals, or a watchlist or owner scope; otherwise the value is the
+// repository string alone, the format older versions read. An object without
+// repository, watchlist, or owner has no saved scope, so older versions
+// prompt for an owner scope.
 type accountJSON struct {
 	Repository *string             `json:"repository,omitempty"`
 	Watchlist  string              `json:"watchlist,omitempty"`
+	Owner      string              `json:"owner,omitempty"`
 	Watchlists map[string][]string `json:"watchlists,omitempty"`
 	Snoozed    json.RawMessage     `json:"snoozed,omitempty"`
 	Dismissed  json.RawMessage     `json:"dismissed,omitempty"`
@@ -328,9 +331,15 @@ func decodeAccount(value json.RawMessage) (account, error) {
 	if len(object.Dismissed) != 0 {
 		decoded.dismissed = decodeDismissals(object.Dismissed)
 	}
+	if scopes := btoi(object.Repository != nil) + btoi(object.Watchlist != "") + btoi(object.Owner != ""); scopes > 1 {
+		return account{}, errors.New("has more than one of repository, watchlist, and owner")
+	}
 	switch {
-	case object.Repository != nil && object.Watchlist != "":
-		return account{}, errors.New("has both a repository and a watchlist")
+	case object.Owner != "":
+		if !github.ValidOwnerName(object.Owner) {
+			return account{}, fmt.Errorf("has invalid owner %q", object.Owner)
+		}
+		decoded.scope, decoded.chosen = Scope{Owner: object.Owner}, true
 	case object.Repository != nil:
 		if *object.Repository != "" && !github.ValidRepositoryName(*object.Repository) {
 			return account{}, fmt.Errorf("has invalid repository %q", *object.Repository)
@@ -396,14 +405,15 @@ func uniqueRepositories(repositories []string) []string {
 }
 
 func (a account) encode() any {
-	if len(a.watchlists) == 0 && len(a.snoozes) == 0 && a.snoozedRaw == nil && len(a.dismissed) == 0 && a.chosen && a.scope.Watchlist == "" {
+	repositoryScope := a.chosen && a.scope.Watchlist == "" && a.scope.Owner == ""
+	if len(a.watchlists) == 0 && len(a.snoozes) == 0 && a.snoozedRaw == nil && len(a.dismissed) == 0 && repositoryScope {
 		return a.scope.Repository
 	}
-	object := accountJSON{Watchlist: a.scope.Watchlist}
+	object := accountJSON{Watchlist: a.scope.Watchlist, Owner: a.scope.Owner}
 	if len(a.watchlists) > 0 {
 		object.Watchlists = make(map[string][]string, len(a.watchlists))
 	}
-	if a.chosen && a.scope.Watchlist == "" {
+	if repositoryScope {
 		repository := a.scope.Repository
 		object.Repository = &repository
 	}
@@ -621,8 +631,10 @@ func (s *Store) Save(login, repository string) error {
 func (s *Store) SaveScope(login string, scope Scope) error {
 	return s.change(login, func(a *account) error {
 		switch {
-		case scope.Watchlist != "" && scope.Repository != "":
-			return errors.New("a scope cannot have both a repository and a watchlist")
+		case btoi(scope.Repository != "")+btoi(scope.Watchlist != "")+btoi(scope.Owner != "") > 1:
+			return errors.New("a scope can have only one of a repository, a watchlist, and an owner")
+		case scope.Owner != "" && !github.ValidOwnerName(scope.Owner):
+			return fmt.Errorf("invalid owner %q", scope.Owner)
 		case scope.Watchlist != "":
 			index := a.find(scope.Watchlist)
 			if index < 0 {
@@ -754,3 +766,10 @@ func (s *Store) write(data []byte) error {
 }
 
 func accountKey(login string) string { return "github.com/" + strings.ToLower(login) }
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}

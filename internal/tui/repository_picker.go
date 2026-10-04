@@ -21,6 +21,7 @@ type repositoryCandidateKind uint8
 const (
 	allRepositoriesCandidate repositoryCandidateKind = iota
 	watchlistCandidate
+	ownerCandidate
 	knownRepositoryCandidate
 	lookupRepositoryCandidate
 )
@@ -31,6 +32,8 @@ type repositoryCandidate struct {
 	repository string
 	// watchlist names a watchlist candidate's watchlist.
 	watchlist string
+	// owner names an owner candidate's owner.
+	owner string
 }
 
 type repositoryPicker struct {
@@ -235,6 +238,17 @@ func (p *repositoryPicker) rebuildCandidates() {
 			matching++
 		}
 	}
+	for _, owner := range repositoryOwners(p.repositories) {
+		label := owner.name + "/*"
+		if strings.Contains(strings.ToLower(label), strings.ToLower(trimmed)) {
+			p.candidates = append(p.candidates, repositoryCandidate{
+				kind:  ownerCandidate,
+				label: label + " · " + plural(owner.repositories, "repo"),
+				owner: owner.name,
+			})
+			matching++
+		}
+	}
 	for _, name := range p.repositories {
 		if strings.Contains(strings.ToLower(name), strings.ToLower(trimmed)) {
 			p.candidates = append(p.candidates, repositoryCandidate{kind: knownRepositoryCandidate, label: name, repository: name})
@@ -261,6 +275,29 @@ func (p *repositoryPicker) rebuildCandidates() {
 		}
 	}
 	p.offset = 0
+}
+
+type repositoryOwner struct {
+	name         string
+	repositories int
+}
+
+// repositoryOwners counts the repositories of each owner, sorted by name,
+// keeping the first spelling of each owner.
+func repositoryOwners(names []string) []repositoryOwner {
+	var owners []repositoryOwner
+	for _, name := range names {
+		owner, _, _ := strings.Cut(name, "/")
+		if i := slices.IndexFunc(owners, func(o repositoryOwner) bool { return strings.EqualFold(o.name, owner) }); i >= 0 {
+			owners[i].repositories++
+			continue
+		}
+		owners = append(owners, repositoryOwner{name: owner, repositories: 1})
+	}
+	slices.SortFunc(owners, func(a, b repositoryOwner) int {
+		return strings.Compare(strings.ToLower(a.name), strings.ToLower(b.name))
+	})
+	return owners
 }
 
 func (p *repositoryPicker) query() string {
@@ -356,7 +393,7 @@ func (m *model) repositoryPickerLines() []string {
 	if p.naming != nil {
 		input = p.naming.View()
 	}
-	lines := []string{"Select repository or watchlist", input}
+	lines := []string{"Select repository, organization, or watchlist", input}
 	end := p.offset + visible
 	if end > len(p.candidates) {
 		end = len(p.candidates)
