@@ -1,28 +1,45 @@
 package tui
 
 import (
-	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/huh/v2"
 
 	"github.com/DragosMocrii/prpr/internal/github"
 )
 
 // rerequestEditor is the form that requests reviews of an authored pull
-// request again. Its field writes to chosen.
+// request again: the people who can be asked, grouped by what they can
+// answer, and which of them are chosen.
 type rerequestEditor struct {
-	form   *huh.Form
-	key    prKey
-	title  string
-	chosen []string
+	key   prKey
+	title string
+	// people are the offered reviewers; groups list them by index.
+	people []github.Reviewer
+	groups []rerequestGroup
+	// chosen holds the chosen people, by lowercase login.
+	chosen map[string]bool
+	// teams are the pending team requests; unreadable counts those GitHub
+	// would not show.
+	teams      []github.TeamRequest
+	unreadable int
+	// approvers reports that an offered reviewer approved.
+	approvers bool
 	// reviewed are when the offered reviewers last reviewed, by lowercase
 	// login, as the form showed them.
 	reviewed map[string]time.Time
+	// cursor is the row under the cursor, in rows(); offset is the first
+	// row drawn.
+	cursor, offset int
+	// filter narrows the people shown by login; filtering is set while it
+	// takes the keys.
+	filter    textinput.Model
+	filtering bool
+	// problem says why Enter sent nothing.
+	problem string
 }
 
 // reviewersListedMsg brings the reviewers of key that can be asked again.
@@ -31,7 +48,7 @@ type reviewersListedMsg struct {
 	account   uint64
 	noticeID  uint64
 	key       prKey
-	reviewers []github.Reviewer
+	reviewers github.ReviewerList
 	err       error
 }
 
@@ -43,7 +60,7 @@ type reviewersRecheckedMsg struct {
 	key       prKey
 	chosen    []string
 	reviewed  map[string]time.Time
-	reviewers []github.Reviewer
+	reviewers github.ReviewerList
 	err       error
 }
 
@@ -115,68 +132,17 @@ func (m *model) handleReviewersListed(msg reviewersListedMsg) tea.Cmd {
 	case msg.err != nil:
 		m.setNotice(singleLine(msg.err.Error()))
 		return nil
-	case len(msg.reviewers) == 0:
-		m.setNotice(fmt.Sprintf("No one to ask again on #%d: nobody reviewed it or is requested to", pr.Number))
+	case len(msg.reviewers.Reviewers) == 0:
+		text := fmt.Sprintf("No one to ask again on #%d: nobody reviewed it or is requested to", pr.Number)
+		if msg.reviewers.UnreadableTeams > 0 {
+			text += "; " + unreadableTeams(msg.reviewers.UnreadableTeams)
+		}
+		m.setNotice(text)
 		return nil
 	}
 	m.notice = ""
-	e := &rerequestEditor{key: msg.key, title: "Request reviews of " + alertName(pr) + " again",
-		reviewed: make(map[string]time.Time)}
-	options := make([]huh.Option[string], len(msg.reviewers))
-	approvers := false
-	for i, reviewer := range msg.reviewers {
-		label := reviewer.Login + " — "
-		switch {
-		case reviewer.State == "":
-			label += "requested, no review yet"
-		case reviewer.Pending:
-			label += reviewWords(reviewer.State) + ", requested again since"
-		default:
-			label += reviewWords(reviewer.State)
-		}
-		if reviewer.Stale && reviewer.State != "" {
-			label += ", before the latest commits"
-		}
-		// GitHub shows an approver asked again as awaiting review, though
-		// the approval still counts.
-		if reviewer.State == "APPROVED" {
-			approvers = true
-		}
-		// A pending request is asked again only on purpose: renewing it
-		// takes it away for a moment. Nor is an approver: an approval
-		// rarely needs a nudge.
-		chosen := reviewer.Stale && !reviewer.Pending && reviewer.State != "APPROVED"
-		if chosen {
-			e.chosen = append(e.chosen, reviewer.Login)
-		}
-		e.reviewed[strings.ToLower(reviewer.Login)] = reviewer.ReviewedAt
-		options[i] = huh.NewOption(singleLine(label), reviewer.Login).Selected(chosen)
-	}
-	description := "Space toggles, Enter requests. GitHub notifies each one."
-	if approvers {
-		description += "\nApprovers asked again show as awaiting review; approvals still count."
-	}
-	m.rerequest = e
-	e.form = huh.NewForm(huh.NewGroup(
-		huh.NewMultiSelect[string]().Title(e.title).
-			Description(description).
-			Options(options...).Filterable(false).Value(&e.chosen).
-			Validate(func(chosen []string) error {
-				if len(chosen) == 0 {
-					return errors.New("choose at least one reviewer, or press Esc")
-				}
-				return nil
-			}).
-			// Sized after the title and description, with room for them to
-			// wrap: with few options, huh otherwise leaves them no room.
-			Height(len(options) + 4),
-	))
-	dark := m.darkBackground
-	e.form.WithAccessible(false).WithShowHelp(true).
-		WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return rulesTheme(dark) }))
-	e.form.SubmitCmd, e.form.CancelCmd = nil, nil
-	m.sizeRerequestForm()
-	return e.form.Init()
+	m.rerequest = newRerequestEditor(msg.key, "Request reviews of "+alertName(pr), msg.reviewers, m.darkBackground)
+	return nil
 }
 
 // reviewWords names a review state.
@@ -194,28 +160,24 @@ func reviewWords(state string) string {
 	return "reviewed"
 }
 
-// sizeRerequestForm fits the form to the terminal; every resize sets it again.
-func (m *model) sizeRerequestForm() {
-	m.rerequest.form.WithWidth(max(min(m.width, rulesWidth), 1)).WithHeight(max(m.height-rulesChrome, 1))
-}
-
-// updateRerequest passes a message to the form. Esc cancels; a finished form
-// requests the reviews.
+// updateRerequest passes a key to the form. Esc cancels; Enter requests
+// the chosen reviews.
 func (m *model) updateRerequest(msg tea.Msg) tea.Cmd {
-	e := m.rerequest
-	if press, ok := msg.(tea.KeyPressMsg); ok && press.String() == "esc" {
-		m.rerequest = nil
+	press, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		if m.rerequest.filtering {
+			var cmd tea.Cmd
+			m.rerequest.filter, cmd = m.rerequest.filter.Update(msg)
+			return cmd
+		}
 		return nil
 	}
-	form, cmd := e.form.Update(msg)
-	if f, ok := form.(*huh.Form); ok {
-		e.form = f
-	}
-	switch e.form.State {
-	case huh.StateAborted:
+	send, cancel, cmd := m.rerequest.update(press, m.keys.Reviewers, m.rerequestListHeight())
+	switch {
+	case cancel:
 		m.rerequest = nil
-		return nil
-	case huh.StateCompleted:
+	case send:
+		e := m.rerequest
 		m.rerequest = nil
 		return m.recheckReviewers(e)
 	}
@@ -230,12 +192,13 @@ func (m *model) recheckReviewers(e *rerequestEditor) tea.Cmd {
 		m.setNotice(fmt.Sprintf("%s#%d is no longer listed", e.key.repository, e.key.number))
 		return nil
 	}
-	if len(e.chosen) == 0 {
+	chosen := e.chosenLogins()
+	if len(chosen) == 0 {
 		return nil
 	}
 	m.setNotice(fmt.Sprintf("Requesting reviews of #%d…", pr.Number))
 	ctx, list, repository, number, account := m.ctx, m.listReviewers, pr.Repository, pr.Number, m.accountGeneration
-	key, chosen, reviewed := e.key, slices.Clone(e.chosen), e.reviewed
+	key, reviewed := e.key, e.reviewed
 	return func() tea.Msg {
 		reviewers, err := list(ctx, repository, number)
 		return reviewersRecheckedMsg{account: account, key: key, chosen: chosen, reviewed: reviewed, reviewers: reviewers, err: err}
@@ -259,8 +222,8 @@ func (m *model) handleReviewersRechecked(msg reviewersRecheckedMsg) tea.Cmd {
 		m.setNotice(singleLine("Nothing sent: " + msg.err.Error()))
 		return nil
 	}
-	now := make(map[string]github.Reviewer, len(msg.reviewers))
-	for _, reviewer := range msg.reviewers {
+	now := make(map[string]github.Reviewer, len(msg.reviewers.Reviewers))
+	for _, reviewer := range msg.reviewers.Reviewers {
 		now[strings.ToLower(reviewer.Login)] = reviewer
 	}
 	var logins, renewed, skipped []string
@@ -296,16 +259,9 @@ func (m *model) handleReviewsRequested(msg reviewsRequestedMsg) {
 		m.setNotice(singleLine(msg.err.Error()))
 		return
 	}
-	text := fmt.Sprintf("Requested reviews of #%d again from %s", msg.key.number, strings.Join(msg.logins, ", "))
+	text := fmt.Sprintf("Requested reviews of #%d from %s", msg.key.number, strings.Join(msg.logins, ", "))
 	if len(msg.skipped) > 0 {
 		text += "; not " + strings.Join(msg.skipped, ", ") + ", who reviewed it since"
 	}
 	m.setNotice(singleLine(text))
-}
-
-// rerequestLines draws the form.
-func (m *model) rerequestLines() []string {
-	lines := []string{m.titleLine("prpr — "+m.accountLabel()+" — request reviews again", ""), ""}
-	lines = append(lines, strings.Split(m.rerequest.form.View(), "\n")...)
-	return append(lines, "", m.shortHelp(m.keys.snoozeHelp()))
 }

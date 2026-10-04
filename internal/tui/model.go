@@ -59,7 +59,7 @@ type model struct {
 	// rerequest is the form that requests reviews again, nil when closed.
 	// listReviewers and requestReviews are the client's in the app.
 	rerequest      *rerequestEditor
-	listReviewers  func(context.Context, string, int) ([]github.Reviewer, error)
+	listReviewers  func(context.Context, string, int) (github.ReviewerList, error)
 	requestReviews func(context.Context, string, int, []string, []string) error
 	// snoozeGeneration counts snooze timers; ticks from an older one are
 	// dropped.
@@ -624,8 +624,6 @@ func (m *model) sizeForm() {
 		m.sizeRulesForm()
 	case m.snoozeEditor != nil:
 		m.sizeSnoozeForm()
-	case m.rerequest != nil:
-		m.sizeRerequestForm()
 	case m.scheduleEditor != nil:
 		m.sizeScheduleForm()
 	}

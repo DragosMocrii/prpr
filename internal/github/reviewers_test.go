@@ -34,10 +34,11 @@ func TestDecodeReviewersOffersReviewersAndPendingRequests(t *testing.T) {
 			{"requestedReviewer":null}
 		]}
 	}}}}`)
-	got, err := decodeReviewers(data)
+	list, err := decodeReviewers(data)
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := list.Reviewers
 	want := []Reviewer{
 		{Login: "alice", State: "APPROVED", Stale: false},
 		{Login: "bob", State: "CHANGES_REQUESTED", Stale: true},
@@ -203,10 +204,11 @@ func TestDecodeReviewersKeepsTheApprovalOfAReviewerAskedAgain(t *testing.T) {
 		]},
 		"reviewRequests":{"nodes":[{"requestedReviewer":{"__typename":"User","login":"alice"}}]}
 	}}}}`)
-	got, err := decodeReviewers(data)
+	list, err := decodeReviewers(data)
 	if err != nil {
 		t.Fatal(err)
 	}
+	got := list.Reviewers
 	want := []Reviewer{
 		// bob approved, then commented on the head commit.
 		{Login: "bob", State: "APPROVED", Stale: false, ReviewedAt: time.Date(2026, 10, 3, 9, 5, 0, 0, time.UTC)},
@@ -214,5 +216,64 @@ func TestDecodeReviewersKeepsTheApprovalOfAReviewerAskedAgain(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("reviewers = %+v, want %+v", got, want)
+	}
+}
+
+func TestDecodeReviewersOffersTheMembersOfRequestedTeams(t *testing.T) {
+	data := []byte(`{"data":{"repository":{"pullRequest":{
+		"author":{"login":"me"},
+		"headRefOid":"head",
+		"latestReviews":{"nodes":[
+			{"state":"COMMENTED","author":{"__typename":"User","login":"bob"},"commit":{"oid":"old"}}
+		]},
+		"reviewRequests":{"nodes":[
+			{"asCodeOwner":false,"requestedReviewer":{"__typename":"Team","combinedSlug":"acme/docs",
+				"members":{"totalCount":2,"nodes":[{"login":"lee"},{"login":"priya"}]}}},
+			{"asCodeOwner":true,"requestedReviewer":{"__typename":"Team","combinedSlug":"acme/backend",
+				"members":{"totalCount":140,"nodes":[{"login":"Bob"},{"login":"me"},{"login":"priya"},{"login":"not a login"},null]}}},
+			{"asCodeOwner":false,"requestedReviewer":{"__typename":"User","login":"erin"}}
+		]}
+	}}}}`)
+	list, err := decodeReviewers(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Reviewer{
+		{Login: "bob", State: "COMMENTED", Stale: true, Teams: []string{"acme/backend"}, CodeOwner: true},
+		{Login: "erin", Pending: true},
+		{Login: "priya", Teams: []string{"acme/backend", "acme/docs"}, CodeOwner: true},
+		{Login: "lee", Teams: []string{"acme/docs"}},
+	}
+	if !reflect.DeepEqual(list.Reviewers, want) {
+		t.Fatalf("reviewers = %+v, want %+v", list.Reviewers, want)
+	}
+	teams := []TeamRequest{
+		{Name: "acme/backend", CodeOwner: true, Members: 140, Logins: []string{"Bob", "priya"}},
+		{Name: "acme/docs", Members: 2, Logins: []string{"lee", "priya"}},
+	}
+	if !reflect.DeepEqual(list.Teams, teams) || list.UnreadableTeams != 0 {
+		t.Fatalf("teams = %+v, unreadable %d", list.Teams, list.UnreadableTeams)
+	}
+}
+
+func TestDecodeReviewersKeepsTheRestWhenATeamIsNotReadable(t *testing.T) {
+	data := []byte(`{"errors":[{"message":"Your token has not been granted the required scopes","path":["repository","pullRequest","reviewRequests","nodes",0,"requestedReviewer","members"]}],
+	"data":{"repository":{"pullRequest":{
+		"author":{"login":"me"},
+		"headRefOid":"head",
+		"latestReviews":{"nodes":[{"state":"COMMENTED","author":{"__typename":"User","login":"bob"},"commit":{"oid":"head"}}]},
+		"reviewRequests":{"nodes":[{"asCodeOwner":true,"requestedReviewer":null}]}
+	}}}}`)
+	list, err := decodeReviewers(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Reviewers) != 1 || list.Reviewers[0].Login != "bob" || list.UnreadableTeams != 1 {
+		t.Fatalf("list = %+v", list)
+	}
+	// An error elsewhere still fails the query.
+	other := strings.Replace(string(data), `"reviewRequests","nodes",0,"requestedReviewer","members"`, `"latestReviews"`, 1)
+	if _, err := decodeReviewers([]byte(other)); err == nil {
+		t.Fatal("an error outside review requests was ignored")
 	}
 }

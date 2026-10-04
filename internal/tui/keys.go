@@ -54,6 +54,25 @@ type keyMap struct {
 	SearchInput     searchKeyMap
 	WatchlistName   searchKeyMap
 	AccountPicker   accountKeyMap
+	Reviewers       reviewerKeyMap
+}
+
+// reviewerKeyMap is the R form's keys.
+type reviewerKeyMap struct {
+	Up        key.Binding
+	Down      key.Binding
+	PageUp    key.Binding
+	PageDown  key.Binding
+	Toggle    key.Binding
+	NextGroup key.Binding
+	PrevGroup key.Binding
+	Filter    key.Binding
+	Send      key.Binding
+	Cancel    key.Binding
+	// KeepFilter and ClearFilter end typing a filter.
+	KeepFilter  key.Binding
+	ClearFilter key.Binding
+	Quit        key.Binding
 }
 
 type accountKeyMap struct {
@@ -158,6 +177,21 @@ func defaultKeyMap() keyMap {
 			Cancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 			Clear:  key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear")),
 			Quit:   key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+		},
+		Reviewers: reviewerKeyMap{
+			Up:          key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
+			Down:        key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+			PageUp:      key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "page up")),
+			PageDown:    key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")),
+			Toggle:      key.NewBinding(key.WithKeys("space", "x"), key.WithHelp("space", "toggle")),
+			NextGroup:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next group")),
+			PrevGroup:   key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous group")),
+			Filter:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+			Send:        key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "request reviews")),
+			Cancel:      key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+			KeepFilter:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "keep filter")),
+			ClearFilter: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
+			Quit:        key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 		},
 		SearchInput: searchKeyMap{
 			Apply:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "keep search")),
@@ -386,6 +420,14 @@ func (k keyMap) rulesHelp() helpKeys {
 
 func (k keyMap) snoozeHelp() helpKeys {
 	return helpKeys{pinned: []key.Binding{k.RulesCancel, k.ForceQuit}}
+}
+func (k keyMap) rerequestHelp() helpKeys {
+	r := k.Reviewers
+	return helpKeys{short: []key.Binding{r.Toggle, r.Send, r.NextGroup, r.Filter}, pinned: []key.Binding{r.Cancel, r.Quit}}
+}
+func (k keyMap) rerequestFilterHelp() helpKeys {
+	r := k.Reviewers
+	return helpKeys{short: []key.Binding{r.KeepFilter}, pinned: []key.Binding{r.ClearFilter, r.Quit}}
 }
 func (k keyMap) scheduleHelp() helpKeys {
 	return helpKeys{pinned: []key.Binding{k.ScheduleCancel, k.ForceQuit}}

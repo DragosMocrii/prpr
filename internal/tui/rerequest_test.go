@@ -3,15 +3,22 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/DragosMocrii/prpr/internal/github"
 )
+
+// rerequestView is the R form as drawn, without styles.
+func rerequestView(m *model) string {
+	return ansi.Strip(strings.Join(m.rerequestLines(), "\n"))
+}
 
 // requests records the reviews a model requests.
 type requests struct {
@@ -25,7 +32,9 @@ type requests struct {
 // stubReviewers makes the model list reviewers and record requests.
 func stubReviewers(m *model, reviewers []github.Reviewer, listErr, requestErr error) *requests {
 	sent := &requests{}
-	m.listReviewers = func(context.Context, string, int) ([]github.Reviewer, error) { return reviewers, listErr }
+	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) {
+		return github.ReviewerList{Reviewers: reviewers}, listErr
+	}
 	m.requestReviews = func(_ context.Context, repository string, number int, logins, renewed []string) error {
 		sent.repository, sent.number, sent.logins, sent.renewed = repository, number, logins, renewed
 		sent.calls++
@@ -47,7 +56,7 @@ func TestRerequestAsksTheChosenReviewersAgain(t *testing.T) {
 	if m.rerequest == nil {
 		t.Fatalf("R did not open the form; notice %q", m.notice)
 	}
-	if view := m.rerequest.form.View(); !strings.Contains(view, "alice") || !strings.Contains(view, "bob") {
+	if view := rerequestView(m); !strings.Contains(view, "alice") || !strings.Contains(view, "bob") {
 		t.Fatalf("form does not show both reviewers:\n%s", view)
 	}
 	// Reviews before the latest commits start chosen; space adds alice.
@@ -193,7 +202,7 @@ func TestRerequestRenewsAChosenPendingRequest(t *testing.T) {
 	}, nil, nil)
 	m.setFocus(paneMine)
 	pressMsg(m, letter("R"))
-	if m.rerequest == nil || !strings.Contains(m.rerequest.form.View(), "carol") {
+	if m.rerequest == nil || !strings.Contains(rerequestView(m), "carol") {
 		t.Fatal("a pending reviewer is not offered")
 	}
 	// The pending request starts unchosen; the cursor is on bob, the chosen one.
@@ -211,11 +220,11 @@ func TestRerequestNeverChoosesAnApproverItself(t *testing.T) {
 	stubReviewers(m, []github.Reviewer{{Login: "alice", State: "APPROVED", Stale: true}}, nil, nil)
 	m.setFocus(paneMine)
 	pressMsg(m, letter("R"))
-	if m.rerequest == nil || len(m.rerequest.chosen) != 0 {
+	if m.rerequest == nil || len(m.rerequest.chosenLogins()) != 0 {
 		t.Fatalf("an approver of older commits starts chosen: %+v", m.rerequest)
 	}
-	if !strings.Contains(m.rerequest.form.View(), "awaiting review") {
-		t.Fatalf("form does not warn about the approval:\n%s", m.rerequest.form.View())
+	if !strings.Contains(rerequestView(m), "awaiting review") {
+		t.Fatalf("form does not warn about the approval:\n%s", rerequestView(m))
 	}
 }
 
@@ -242,10 +251,10 @@ func TestRerequestSkipsAnyoneWhoReviewedSinceTheFormOpened(t *testing.T) {
 		},
 	}
 	calls := 0
-	m.listReviewers = func(context.Context, string, int) ([]github.Reviewer, error) {
+	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) {
 		list := lists[min(calls, len(lists)-1)]
 		calls++
-		return list, nil
+		return github.ReviewerList{Reviewers: list}, nil
 	}
 	m.setFocus(paneMine)
 	pressMsg(m, letter("R"))
@@ -283,9 +292,123 @@ func TestRerequestSendsNothingWhenTheRecheckFails(t *testing.T) {
 	sent := stubReviewers(m, []github.Reviewer{{Login: "bob", State: "COMMENTED", Stale: true}}, nil, nil)
 	m.setFocus(paneMine)
 	pressMsg(m, letter("R"))
-	m.listReviewers = func(context.Context, string, int) ([]github.Reviewer, error) { return nil, errors.New("HTTP 502") }
+	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) {
+		return github.ReviewerList{}, errors.New("HTTP 502")
+	}
 	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if sent.calls != 0 || !strings.Contains(m.notice, "Nothing sent: HTTP 502") {
 		t.Fatalf("sent %+v; notice %q", sent, m.notice)
+	}
+}
+
+func TestRerequestGroupsTeamMembersAndShowsWhichTeamsAreCovered(t *testing.T) {
+	mine, review := snoozePRs()
+	m := newPaneModel(t, 140, 40, mine, review)
+	list := github.ReviewerList{
+		Reviewers: []github.Reviewer{
+			{Login: "bob", State: "CHANGES_REQUESTED", Stale: true, Teams: []string{"acme/backend"}, CodeOwner: true},
+			{Login: "priya", Teams: []string{"acme/backend", "acme/docs"}, CodeOwner: true},
+			{Login: "lee", Teams: []string{"acme/docs"}},
+		},
+		Teams: []github.TeamRequest{
+			{Name: "acme/backend", CodeOwner: true, Members: 140, Logins: []string{"bob", "priya"}},
+			{Name: "acme/docs", CodeOwner: true, Members: 2, Logins: []string{"lee", "priya"}},
+		},
+	}
+	sent := stubReviewers(m, nil, nil, nil)
+	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) { return list, nil }
+	m.setFocus(paneMine)
+	m.selectPR(paneMine, "acme/api", 2)
+	pressMsg(m, letter("R"))
+	if m.rerequest == nil {
+		t.Fatalf("R did not open the form; notice %q", m.notice)
+	}
+	view := rerequestView(m)
+	// The smaller team leads; a member of both is under each, naming the other.
+	for _, want := range []string{"Reviewed or requested", "acme/docs · code owner (2)", "acme/backend · code owner (140), first 2 shown",
+		"+docs", "✓ backend  bob", "✗ docs  needs 1 of 2", "1 of 2 covered"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("form lacks %q:\n%s", want, view)
+		}
+	}
+	if strings.Index(view, "acme/docs ·") > strings.Index(view, "acme/backend ·") {
+		t.Fatalf("the larger team leads:\n%s", view)
+	}
+	if !slices.Equal(m.rerequest.chosenLogins(), []string{"bob"}) {
+		t.Fatalf("chosen at start = %v, want only bob", m.rerequest.chosenLogins())
+	}
+	// Tab to acme/docs, down to priya, and choose her: both teams are covered.
+	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	pressMsg(m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	view = rerequestView(m)
+	for _, want := range []string{"✓ backend  bob, priya", "✓ docs  priya", "2 of 2 covered"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("after choosing priya, form lacks %q:\n%s", want, view)
+		}
+	}
+	// On a narrow terminal the teams are a line above the people.
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	if view := rerequestView(m); !strings.Contains(view, "✓ docs · ✓ backend") {
+		t.Fatalf("narrow form lacks the team line:\n%s", view)
+	}
+	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !slices.Equal(sent.logins, []string{"bob", "priya"}) || len(sent.renewed) != 0 {
+		t.Fatalf("requested %v, renewed %v", sent.logins, sent.renewed)
+	}
+}
+
+func TestRerequestScrollsAndFiltersALongList(t *testing.T) {
+	mine, review := snoozePRs()
+	m := newPaneModel(t, 120, 20, mine, review)
+	team := github.TeamRequest{Name: "acme/everyone", CodeOwner: true, Members: 50}
+	var people []github.Reviewer
+	for i := range 50 {
+		login := fmt.Sprintf("person-%02d", i)
+		team.Logins = append(team.Logins, login)
+		people = append(people, github.Reviewer{Login: login, Teams: []string{team.Name}, CodeOwner: true})
+	}
+	stubReviewers(m, nil, nil, nil)
+	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) {
+		return github.ReviewerList{Reviewers: people, Teams: []github.TeamRequest{team}}, nil
+	}
+	m.setFocus(paneMine)
+	pressMsg(m, letter("R"))
+	for range 40 {
+		pressMsg(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	lines := m.rerequestLines()
+	if len(lines) > 20 {
+		t.Fatalf("form is %d lines on a 20-line terminal", len(lines))
+	}
+	if view := rerequestView(m); !strings.Contains(view, "> [ ] person-40") {
+		t.Fatalf("the cursor row is not on screen:\n%s", view)
+	}
+	// Filter, choose the one match, and keep the filter.
+	pressMsg(m, letter("/"))
+	for _, r := range "07" {
+		pressMsg(m, tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	pressMsg(m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	if got := m.rerequest.chosenLogins(); !slices.Equal(got, []string{"person-07"}) {
+		t.Fatalf("chosen under the filter = %v", got)
+	}
+	if view := rerequestView(m); strings.Contains(view, "person-08") || !strings.Contains(view, "✓ everyone  person-07") {
+		t.Fatalf("filtered form:\n%s", view)
+	}
+}
+
+func TestRerequestSaysWhenTeamsAreNotReadable(t *testing.T) {
+	mine, review := snoozePRs()
+	m := newPaneModel(t, 140, 40, mine, review)
+	stubReviewers(m, nil, nil, nil)
+	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) {
+		return github.ReviewerList{UnreadableTeams: 1}, nil
+	}
+	m.setFocus(paneMine)
+	pressMsg(m, letter("R"))
+	if m.rerequest != nil || !strings.Contains(m.notice, "read:org") {
+		t.Fatalf("form %v; notice %q", m.rerequest != nil, m.notice)
 	}
 }
