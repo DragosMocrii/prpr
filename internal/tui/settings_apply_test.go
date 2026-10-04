@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -125,5 +126,26 @@ func TestShortcutsSaveMouseAndNotifications(t *testing.T) {
 	pressMsg(m, letter("n"))
 	if !m.preferences.Mouse() || !m.preferences.Notify() {
 		t.Fatalf("saved mouse %v notify %v", m.preferences.Mouse(), m.preferences.Notify())
+	}
+}
+
+func TestRefreshChangeAfterAFailedFetchKeepsRetrying(t *testing.T) {
+	m := autoRefreshModel(t, time.Minute)
+	m.startFetch()
+	finishFetch(m, fetchFinishedMsg{err: errors.New("offline")})
+	if cmd := m.applyRefresh(10 * time.Minute); cmd == nil || m.refreshDue.IsZero() {
+		t.Fatalf("no retry scheduled: cmd %v due %v", cmd != nil, m.refreshDue)
+	}
+}
+
+func TestRefreshChangeDuringATokenWaitKeepsTheWait(t *testing.T) {
+	m := autoRefreshModel(t, time.Minute)
+	m.pinnedAccount = "work"
+	m.startFetch()
+	finishFetch(m, fetchFinishedMsg{err: &github.AuthError{Err: errors.New("bad credentials")}})
+	before := m.refreshGeneration
+	m.applyRefresh(10 * time.Minute)
+	if m.refreshGeneration != before || m.refreshInterval != 10*time.Minute {
+		t.Fatalf("generation %d→%d, interval %v", before, m.refreshGeneration, m.refreshInterval)
 	}
 }

@@ -26,14 +26,14 @@ func (m *model) settingSaved(err error) {
 func (m *model) applyRefresh(d time.Duration) tea.Cmd {
 	m.refreshInterval = d
 	m.settingSaved(m.preferences.SaveRefresh(d))
-	if m.loading {
+	if m.loading || m.awaitingToken() {
 		return nil
 	}
 	// A new generation drops the old timer.
 	m.refreshGeneration++
 	m.refreshDue = time.Time{}
 	m.countdownGeneration++
-	if m.snapshot.Login == "" {
+	if m.snapshot.Login == "" && m.err == nil {
 		return nil
 	}
 	return m.scheduleAutoRefresh()
@@ -68,7 +68,7 @@ func (m *model) applyQueues(queues []github.Queue) tea.Cmd {
 // the old ones, so it is replaced; the new one's result becomes the change
 // baseline without marking or alerting.
 func (m *model) settingsFetch() tea.Cmd {
-	if m.snapshot.Login == "" {
+	if !m.loading && m.snapshot.Login == "" {
 		return nil
 	}
 	m.settingsBaseline = true
@@ -94,6 +94,7 @@ func (m *model) applyTitle(on bool) {
 	m.setTitle = on
 	if !on {
 		m.stopFlash()
+		m.terminalFocus = focusUnknown
 	}
 	m.settingSaved(m.preferences.SaveTitle(on))
 }
