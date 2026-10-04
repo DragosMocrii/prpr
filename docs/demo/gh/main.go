@@ -47,8 +47,11 @@ type pr struct {
 	checks, decision           string
 	approvals                  int
 	created, ready, requested  time.Duration
-	head                       time.Duration
-	bots                       bots
+	// requestedBefore is an earlier request of the viewer's review; with
+	// it, the request asks again.
+	requestedBefore time.Duration
+	head            time.Duration
+	bots            bots
 }
 
 // bots describes the review-bot activity on a pull request.
@@ -112,6 +115,9 @@ func (p pr) node(full bool) map[string]any {
 			"comments": map[string]any{"nodes": []any{map[string]any{"author": map[string]any{"login": "copilot-pull-request-reviewer"}}}}})
 	}
 	requests := []any{}
+	if p.requestedBefore > 0 {
+		requests = append(requests, map[string]any{"createdAt": ago(p.requestedBefore), "requestedReviewer": map[string]any{"login": login}})
+	}
 	if p.requested > 0 {
 		requests = append(requests, map[string]any{"createdAt": ago(p.requested), "requestedReviewer": map[string]any{"login": login}})
 	}
@@ -166,7 +172,7 @@ func reviews(changed bool) []pr {
 		decision: "REVIEW_REQUIRED", created: 8 * hour, requested: 5 * hour, head: 6 * hour, bots: bots{copilotReview: 5 * hour}}
 	offline := pr{repo: "acme/mobile", number: 530, title: "Offline mode for the order list", author: "priya-n",
 		add: 1310, del: 260, comments: 9, mergeable: "MERGEABLE", mergeState: "BLOCKED", checks: "PENDING",
-		decision: "REVIEW_REQUIRED", created: 3 * day, requested: 2 * day, head: 4 * hour, bots: bots{copilotReview: 30 * hour, threads: 1}}
+		decision: "REVIEW_REQUIRED", created: 3 * day, requestedBefore: 3 * day, requested: 2 * day, head: 4 * hour, bots: bots{copilotReview: 30 * hour, threads: 1}}
 	cursors := pr{repo: "acme/api", number: 418, title: "Document pagination cursors", author: "jordan-k",
 		add: 58, mergeable: "MERGEABLE", mergeState: "CLEAN", checks: "SUCCESS",
 		decision: "REVIEW_REQUIRED", created: 26 * hour, requested: 26 * hour, head: 26 * hour}
@@ -177,6 +183,30 @@ func reviews(changed bool) []pr {
 		add: 143, del: 38, mergeable: "MERGEABLE", mergeState: "BLOCKED", checks: "PENDING",
 		decision: "REVIEW_REQUIRED", created: 15 * time.Minute, requested: 15 * time.Minute, head: 15 * time.Minute}
 	return []pr{rotate, avatars, offline, cursors}
+}
+
+// reviewers answers R's reviewer query for any pull request: a comment
+// review of the head commit, and two code-owner teams that share a member.
+func reviewers() any {
+	team := func(slug string, logins ...string) map[string]any {
+		members := []any{}
+		for _, l := range logins {
+			members = append(members, map[string]any{"login": l})
+		}
+		return map[string]any{"asCodeOwner": true, "requestedReviewer": map[string]any{"__typename": "Team", "combinedSlug": "acme/" + slug,
+			"members": map[string]any{"totalCount": len(logins), "nodes": members}}}
+	}
+	review := map[string]any{"state": "COMMENTED", "submittedAt": ago(day), "author": map[string]any{"__typename": "User", "login": "jordan-k"},
+		"commit": map[string]any{"oid": "head"}}
+	return map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{
+		"author": map[string]any{"login": login}, "headRefOid": "head",
+		"latestReviews":            map[string]any{"nodes": []any{review}},
+		"latestOpinionatedReviews": map[string]any{"nodes": []any{}},
+		"reviewRequests": map[string]any{"nodes": []any{
+			team("platform", "sam-lee", "priya-n", "dana-r"),
+			team("api-owners", "jordan-k", "lee-t", "priya-n", "omar-b", "kim-s"),
+		}},
+	}}}}
 }
 
 // fetched reports whether a full fetch of list already ran, and records it.
@@ -209,6 +239,8 @@ func main() {
 	case !strings.HasPrefix(args, "api graphql"):
 		fmt.Fprintln(os.Stderr, "demo gh: unsupported command:", args)
 		os.Exit(1)
+	case strings.Contains(args, "combinedSlug"):
+		data = reviewers()
 	case strings.Contains(args, "reviewed-by:@me"):
 		// The demo has no pull requests the viewer already reviewed.
 		data = []any{map[string]any{"data": map[string]any{"search": page(nil, true)}}}

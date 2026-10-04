@@ -49,14 +49,16 @@ Without the secret the step is skipped. A manual run for an older tag leaves a n
 
 ## Demo recording
 
-`docs/demo.gif` is recorded by a separate Go module in `docs/demo`, which runs the app in a pseudo-terminal against a fake `gh` with made-up pull requests. Re-record it after visible interface changes:
+`docs/demo.gif` and `docs/demo-nerd.gif` are recorded by a separate Go module in `docs/demo`, which runs the app in a pseudo-terminal against a fake `gh` with made-up pull requests. Re-record both after visible interface changes:
 
 ```sh
 cd docs/demo
-go run .
+FONT=/path/to/JetBrainsMonoNerdFontMono
+go run . -font $FONT-Regular.ttf -bold $FONT-Bold.ttf -emoji /path/to/noto-emoji/2D/png/72
+go run . -font $FONT-Regular.ttf -bold $FONT-Bold.ttf -emoji /path/to/noto-emoji/2D/png/72 -icons nerd -o ../demo-nerd.gif
 ```
 
-It needs DejaVu Sans Mono and DejaVu Sans (`fonts-dejavu-core` on Debian and Ubuntu); pass `-font`, `-bold`, and `-fallback` to use other paths. Keep the recording free of real accounts, repositories, and pull requests. The fake `gh` tells queries apart by text they contain (`rateLimit`, `search(`, and `mergeStateStatus`, which only the full query selects), so update it when those queries change.
+The recordings use [JetBrains Mono Nerd Font](https://www.nerdfonts.com/font-downloads) (the Mono variant, which keeps icons one cell wide), with DejaVu Sans (`fonts-dejavu-core` on Debian and Ubuntu) for glyphs it lacks, such as the braille spinner; `-fallback` takes another path. Without `-font` and `-bold`, DejaVu Sans Mono is used, which has no Nerd Font icons. No font here draws 🙏 in color, so `-emoji` takes a directory of [Noto Emoji](https://github.com/googlefonts/noto-emoji) images (`2D/png/72`, named `emoji_u1f64f.png`); without it, 🙏 is a box. Keep the recording free of real accounts, repositories, and pull requests. The fake `gh` tells queries apart by text they contain (`rateLimit`, `reviewed-by:@me`, `combinedSlug`, which only `R`'s reviewer query selects, `search(`, and `mergeStateStatus`, which only the full query selects), so update it when those queries change.
 
 ## Pull requests and bug reports
 

@@ -2,7 +2,7 @@
 
 `prpr` is a terminal app for monitoring open pull requests authored by a GitHub CLI account: gh's active account, or one you pin in prpr (see [GitHub accounts](#github-accounts)). It hides drafts until you press `D` and pulls across repositories visible to that account, and lists open pull requests that request a review from you directly in a second pane; requests to your teams, such as code-owner teams, are left out.
 
-![prpr listing pull requests, then marking a new, a changed, and a merged pull request after a refresh](docs/demo.gif)
+![prpr listing pull requests and showing one's details, marking a new, a changed, and a merged pull request after a refresh, blinking 🙏 on a review request that asks again, opening the grouped keys, and choosing a reviewer who covers two code-owner teams](docs/demo.gif)
 
 ## Requirements
 
@@ -295,6 +295,8 @@ A watchlist is a named group of repositories, such as "My services" or "Open sou
 ### Icons
 
 prpr draws its symbols with Unicode characters that common fonts include. With a [Nerd Font](https://www.nerdfonts.com/) (version 3 or later) set in your terminal, `i` switches to GitHub's octicons from the font, and saves the choice; `i` again switches back, so if you see empty boxes, your terminal's font has no Nerd Font glyphs. Terminals do not report their font, so prpr cannot detect one. `--icons nerd|unicode` or `PRPR_ICONS=nerd|unicode` picks the set for one run, ahead of the saved choice; `--icons` wins over `PRPR_ICONS`.
+
+![The same tour with Nerd Font icons](docs/demo-nerd.gif)
 
 Nerd Font icons replace the merge, CI, review, and bot symbols, the `draft` tag, the reviewed pull requests' `waiting`, `new commits`, and other words, the pin, bell, and `★` in titles and the picker, and the statistics column headers, and give each attention category its own icon (merge, x-circle, checklist, compare, robot, code review, question). These columns get narrower, which leaves more of the terminal for PR names. Colors and the change marks stay the same, and the details screen, notifications, and help keep their words.
 

@@ -2,10 +2,13 @@
 // of ./gh in a pseudo-terminal, plays a fixed sequence of keys, and draws the
 // screen to an animated GIF. Run it from this directory on Linux or macOS:
 //
-//	go run . -font /path/to/DejaVuSansMono.ttf -bold /path/to/DejaVuSansMono-Bold.ttf
+//	go run . -font /path/to/DejaVuSansMono.ttf -bold /path/to/DejaVuSansMono-Bold.ttf -emoji /path/to/png/72
+//
+// -icons nerd records Nerd Font icons, which -font must then hold.
 //
 // The font must cover the box-drawing and status glyphs prpr draws; DejaVu
-// Sans Mono does.
+// Sans Mono does. Emoji such as 🙏 are drawn from Noto Emoji's color images
+// (2D/png/72 of github.com/googlefonts/noto-emoji), which no font here holds.
 package main
 
 import (
@@ -16,12 +19,14 @@ import (
 	"image/color"
 	"image/draw"
 	"image/gif"
+	"image/png"
 	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +34,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 	"github.com/creack/pty"
+	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
@@ -62,29 +68,47 @@ type step struct {
 // The cursor rests on an unchanged row during the refresh, because leaving a
 // row clears its mark.
 var script = []step{
+	// The list, then the details of the pull request with conflicts.
 	{2500 * time.Millisecond, "j"},
 	{600 * time.Millisecond, "j"},
+	{1200 * time.Millisecond, "\r"},
+	{2500 * time.Millisecond, "\x1b"},
+	// A refresh marks what changed.
 	{600 * time.Millisecond, "G"},
 	{1000 * time.Millisecond, "r"},
+	// Review requests, one asking again with a blinking 🙏.
 	{4500 * time.Millisecond, "\t"},
 	{1200 * time.Millisecond, "j"},
 	{900 * time.Millisecond, "j"},
-	{2500 * time.Millisecond, ""},
+	// The keys, grouped.
+	{2000 * time.Millisecond, "?"},
+	{2800 * time.Millisecond, "?"},
+	// Requesting reviews: choosing one member covers both code-owner teams.
+	{800 * time.Millisecond, "\t"},
+	{600 * time.Millisecond, "g"},
+	{600 * time.Millisecond, "R"},
+	{1800 * time.Millisecond, "\t"},
+	{700 * time.Millisecond, "j"},
+	{700 * time.Millisecond, " "},
+	{2800 * time.Millisecond, "\x1b"},
+	{2000 * time.Millisecond, ""},
 }
 
 func main() {
 	regular := flag.String("font", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "monospace TrueType font")
 	bold := flag.String("bold", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", "bold variant of -font")
 	fallback := flag.String("fallback", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "font for glyphs -font lacks, such as the braille spinner")
+	icons := flag.String("icons", "unicode", "prpr's icon set: unicode or nerd")
+	emoji := flag.String("emoji", "", "directory of Noto Emoji images named emoji_u<codepoint>.png, for 🙏; without it, 🙏 is a box")
 	out := flag.String("o", "../demo.gif", "output GIF")
 	flag.Parse()
-	if err := record(*regular, *bold, *fallback, *out); err != nil {
+	if err := record(*regular, *bold, *fallback, *emoji, *icons, *out); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func record(regularPath, boldPath, fallbackPath, out string) error {
-	faces, err := loadFaces(regularPath, boldPath, fallbackPath)
+func record(regularPath, boldPath, fallbackPath, emojiPath, icons, out string) error {
+	faces, err := loadFaces(regularPath, boldPath, fallbackPath, emojiPath)
 	if err != nil {
 		return err
 	}
@@ -118,7 +142,7 @@ func record(regularPath, boldPath, fallbackPath, out string) error {
 
 	cmd := exec.Command(filepath.Join(bin, "prpr"))
 	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"XDG_CONFIG_HOME="+config, "DEMO_STATE="+state, "TERM=xterm-256color", "COLORTERM=truecolor")
+		"XDG_CONFIG_HOME="+config, "DEMO_STATE="+state, "TERM=xterm-256color", "COLORTERM=truecolor", "PRPR_ICONS="+icons)
 	tty, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
 	if err != nil {
 		return err
@@ -170,9 +194,44 @@ func record(regularPath, boldPath, fallbackPath, out string) error {
 	return writeGIF(out, frames, delays)
 }
 
-type faces struct{ regular, bold, fallback font.Face }
+// faces are the fonts cells are drawn in, and the emoji images.
+type faces struct {
+	regular, bold, fallback font.Face
+	emoji                   emojiImages
+}
 
-func loadFaces(regularPath, boldPath, fallbackPath string) (faces, error) {
+// emojiImages are color emoji images in a directory, named as Noto Emoji
+// names them: emoji_u, then each code point in hex, without variation
+// selectors, joined by underscores.
+type emojiImages struct {
+	dir    string
+	images map[string]image.Image
+}
+
+// image returns the image for a cell's content, or nil for none.
+func (e emojiImages) image(content string) image.Image {
+	if e.dir == "" {
+		return nil
+	}
+	if img, ok := e.images[content]; ok {
+		return img
+	}
+	var points []string
+	for _, r := range content {
+		if r != 0xfe0f {
+			points = append(points, fmt.Sprintf("%x", r))
+		}
+	}
+	var img image.Image
+	if file, err := os.Open(filepath.Join(e.dir, "emoji_u"+strings.Join(points, "_")+".png")); err == nil {
+		img, _ = png.Decode(file)
+		file.Close()
+	}
+	e.images[content] = img
+	return img
+}
+
+func loadFaces(regularPath, boldPath, fallbackPath, emojiPath string) (faces, error) {
 	load := func(path string) (font.Face, error) {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -196,7 +255,7 @@ func loadFaces(regularPath, boldPath, fallbackPath string) (faces, error) {
 	if err != nil {
 		return faces{}, err
 	}
-	return faces{regular, bold, fallback}, nil
+	return faces{regular, bold, fallback, emojiImages{dir: emojiPath, images: map[string]image.Image{}}}, nil
 }
 
 func cellSize(f font.Face) (int, int, int) {
@@ -252,7 +311,12 @@ func render(emu *vt.SafeEmulator, f faces) *image.RGBA {
 			width := max(cell.Width, 1)
 			box := image.Rect(padding+x*w, padding+y*h, padding+(x+width)*w, padding+(y+1)*h)
 			draw.Draw(img, box, image.NewUniform(bg), image.Point{}, draw.Src)
-			if cell.Content != "" && cell.Content != " " {
+			if emoji := f.emoji.image(cell.Content); emoji != nil {
+				// The emoji fills the height of its cells, centered across them.
+				side := min(box.Dx(), box.Dy())
+				at := image.Pt(box.Min.X+(box.Dx()-side)/2, box.Min.Y+(box.Dy()-side)/2)
+				xdraw.CatmullRom.Scale(img, image.Rectangle{at, at.Add(image.Pt(side, side))}, emoji, emoji.Bounds(), xdraw.Over, nil)
+			} else if cell.Content != "" && cell.Content != " " {
 				face := f.regular
 				if attrs&uv.AttrBold != 0 {
 					face = f.bold
