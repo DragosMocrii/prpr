@@ -226,21 +226,19 @@ type autoRefreshMsg struct{ generation uint64 }
 
 type countdownTickMsg struct{ generation uint64 }
 
-// New returns the app model. A positive refreshInterval refetches both lists
-// that long after each fetch finishes; notify starts with notifications on.
-// icons names the icon set for this run; empty uses the saved one. title
-// sets the terminal title.
-func New(ctx context.Context, client *github.Client, preferences *preferences.Store, refreshInterval time.Duration, notify bool, icons string, title bool) tea.Model {
+// New returns the app model, set up from the saved settings.
+func New(ctx context.Context, client *github.Client, preferences *preferences.Store) tea.Model {
 	appCtx, cancel := context.WithCancel(ctx)
 	m := newModel(appCtx, client, preferences)
 	m.cancel = cancel
-	m.refreshInterval = refreshInterval
+	m.refreshInterval = preferences.Refresh()
 	m.bots = len(client.Bots()) > 0
 	m.openBrowser = client.OpenInBrowser
 	m.listReviewers = client.Reviewers
 	m.requestReviews = client.RequestReviews
-	m.notify = notify
-	m.icons = startIcons(icons, preferences)
+	m.notify = preferences.Notify()
+	m.mouse = preferences.Mouse()
+	m.icons = iconsNamed(preferences.Icons())
 	m.legend = preferences.Legend()
 	m.showDrafts = preferences.ShowDrafts()
 	m.rules = preferences.Rules()
@@ -248,10 +246,13 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	if err := preferences.RulesErr(); err != nil {
 		m.preferenceErr = err
 	}
+	if err := preferences.SettingsErr(); err != nil && m.preferenceErr == nil {
+		m.preferenceErr = err
+	}
 	if m.scheduleErr != nil && m.preferenceErr == nil {
 		m.preferenceErr = fmt.Errorf("Active-hours schedule needs repair: %w", m.scheduleErr)
 	}
-	m.setTitle = title
+	m.setTitle = preferences.Title()
 	m.desktopNotify = notifier.Desktop()
 	m.listAccounts = client.Accounts
 	m.useAccount = client.UseAccount

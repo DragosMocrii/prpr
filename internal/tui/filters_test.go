@@ -245,7 +245,7 @@ func TestSavedDraftsChoiceIsRestored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m := New(t.Context(), client, store, 0, false, "", false).(*model); !m.showDrafts {
+	if m := New(t.Context(), client, store).(*model); !m.showDrafts {
 		t.Fatal("saved shown drafts started hidden")
 	}
 }

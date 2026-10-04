@@ -91,16 +91,16 @@ func TestEveryNerdIconIsOneCell(t *testing.T) {
 	}
 }
 
-func TestStartIconsPrefersTheRunsChoiceThenTheSavedOne(t *testing.T) {
+func TestIconsStartFromTheSavedChoice(t *testing.T) {
 	store := testPreferences(t)
-	if startIcons("", store).nerd {
-		t.Fatal("no choice started with Nerd icons")
+	if iconsNamed(store.Icons()).nerd {
+		t.Fatal("no saved choice started with Nerd icons")
 	}
 	if err := store.SaveIcons(IconsNerd); err != nil {
 		t.Fatal(err)
 	}
-	if !startIcons("", store).nerd || startIcons(IconsUnicode, store).nerd {
-		t.Fatal("the saved choice or the run's choice was ignored")
+	if !iconsNamed(store.Icons()).nerd {
+		t.Fatal("a saved Nerd choice started with Unicode icons")
 	}
 }
 

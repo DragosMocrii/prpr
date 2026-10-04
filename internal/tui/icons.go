@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"charm.land/lipgloss/v2"
-
-	"github.com/DragosMocrii/prpr/internal/preferences"
 )
 
 // iconSet holds the symbols prpr draws. unicodeIcons uses characters that
@@ -88,29 +86,11 @@ func (ic *iconSet) header(title string) string {
 	return title
 }
 
-// Icon set names, as --icons, PRPR_ICONS, and preferences spell them.
+// Icon set names, as preferences spell them.
 const (
 	IconsUnicode = "unicode"
 	IconsNerd    = "nerd"
 )
-
-// ParseIcons checks an icon set name; empty means no choice.
-func ParseIcons(name string) (string, error) {
-	switch name {
-	case "", IconsUnicode, IconsNerd:
-		return name, nil
-	}
-	return "", fmt.Errorf("unknown icon set %q; use %s or %s", name, IconsNerd, IconsUnicode)
-}
-
-// startIcons is the icon set a run starts with: the one named for the run,
-// else the saved one, else Unicode.
-func startIcons(name string, store *preferences.Store) *iconSet {
-	if name == "" {
-		name = store.Icons()
-	}
-	return iconsNamed(name)
-}
 
 func iconsNamed(name string) *iconSet {
 	if name == IconsNerd {

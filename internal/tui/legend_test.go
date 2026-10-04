@@ -136,7 +136,7 @@ func TestSavedLegendOpensAtStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := New(t.Context(), client, store, 0, false, "", false).(*model)
+	m := New(t.Context(), client, store).(*model)
 	if !m.legend {
 		t.Fatal("a saved open legend started closed")
 	}
