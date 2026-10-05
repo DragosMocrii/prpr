@@ -1,10 +1,12 @@
 package github
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 // signaturePageSize is larger than pageSize: signature fields resolve
@@ -121,4 +123,70 @@ func decodeSearchSignatures(data []byte, name string) ([]entry, error) {
 		}
 	}
 	return result, nil
+}
+
+// detailBatch is how many pull requests a detail query names: a full
+// query's page, so it stays inside GitHub's time limit.
+const detailBatch = pageSize
+
+// detailQuery reads n pull requests, $id0 to $id(n-1), with fields.
+func detailQuery(n int, fields string) string {
+	var b strings.Builder
+	b.WriteString("query(")
+	for i := range n {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "$id%d: ID!", i)
+	}
+	b.WriteString(") {")
+	for i := range n {
+		fmt.Fprintf(&b, "\n  p%d: node(id: $id%d) { ... on PullRequest {%s\n  } }", i, i, fields)
+	}
+	b.WriteString("\n}")
+	return b.String()
+}
+
+// decodeDetails decodes a detail query of ids. A pull request GitHub no
+// longer finds fails it: the lists named it a moment ago.
+func decodeDetails(data []byte, ids []string) ([]*pullRequestNode, error) {
+	var response struct {
+		Data   map[string]*pullRequestNode `json:"data"`
+		Errors []json.RawMessage           `json:"errors"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		return nil, fmt.Errorf("decode GitHub pull request detail response: %w", err)
+	}
+	if len(response.Errors) != 0 {
+		return nil, fmt.Errorf("GitHub pull request detail query returned GraphQL errors: %s", graphQLErrors(response.Errors))
+	}
+	nodes := make([]*pullRequestNode, len(ids))
+	for i, id := range ids {
+		if nodes[i] = response.Data["p"+strconv.Itoa(i)]; nodes[i] == nil {
+			return nil, fmt.Errorf("GitHub pull request %s was not found", id)
+		}
+	}
+	return nodes, nil
+}
+
+// details reads the pull requests ids names with fields, in batches.
+func (c *Client) details(ctx context.Context, ids []string, fields string) ([]*pullRequestNode, error) {
+	var nodes []*pullRequestNode
+	for start := 0; start < len(ids); start += detailBatch {
+		batch := ids[start:min(start+detailBatch, len(ids))]
+		args := []string{"api", "graphql", "--hostname", "github.com", "-f", "query=" + detailQuery(len(batch), fields)}
+		for i, id := range batch {
+			args = append(args, "-f", "id"+strconv.Itoa(i)+"="+id)
+		}
+		data, err := c.output(ctx, "GitHub pull request detail query failed", args...)
+		if err != nil {
+			return nil, err
+		}
+		found, err := decodeDetails(data, batch)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, found...)
+	}
+	return nodes, nil
 }

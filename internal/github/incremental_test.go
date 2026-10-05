@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -127,5 +128,44 @@ func TestDecodeSignaturesKeepsOrderAndSkipsEmptyNodes(t *testing.T) {
 	}
 	if _, err := decodeSearchSignatures([]byte(`[{"errors":[{"message":"nope"}]}]`), "review request"); err == nil {
 		t.Fatal("GraphQL errors accepted")
+	}
+}
+
+func TestDetailQueryNamesEachIDWithTheListFields(t *testing.T) {
+	q := detailQuery(2, "\n        number")
+	for _, part := range []string{"query($id0: ID!, $id1: ID!)", "p0: node(id: $id0) { ... on PullRequest {", "p1: node(id: $id1)", "number"} {
+		if !strings.Contains(q, part) {
+			t.Fatalf("detail query lacks %q:\n%s", part, q)
+		}
+	}
+}
+
+func TestDecodeDetailsMapsAliasesAndRejectsMissingNodes(t *testing.T) {
+	nodes, err := decodeDetails([]byte(`{"data":{"p1":{"number":2},"p0":{"number":1}}}`), []string{"PR_1", "PR_2"})
+	if err != nil || nodes[0].Number != 1 || nodes[1].Number != 2 {
+		t.Fatalf("nodes %v, %v", nodes, err)
+	}
+	if _, err := decodeDetails([]byte(`{"data":{"p0":{"number":1},"p1":null}}`), []string{"PR_1", "PR_2"}); err == nil || !strings.Contains(err.Error(), "PR_2") {
+		t.Fatalf("null node: %v", err)
+	}
+	if _, err := decodeDetails([]byte(`{"errors":[{"message":"nope"}]}`), []string{"PR_1"}); err == nil {
+		t.Fatal("GraphQL errors accepted")
+	}
+}
+
+func TestDetailsBatchesIDs(t *testing.T) {
+	f := newFakeAPI(t)
+	var ids []string
+	for i := range detailBatch + 5 {
+		id := "PR_" + strconv.Itoa(i+1)
+		ids = append(ids, id)
+		f.authored = append(f.authored, prNode(id, i+1))
+	}
+	nodes, err := f.client().details(context.Background(), ids, pullRequestFields(false))
+	if err != nil || len(nodes) != len(ids) || nodes[len(ids)-1].Number != len(ids) {
+		t.Fatalf("%d nodes, %v", len(nodes), err)
+	}
+	if len(f.nodeIDs) != 2 || len(f.nodeIDs[0]) != detailBatch || len(f.nodeIDs[1]) != 5 {
+		t.Fatalf("batches %v", f.nodeIDs)
 	}
 }
