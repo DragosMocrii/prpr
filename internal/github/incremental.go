@@ -165,9 +165,10 @@ func (c *Client) details(ctx context.Context, ids []string, fields string) ([]*p
 }
 
 // fetchCache is what an incremental fetch reuses: each list's pull
-// requests by node ID, as converted before mergeReviews, and when the last
-// complete fetch ran.
+// requests by node ID, as converted before mergeReviews, the viewer's login
+// they were read as, and when the last complete fetch ran.
 type fetchCache struct {
+	login                        string
 	authored, requests, reviewed map[string]listed
 	lastComplete                 time.Time
 }
@@ -189,7 +190,7 @@ func allKept(prs []PullRequest) []listed {
 }
 
 func newFetchCache(l lists, lastComplete time.Time) *fetchCache {
-	return &fetchCache{authored: byID(allKept(l.authored)), requests: byID(allKept(l.requests)), reviewed: byID(l.reviewed), lastComplete: lastComplete}
+	return &fetchCache{authored: byID(allKept(l.authored)), requests: byID(allKept(l.requests)), reviewed: byID(l.reviewed), login: l.login, lastComplete: lastComplete}
 }
 
 // dropCache makes the next fetch complete. The caller holds c.mu.
@@ -215,14 +216,18 @@ func (c *Client) SetFullRefresh(d time.Duration) {
 
 // inTransition reports a pull request whose detail may change while its
 // signature does not: GitHub is still computing its merge state, its CI
-// runs, a merge queue holds it, or a bot has yet to act on its head.
+// runs or fails (a failing check wins over a pending one in the rollup, so
+// running required checks hide behind it), a merge queue holds it, a bot has
+// yet to act on its head or raised concerns, or review threads are
+// unresolved (resolving one may not move updatedAt).
 func inTransition(pr PullRequest) bool {
 	if pr.MergeState == "" || pr.MergeState == "UNKNOWN" || pr.Checks == "PENDING" || pr.Checks == "EXPECTED" ||
-		(pr.Queue != nil && pr.Queue.State.InQueue()) {
+		pr.Checks == "FAILURE" || pr.Checks == "ERROR" || (pr.Queue != nil && pr.Queue.State.InQueue()) ||
+		(pr.ThreadsKnown && pr.UnresolvedThreads > 0) {
 		return true
 	}
 	for _, bot := range pr.Bots {
-		if bot.State == BotRunning || bot.State == BotStale {
+		if bot.State == BotRunning || bot.State == BotStale || bot.State == BotConcerns {
 			return true
 		}
 	}
@@ -242,29 +247,34 @@ func stale(list []entry, cache map[string]listed) []string {
 
 // fetchIncremental lists every pull request by signature, reads the detail
 // of those that are new, changed, or in transition, and takes the rest from
-// cache. Every query must succeed.
-func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots []Bot, needs Needs, queues []Queue, now time.Time) (lists, error) {
+// cache. Every query must succeed. When the signatures name another viewer
+// than the cache's, it runs a complete fetch instead and reports true.
+func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots []Bot, needs Needs, queues []Queue, now time.Time) (l lists, complete bool, err error) {
 	out := c.graphqlLists(ctx, authoredSignatureQuery(queues), searchSignatureQuery(reviewSearch), searchSignatureQuery(reviewedSearch(now)))
 	if out[0].err != nil {
-		return lists{}, out[0].err
+		return lists{}, false, out[0].err
 	}
 	login, authored, err := decodeAuthoredSignatures(out[0].data)
 	if err != nil {
-		return lists{}, err
+		return lists{}, false, err
+	}
+	if login != cache.login {
+		l, err = c.fetchComplete(ctx, bots, needs, queues, now)
+		return l, true, err
 	}
 	if out[1].err != nil {
-		return lists{}, out[1].err
+		return lists{}, false, out[1].err
 	}
 	requests, err := decodeSearchSignatures(out[1].data, "review request")
 	if err != nil {
-		return lists{}, err
+		return lists{}, false, err
 	}
 	if out[2].err != nil {
-		return lists{}, out[2].err
+		return lists{}, false, out[2].err
 	}
 	reviewed, err := decodeSearchSignatures(out[2].data, "reviewed pull request")
 	if err != nil {
-		return lists{}, err
+		return lists{}, false, err
 	}
 
 	// The lists' details are independent, so they are read at once.
@@ -289,7 +299,7 @@ func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots [
 	ra, rr, rd := <-a, <-r, <-d
 	for _, res := range []read{ra, rr, rd} {
 		if res.err != nil {
-			return lists{}, res.err
+			return lists{}, false, res.err
 		}
 	}
 
@@ -299,7 +309,7 @@ func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots [
 	}
 	if needs.RequiredChecks {
 		if err := c.requiredChecks(ctx, freshAuthored); err != nil {
-			return lists{}, err
+			return lists{}, false, err
 		}
 	}
 	freshRequests := make([]listed, len(rr.nodes))
@@ -311,7 +321,7 @@ func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots [
 		freshReviewed[i] = reviewedPullRequest(node, login, bots)
 	}
 
-	l := lists{login: login}
+	l = lists{login: login}
 	for _, x := range assemble(authored, cache.authored, byID(allKept(freshAuthored))) {
 		l.authored = append(l.authored, x.pr)
 	}
@@ -319,7 +329,7 @@ func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots [
 		l.requests = append(l.requests, x.pr)
 	}
 	l.reviewed = assemble(reviewed, cache.reviewed, byID(freshReviewed))
-	return l, nil
+	return l, false, nil
 }
 
 // assemble lists the pull requests in signature order, fresh ones first

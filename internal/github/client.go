@@ -454,8 +454,11 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	if complete {
 		l, err = c.fetchComplete(ctx, bots, needs, queues, now)
 	} else {
-		l, err = c.fetchIncremental(ctx, cache, bots, needs, queues, now)
-		lastComplete = cache.lastComplete
+		var became bool
+		l, became, err = c.fetchIncremental(ctx, cache, bots, needs, queues, now)
+		if !became {
+			lastComplete = cache.lastComplete
+		}
 	}
 	c.mu.Lock()
 	if c.cacheGeneration == generation {

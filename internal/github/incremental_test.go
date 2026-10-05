@@ -408,3 +408,68 @@ func TestASettingChangedDuringAFetchIsNotCached(t *testing.T) {
 		t.Fatalf("a fetch with replaced settings was cached: next fetch %s", kind)
 	}
 }
+
+func TestAnotherViewerMakesTheFetchComplete(t *testing.T) {
+	f := cleanFake(t)
+	c := f.client()
+	fetch(t, f, c)
+	f.login = "carol"
+	f.nodeIDs = nil
+	got, kind := fetch(t, f, c)
+	if kind != "signature" {
+		t.Fatalf("the signature pass should run first, got %s", kind)
+	}
+	if !slices.Contains(f.kinds, "complete") {
+		t.Fatalf("no complete query followed: %v", f.kinds)
+	}
+	fresh, _ := fetch(t, f, f.client())
+	if !reflect.DeepEqual(got, fresh) || got.Login != "carol" || len(got.ReviewRequests) != 1 {
+		t.Fatalf("snapshot reused another account's rows:\n%+v\n%+v", got, fresh)
+	}
+	// The result counts as a complete fetch: the cache now follows carol.
+	if _, kind := fetch(t, f, c); kind != "signature" {
+		t.Fatalf("next fetch %s", kind)
+	}
+}
+
+func TestFailingChecksAreFetchedAgain(t *testing.T) {
+	f := cleanFake(t)
+	f.authored[0]["commits"] = map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{
+		"committedDate": "2026-10-01T09:00:00Z", "statusCheckRollup": map[string]any{"state": "FAILURE"}}}}}
+	c := f.client()
+	fetch(t, f, c)
+	fetch(t, f, c)
+	if len(f.nodeIDs) != 1 || !reflect.DeepEqual(f.nodeIDs[0], []string{"PR_1"}) {
+		t.Fatalf("detail fetched %v, want the failing pull request", f.nodeIDs)
+	}
+}
+
+func TestUnresolvedThreadsAreFetchedAgain(t *testing.T) {
+	f := cleanFake(t)
+	f.authored[0]["openThreads"] = map[string]any{"totalCount": 1, "nodes": []any{map[string]any{"isResolved": false}}}
+	f.authored[1]["openThreads"] = map[string]any{"totalCount": 1, "nodes": []any{map[string]any{"isResolved": true}}}
+	c := f.client()
+	c.SetNeeds(Needs{Threads: true})
+	first, _ := fetch(t, f, c)
+	if !first.PullRequests[0].ThreadsKnown || first.PullRequests[0].UnresolvedThreads != 1 {
+		t.Fatalf("threads not read: %+v", first.PullRequests[0])
+	}
+	fetch(t, f, c)
+	if len(f.nodeIDs) != 1 || !reflect.DeepEqual(f.nodeIDs[0], []string{"PR_1"}) {
+		t.Fatalf("detail fetched %v, want only the pull request with open threads", f.nodeIDs)
+	}
+}
+
+func TestSignaturePassFailureFailsTheFetchAndTheNextIsComplete(t *testing.T) {
+	f := cleanFake(t)
+	c := f.client()
+	fetch(t, f, c)
+	f.failSignature = true
+	if _, err := c.Fetch(context.Background()); err == nil {
+		t.Fatal("no error")
+	}
+	f.failSignature = false
+	if _, kind := fetch(t, f, c); kind != "complete" {
+		t.Fatalf("after a failure: %s", kind)
+	}
+}

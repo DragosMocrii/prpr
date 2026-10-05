@@ -23,6 +23,10 @@ type fakeAPI struct {
 	gone map[string]bool
 	// failNodes makes detail queries fail.
 	failNodes bool
+	// failSignature makes signature list queries fail.
+	failSignature bool
+	// login is the viewer's login.
+	login string
 	// onCall runs at the start of each list or detail query with its kind.
 	onCall func(kind string)
 	// kinds records "complete" or "signature" per authored list query, and
@@ -34,7 +38,7 @@ type fakeAPI struct {
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
-	return &fakeAPI{t: t, gone: map[string]bool{}, now: time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)}
+	return &fakeAPI{t: t, login: "alice", gone: map[string]bool{}, now: time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)}
 }
 
 func (f *fakeAPI) client() *Client {
@@ -59,10 +63,10 @@ func prNode(id string, number int) map[string]any {
 	}
 }
 
-func page(key string, nodes []map[string]any, login bool) []any {
+func page(key string, nodes []map[string]any, login string) []any {
 	connection := map[string]any{"nodes": nodes, "pageInfo": map[string]any{"hasNextPage": false, "endCursor": nil}}
-	if login {
-		return []any{map[string]any{"data": map[string]any{"viewer": map[string]any{"login": "alice", key: connection}}}}
+	if login != "" {
+		return []any{map[string]any{"data": map[string]any{"viewer": map[string]any{"login": login, key: connection}}}}
 	}
 	return []any{map[string]any{"data": map[string]any{key: connection}}}
 }
@@ -94,6 +98,9 @@ func (f *fakeAPI) call(_ context.Context, _ string, args ...string) ([]byte, err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if kind == "signature" && f.failSignature {
+		return nil, errors.New("GitHub list query failed: boom")
+	}
 	var data any
 	switch {
 	case kind == "required":
@@ -118,11 +125,11 @@ func (f *fakeAPI) call(_ context.Context, _ string, args ...string) ([]byte, err
 		data = map[string]any{"data": answer}
 	case strings.HasPrefix(query, "query($endCursor: String) {\n  viewer {"):
 		f.kinds = append(f.kinds, kind)
-		data = page("pullRequests", f.authored, true)
+		data = page("pullRequests", f.authored, f.login)
 	case strings.Contains(query, "reviewed-by:@me"):
-		data = page("search", f.reviewed, false)
+		data = page("search", f.reviewed, "")
 	default:
-		data = page("search", f.requests, false)
+		data = page("search", f.requests, "")
 	}
 	return json.Marshal(data)
 }
