@@ -65,7 +65,9 @@ type bots struct {
 
 func (p pr) node(full bool) map[string]any {
 	n := map[string]any{
-		"number": p.number, "title": p.title, "isDraft": p.draft,
+		"id":         fmt.Sprintf("PR_%s_%d", strings.ReplaceAll(p.repo, "/", "_"), p.number),
+		"headRefOid": fmt.Sprintf("%x", int64(p.head)),
+		"number":     p.number, "title": p.title, "isDraft": p.draft,
 		"url":        fmt.Sprintf("https://github.com/%s/pull/%d", p.repo, p.number),
 		"mergeable":  p.mergeable,
 		"updatedAt":  ago(p.head),
@@ -219,6 +221,12 @@ func fetched(list string) bool {
 	return err == nil
 }
 
+// ran reports whether a full fetch of list already ran.
+func ran(list string) bool {
+	_, err := os.Stat(filepath.Join(os.Getenv("DEMO_STATE"), list))
+	return err == nil
+}
+
 func nodes(prs []pr, full bool) []any {
 	out := make([]any, len(prs))
 	for i, p := range prs {
@@ -239,6 +247,22 @@ func main() {
 	case !strings.HasPrefix(args, "api graphql"):
 		fmt.Fprintln(os.Stderr, "demo gh: unsupported command:", args)
 		os.Exit(1)
+	case strings.Contains(args, "node(id:"):
+		// A detail query: answer each $idN from the current data.
+		all := append(mine(ran("mine")), reviews(ran("reviews"))...)
+		answer := map[string]any{}
+		for i := 0; i+1 < len(os.Args); i++ {
+			name, id, ok := strings.Cut(os.Args[i+1], "=")
+			if os.Args[i] != "-f" || !ok || !strings.HasPrefix(name, "id") {
+				continue
+			}
+			for _, p := range all {
+				if n := p.node(true); n["id"] == id {
+					answer["p"+strings.TrimPrefix(name, "id")] = n
+				}
+			}
+		}
+		data = map[string]any{"data": answer}
 	case strings.Contains(args, "combinedSlug"):
 		data = reviewers()
 	case strings.Contains(args, "reviewed-by:@me"):
@@ -249,17 +273,22 @@ func main() {
 			"limit": 5000, "remaining": 4874, "resetAt": now.Add(41 * time.Minute).Format(time.RFC3339)}}}
 	default:
 		full := strings.Contains(args, "mergeStateStatus")
+		signature := !full && strings.Contains(args, "headRefOid")
 		review := strings.Contains(args, "search(")
+		list := map[bool]string{false: "mine", true: "reviews"}[review]
 		changed := false
-		if full {
+		switch {
+		case full:
 			time.Sleep(1500 * time.Millisecond)
-			changed = fetched(map[bool]string{false: "mine", true: "reviews"}[review])
+			changed = fetched(list)
+		case signature:
+			changed = ran(list)
 		}
 		if review {
-			data = []any{map[string]any{"data": map[string]any{"search": page(reviews(changed), full)}}}
+			data = []any{map[string]any{"data": map[string]any{"search": page(reviews(changed), full || signature)}}}
 		} else {
 			data = []any{map[string]any{"data": map[string]any{"viewer": map[string]any{
-				"login": login, "pullRequests": page(mine(changed), full)}}}}
+				"login": login, "pullRequests": page(mine(changed), full || signature)}}}}
 		}
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(data); err != nil {
