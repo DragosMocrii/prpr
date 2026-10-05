@@ -17,6 +17,7 @@ const signaturePageSize = 100
 func signatureFields(queues []Queue) string {
 	fields := `
         id
+        url
         updatedAt
         headRefOid
         mergeable
@@ -87,42 +88,13 @@ func decodeAuthoredSignatures(data []byte) (string, []entry, error) {
 
 // decodeSearchSignatures decodes a search's signature pages.
 func decodeSearchSignatures(data []byte, name string) ([]entry, error) {
-	var pages []json.RawMessage
-	if err := json.Unmarshal(data, &pages); err != nil {
-		return nil, fmt.Errorf("decode GitHub %s response: %w", name, err)
+	prs, err := decodeSearchPages(data, name, func(node *pullRequestNode) (PullRequest, bool) {
+		return PullRequest{ID: node.ID, sig: node.signature()}, true
+	})
+	if err != nil {
+		return nil, err
 	}
-	if len(pages) == 0 {
-		return nil, fmt.Errorf("decode GitHub %s response: no pages returned", name)
-	}
-
-	var result []entry
-	for i, pageData := range pages {
-		var page struct {
-			Data struct {
-				Search *struct {
-					Nodes []*pullRequestNode `json:"nodes"`
-				} `json:"search"`
-			} `json:"data"`
-			Errors []json.RawMessage `json:"errors"`
-		}
-		if err := json.Unmarshal(pageData, &page); err != nil {
-			return nil, fmt.Errorf("decode GitHub %s page %d: %w", name, i+1, err)
-		}
-		if len(page.Errors) != 0 {
-			return nil, fmt.Errorf("GitHub %s page %d returned GraphQL errors: %s", name, i+1, graphQLErrors(page.Errors))
-		}
-		if page.Data.Search == nil {
-			return nil, fmt.Errorf("GitHub %s page %d has no search connection", name, i+1)
-		}
-		for _, node := range page.Data.Search.Nodes {
-			// Skip null or empty nodes, but keep nodes with an ID even if they lack other fields.
-			if node == nil || node.ID == "" {
-				continue
-			}
-			result = append(result, entry{id: node.ID, sig: node.signature()})
-		}
-	}
-	return result, nil
+	return entries(prs), nil
 }
 
 // detailBatch is how many pull requests a detail query names: a full

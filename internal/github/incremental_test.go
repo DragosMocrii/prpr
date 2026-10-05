@@ -93,7 +93,7 @@ func TestSignatureQueriesSelectOnlyTheSignature(t *testing.T) {
 				t.Errorf("signature query selects %s:\n%s", slow, q)
 			}
 		}
-		for _, part := range []string{"first: 100", "id\n", "updatedAt", "headRefOid", "mergeable", "isDraft", "statusCheckRollup { state }"} {
+		for _, part := range []string{"first: 100", "id\n", "url\n", "updatedAt", "headRefOid", "mergeable", "isDraft", "statusCheckRollup { state }"} {
 			if !strings.Contains(q, part) {
 				t.Errorf("signature query lacks %q:\n%s", part, q)
 			}
@@ -113,8 +113,8 @@ func TestDecodeSignaturesKeepsOrderAndSkipsEmptyNodes(t *testing.T) {
 	if err != nil || login != "alice" || len(authored) != 1 || authored[0].id != "PR_1" || authored[0].sig.headOid != "h1" {
 		t.Fatalf("authored %q %+v %v", login, authored, err)
 	}
-	search := `[{"data":{"search":{"nodes":[{"id":"PR_3","headRefOid":"a"},null,{},{"id":"PR_2","headRefOid":"b"}],"pageInfo":{"hasNextPage":true,"endCursor":"x"}}}},
-	            {"data":{"search":{"nodes":[{"id":"PR_1","headRefOid":"c"}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}]`
+	search := `[{"data":{"search":{"nodes":[{"id":"PR_3","url":"https://github.com/acme/api/pull/3","headRefOid":"a"},null,{},{"id":"PR_2","url":"https://github.com/acme/api/pull/2","headRefOid":"b"}],"pageInfo":{"hasNextPage":true,"endCursor":"x"}}}},
+	            {"data":{"search":{"nodes":[{"id":"PR_1","url":"https://github.com/acme/api/pull/1","headRefOid":"c"}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}]`
 	entries, err := decodeSearchSignatures([]byte(search), "review request")
 	if err != nil {
 		t.Fatal(err)
