@@ -103,6 +103,17 @@ type Client struct {
 	needs Needs
 	// queues are the merge queues fetches read.
 	queues []Queue
+	// api answers gh commands in place of gh, for tests; nil runs gh.
+	api func(ctx context.Context, message string, args ...string) ([]byte, error)
+	// clock is the time fetches use, for tests; nil is time.Now.
+	clock func() time.Time
+}
+
+func (c *Client) currentTime() time.Time {
+	if c.clock != nil {
+		return c.clock()
+	}
+	return time.Now()
 }
 
 type AuthError struct {
@@ -148,13 +159,27 @@ func pullRequestFields(bots bool) string {
         } } }` + extra
 }
 
+// authoredFields are the authored list's fields.
+func authoredFields(bots bool, needs Needs, queues []Queue) string {
+	return pullRequestFields(bots) + needsFields(needs) + queueFields(queues)
+}
+
+// reviewFields are a review search's fields plus extra.
+func reviewFields(bots bool, extra string) string {
+	return pullRequestFields(bots) + `
+        author { login }
+        requestEvents: timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
+          nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { ... on User { login } } } }
+        }` + extra
+}
+
 func pullRequestsQuery(bots bool, needs Needs, queues []Queue) string {
 	return `query($endCursor: String) {
   viewer {
     login
     pullRequests(first: ` + strconv.Itoa(pageSize) + `, after: $endCursor, states: [OPEN],
                  orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes {` + pullRequestFields(bots) + needsFields(needs) + queueFields(queues) + `
+      nodes {` + authoredFields(bots, needs, queues) + `
       }
       pageInfo { hasNextPage endCursor }
     }
@@ -178,11 +203,7 @@ func searchQuery(search string, bots bool, extra string) string {
   search(type: ISSUE, first: ` + strconv.Itoa(pageSize) + `, after: $endCursor,
          query: "` + search + `") {
     nodes {
-      ... on PullRequest {` + pullRequestFields(bots) + `
-        author { login }
-        requestEvents: timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
-          nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { ... on User { login } } } }
-        }` + extra + `
+      ... on PullRequest {` + reviewFields(bots, extra) + `
       }
     }
     pageInfo { hasNextPage endCursor }
@@ -408,14 +429,25 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	}
 	bots := c.Bots()
 	needs := c.currentNeeds()
-	snapshot, err := c.run(ctx, pullRequestsQuery(len(bots) > 0, needs, c.currentQueues()), reviewRequestsQuery(len(bots) > 0), reviewedQuery(len(bots) > 0, time.Now()), bots)
-	if err != nil || !needs.RequiredChecks {
-		return snapshot, err
-	}
-	if err := c.requiredChecks(ctx, snapshot.PullRequests); err != nil {
+	l, err := c.fetchComplete(ctx, bots, needs, c.currentQueues(), c.currentTime())
+	if err != nil {
 		return Snapshot{}, err
 	}
-	return snapshot, nil
+	return l.snapshot(), nil
+}
+
+// fetchComplete runs every list's full query, then the required checks
+// when the rules need them.
+func (c *Client) fetchComplete(ctx context.Context, bots []Bot, needs Needs, queues []Queue, now time.Time) (lists, error) {
+	hasBots := len(bots) > 0
+	l, err := c.fetchLists(ctx, pullRequestsQuery(hasBots, needs, queues), reviewRequestsQuery(hasBots), reviewedQuery(hasBots, now), bots)
+	if err != nil || !needs.RequiredChecks {
+		return l, err
+	}
+	if err := c.requiredChecks(ctx, l.authored); err != nil {
+		return lists{}, err
+	}
+	return l, nil
 }
 
 // Preview fetches both lists with only the fields GitHub answers quickly, for
@@ -423,10 +455,11 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 // authentication check, which Fetch reports, and reviewed pull requests,
 // which need the fields Preview leaves out to be placed.
 func (c *Client) Preview(ctx context.Context) (Snapshot, error) {
-	snapshot, err := c.run(ctx, previewPullRequestsQuery(), previewReviewRequestsQuery(), "", nil)
+	l, err := c.fetchLists(ctx, previewPullRequestsQuery(), previewReviewRequestsQuery(), "", nil)
 	if err != nil {
 		return Snapshot{}, err
 	}
+	snapshot := l.snapshot()
 	snapshot.Preview = true
 	for _, list := range [][]PullRequest{snapshot.PullRequests, snapshot.ReviewRequests} {
 		for i := range list {
@@ -436,57 +469,82 @@ func (c *Client) Preview(ctx context.Context) (Snapshot, error) {
 	return snapshot, nil
 }
 
-// run fetches both lists with the given queries, and the pull requests the
-// viewer reviewed unless reviewed is empty. Every query must succeed.
-func (c *Client) run(ctx context.Context, pullRequests, reviewRequests, reviewed string, bots []Bot) (Snapshot, error) {
-	// The lists are independent, so the queries run at once.
-	type output struct {
-		data []byte
-		err  error
-	}
-	search := func(message, query string) chan output {
-		result := make(chan output, 1)
-		if query == "" {
-			result <- output{}
-			return result
-		}
-		go func() {
-			data, err := c.output(ctx, message, "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+query)
-			result <- output{data, err}
-		}()
-		return result
-	}
-	reviews := search("GitHub review request query failed", reviewRequests)
-	reviewedOutput := search("GitHub reviewed pull request query failed", reviewed)
+// lists are the three fetched lists before mergeReviews joins them.
+type lists struct {
+	login              string
+	authored, requests []PullRequest
+	reviewed           []listed
+}
 
-	data, err := c.output(ctx, "GitHub pull request query failed", "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+pullRequests)
-	review, past := <-reviews, <-reviewedOutput
-	if err != nil {
-		return Snapshot{}, err
+// snapshot joins the lists as Fetch returns them.
+func (l lists) snapshot() Snapshot {
+	var kept []PullRequest
+	for _, r := range l.reviewed {
+		if r.keep {
+			kept = append(kept, r.pr)
+		}
 	}
-	snapshot, err := decodePages(data, bots)
-	if err != nil {
-		return Snapshot{}, err
+	requests := l.requests
+	if len(kept) > 0 {
+		requests = mergeReviews(l.requests, kept)
 	}
-	if review.err != nil {
-		return Snapshot{}, review.err
+	return Snapshot{Login: l.login, PullRequests: l.authored, ReviewRequests: requests}
+}
+
+type listOutput struct {
+	data []byte
+	err  error
+}
+
+// graphqlLists runs the authored, review request, and reviewed list queries
+// at once, skipping an empty one.
+func (c *Client) graphqlLists(ctx context.Context, authored, requests, reviewed string) [3]listOutput {
+	messages := [3]string{"GitHub pull request query failed", "GitHub review request query failed", "GitHub reviewed pull request query failed"}
+	var outputs [3]listOutput
+	var wg sync.WaitGroup
+	for i, query := range [3]string{authored, requests, reviewed} {
+		if query == "" {
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			data, err := c.output(ctx, messages[i], "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+query)
+			outputs[i] = listOutput{data, err}
+		}()
 	}
-	snapshot.ReviewRequests, err = decodeReviewPages(review.data, snapshot.Login, bots)
+	wg.Wait()
+	return outputs
+}
+
+// fetchLists fetches and decodes the lists, the reviewed one unless its
+// query is empty. Every query must succeed.
+func (c *Client) fetchLists(ctx context.Context, authored, requests, reviewed string, bots []Bot) (lists, error) {
+	out := c.graphqlLists(ctx, authored, requests, reviewed)
+	if out[0].err != nil {
+		return lists{}, out[0].err
+	}
+	snapshot, err := decodePages(out[0].data, bots)
 	if err != nil {
-		return Snapshot{}, err
+		return lists{}, err
+	}
+	l := lists{login: snapshot.Login, authored: snapshot.PullRequests}
+	if out[1].err != nil {
+		return lists{}, out[1].err
+	}
+	if l.requests, err = decodeReviewPages(out[1].data, l.login, bots); err != nil {
+		return lists{}, err
 	}
 	if reviewed == "" {
-		return snapshot, nil
+		return l, nil
 	}
-	if past.err != nil {
-		return Snapshot{}, past.err
+	if out[2].err != nil {
+		return lists{}, out[2].err
 	}
-	done, err := decodeReviewedPages(past.data, snapshot.Login, bots)
-	if err != nil {
-		return Snapshot{}, err
+	if l.reviewed, err = decodeReviewedNodes(out[2].data, l.login, bots); err != nil {
+		return lists{}, err
 	}
-	snapshot.ReviewRequests = mergeReviews(snapshot.ReviewRequests, done)
-	return snapshot, nil
+	return l, nil
 }
 
 func (c *Client) ListRepositories(ctx context.Context) ([]string, error) {
@@ -659,21 +717,6 @@ func decodePages(data []byte, bots []Bot) (Snapshot, error) {
 func decodeReviewPages(data []byte, login string, bots []Bot) ([]PullRequest, error) {
 	return decodeSearchPages(data, "review request", func(node *pullRequestNode) (PullRequest, bool) {
 		return node.pullRequest(login, bots), true
-	})
-}
-
-// decodeReviewedPages decodes the reviewed search, keeping the pull requests
-// that directly requested the viewer's review.
-func decodeReviewedPages(data []byte, login string, bots []Bot) ([]PullRequest, error) {
-	return decodeSearchPages(data, "reviewed pull request", func(node *pullRequestNode) (PullRequest, bool) {
-		pr := node.pullRequest("", bots)
-		var head time.Time
-		if commits := node.Commits.Nodes; len(commits) > 0 && commits[0] != nil {
-			head = commits[0].Commit.CommittedDate
-		}
-		status, since, ok := node.reviewedStatus(login, head)
-		pr.ReviewStatus, pr.WaitingSince = status, since
-		return pr, ok
 	})
 }
 

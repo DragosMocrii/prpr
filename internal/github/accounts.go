@@ -125,6 +125,9 @@ func (c *Client) command(ctx context.Context, args ...string) (*exec.Cmd, secret
 // output runs a gh command as the pinned account. Its error names message
 // and gh's message, with any copy of the token removed.
 func (c *Client) output(ctx context.Context, message string, args ...string) ([]byte, error) {
+	if c.api != nil {
+		return c.api(ctx, message, args...)
+	}
 	cmd, token, err := c.command(ctx, args...)
 	if err != nil {
 		return nil, err

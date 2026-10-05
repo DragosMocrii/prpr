@@ -1,6 +1,8 @@
 package github
 
 import (
+	"context"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -54,5 +56,28 @@ func TestFullQueriesSelectTheNodeIDAndHeadCommit(t *testing.T) {
 		if !strings.Contains(q, "\n        id\n") || !strings.Contains(q, "headRefOid") {
 			t.Fatalf("query lacks id or headRefOid:\n%s", q)
 		}
+	}
+}
+
+func TestCompleteFetchThroughTheFakeKeepsListsAndOrder(t *testing.T) {
+	f := newFakeAPI(t)
+	f.authored = []map[string]any{prNode("PR_2", 2), prNode("PR_1", 1)}
+	f.requests = []map[string]any{prNode("PR_10", 10)}
+	unrequested := prNode("PR_21", 21)
+	unrequested["requestEvents"] = map[string]any{"nodes": []any{}}
+	f.reviewed = []map[string]any{prNode("PR_20", 20), unrequested}
+	snapshot, err := f.client().Fetch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Login != "alice" || len(snapshot.PullRequests) != 2 || snapshot.PullRequests[0].Number != 2 {
+		t.Fatalf("authored %+v", snapshot.PullRequests)
+	}
+	var numbers []int
+	for _, pr := range snapshot.ReviewRequests {
+		numbers = append(numbers, pr.Number)
+	}
+	if !reflect.DeepEqual(numbers, []int{10, 20}) {
+		t.Fatalf("review rows %v, want the request then the kept reviewed row", numbers)
 	}
 }

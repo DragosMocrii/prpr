@@ -49,15 +49,17 @@ const activityItems = 50
 // each one: the head commit, recent reviews and comments, and the direct
 // review requests.
 func reviewedQuery(bots bool, now time.Time) string {
-	return searchQuery(reviewedSearch(now), bots, `
-        activity: timelineItems(itemTypes: [PULL_REQUEST_REVIEW, ISSUE_COMMENT], last: `+strconv.Itoa(activityItems)+`) {
+	return searchQuery(reviewedSearch(now), bots, reviewedExtra)
+}
+
+var reviewedExtra = `
+        activity: timelineItems(itemTypes: [PULL_REQUEST_REVIEW, ISSUE_COMMENT], last: ` + strconv.Itoa(activityItems) + `) {
           nodes {
             __typename
             ... on PullRequestReview { author { login } state submittedAt commit { oid } }
             ... on IssueComment { author { login } createdAt }
           }
-        }`)
-}
+        }`
 
 // activityNode is a review or a conversation comment.
 type activityNode struct {
@@ -184,4 +186,49 @@ func mergeReviews(requests, reviewed []PullRequest) []PullRequest {
 		}
 	}
 	return append(merged, waiting...)
+}
+
+// listed is a pull request of a list and whether it stays in it: the
+// reviewed search keeps only those that requested the viewer directly.
+type listed struct {
+	pr   PullRequest
+	keep bool
+}
+
+// reviewedPullRequest converts a reviewed search node and places it.
+func reviewedPullRequest(node *pullRequestNode, login string, bots []Bot) listed {
+	pr := node.pullRequest("", bots)
+	var head time.Time
+	if commits := node.Commits.Nodes; len(commits) > 0 && commits[0] != nil {
+		head = commits[0].Commit.CommittedDate
+	}
+	status, since, ok := node.reviewedStatus(login, head)
+	pr.ReviewStatus, pr.WaitingSince = status, since
+	return listed{pr: pr, keep: ok}
+}
+
+// decodeReviewedNodes decodes the reviewed search, kept or not.
+func decodeReviewedNodes(data []byte, login string, bots []Bot) ([]listed, error) {
+	var all []listed
+	_, err := decodeSearchPages(data, "reviewed pull request", func(node *pullRequestNode) (PullRequest, bool) {
+		all = append(all, reviewedPullRequest(node, login, bots))
+		return PullRequest{}, false
+	})
+	return all, err
+}
+
+// decodeReviewedPages decodes the reviewed search, keeping the pull requests
+// that directly requested the viewer's review.
+func decodeReviewedPages(data []byte, login string, bots []Bot) ([]PullRequest, error) {
+	all, err := decodeReviewedNodes(data, login, bots)
+	if err != nil {
+		return nil, err
+	}
+	var kept []PullRequest
+	for _, l := range all {
+		if l.keep {
+			kept = append(kept, l.pr)
+		}
+	}
+	return kept, nil
 }
