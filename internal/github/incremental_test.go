@@ -393,3 +393,18 @@ func TestRequiredChecksRunOnlyForRefetchedAuthoredPullRequests(t *testing.T) {
 		}
 	}
 }
+
+func TestASettingChangedDuringAFetchIsNotCached(t *testing.T) {
+	f := cleanFake(t)
+	c := f.client()
+	var once sync.Once
+	f.onCall = func(kind string) {
+		if kind == "complete" {
+			once.Do(func() { c.SetBots(nil) })
+		}
+	}
+	fetch(t, f, c)
+	if _, kind := fetch(t, f, c); kind != "complete" {
+		t.Fatalf("a fetch with replaced settings was cached: next fetch %s", kind)
+	}
+}

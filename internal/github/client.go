@@ -440,9 +440,11 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 		}
 		return Snapshot{}, &AuthError{Err: err}
 	}
-	bots, needs, queues := c.Bots(), c.currentNeeds(), c.currentQueues()
 	now := c.currentTime()
+	// Settings, cache, and generation are read together, so a setter that
+	// drops the cache later makes this fetch's write stale.
 	c.mu.Lock()
+	bots, needs, queues := c.bots, c.needs, c.queues
 	cache, generation := c.cache, c.cacheGeneration
 	complete := cache == nil || (c.fullEvery > 0 && now.Sub(cache.lastComplete) >= c.fullEvery)
 	c.mu.Unlock()
