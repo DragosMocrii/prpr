@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const fullAuthoredPage = `[{"data":{"viewer":{"login":"alice","pullRequests":{"nodes":[
@@ -79,5 +80,52 @@ func TestCompleteFetchThroughTheFakeKeepsListsAndOrder(t *testing.T) {
 	}
 	if !reflect.DeepEqual(numbers, []int{10, 20}) {
 		t.Fatalf("review rows %v, want the request then the kept reviewed row", numbers)
+	}
+}
+
+func TestSignatureQueriesSelectOnlyTheSignature(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	queries := []string{authoredSignatureQuery(nil), searchSignatureQuery(reviewSearch), searchSignatureQuery(reviewedSearch(now))}
+	for _, q := range queries {
+		for _, slow := range []string{"mergeStateStatus", "timelineItems", "reviewThreads", "reactions", "latestOpinionatedReviews", "comments("} {
+			if strings.Contains(q, slow) {
+				t.Errorf("signature query selects %s:\n%s", slow, q)
+			}
+		}
+		for _, part := range []string{"first: 100", "id\n", "updatedAt", "headRefOid", "mergeable", "isDraft", "statusCheckRollup { state }"} {
+			if !strings.Contains(q, part) {
+				t.Errorf("signature query lacks %q:\n%s", part, q)
+			}
+		}
+	}
+	if !strings.Contains(queries[1], `"`+reviewSearch+`"`) || !strings.Contains(queries[2], `"`+reviewedSearch(now)+`"`) {
+		t.Fatal("signature searches differ from the full ones")
+	}
+	if strings.Contains(authoredSignatureQuery([]Queue{QueueTrunk}), "mergeQueueEntry") ||
+		!strings.Contains(authoredSignatureQuery([]Queue{QueueGitHub}), "mergeQueueEntry { state }") {
+		t.Fatal("mergeQueueEntry follows GitHub's queue alone")
+	}
+}
+
+func TestDecodeSignaturesKeepsOrderAndSkipsEmptyNodes(t *testing.T) {
+	login, authored, err := decodeAuthoredSignatures([]byte(sparseAuthoredPage))
+	if err != nil || login != "alice" || len(authored) != 1 || authored[0].id != "PR_1" || authored[0].sig.headOid != "h1" {
+		t.Fatalf("authored %q %+v %v", login, authored, err)
+	}
+	search := `[{"data":{"search":{"nodes":[{"id":"PR_3","headRefOid":"a"},null,{},{"id":"PR_2","headRefOid":"b"}],"pageInfo":{"hasNextPage":true,"endCursor":"x"}}}},
+	            {"data":{"search":{"nodes":[{"id":"PR_1","headRefOid":"c"}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}]`
+	entries, err := decodeSearchSignatures([]byte(search), "review request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, e := range entries {
+		ids = append(ids, e.id)
+	}
+	if !reflect.DeepEqual(ids, []string{"PR_3", "PR_2", "PR_1"}) {
+		t.Fatalf("ids %v", ids)
+	}
+	if _, err := decodeSearchSignatures([]byte(`[{"errors":[{"message":"nope"}]}]`), "review request"); err == nil {
+		t.Fatal("GraphQL errors accepted")
 	}
 }
