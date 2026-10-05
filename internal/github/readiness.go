@@ -38,8 +38,7 @@ const codeOwnerRequests = 50
 // unknown unless one of those read is unresolved.
 const threadCount = 100
 
-// needsFields are the authored query's fields for needs. The node ID lets
-// the required checks query name each pull request.
+// needsFields are the authored query's fields for needs. The node ID the required checks query names is in every query's fields.
 func needsFields(needs Needs) string {
 	var fields string
 	if needs.CodeOwners {
@@ -52,10 +51,6 @@ func needsFields(needs Needs) string {
 	if needs.Threads {
 		fields += `
         openThreads: reviewThreads(first: ` + strconv.Itoa(threadCount) + `) { totalCount nodes { isResolved } }`
-	}
-	if needs.RequiredChecks {
-		fields += `
-        id`
 	}
 	return fields
 }
@@ -84,7 +79,6 @@ type needsNodes struct {
 // that GitHub does not name, such as one hidden from the viewer, is kept as
 // "", so it still counts as pending.
 func (n *needsNodes) applyNeeds(pr *PullRequest) {
-	pr.ID = n.ID
 	if requests := n.CodeOwnerRequests; requests != nil {
 		pr.PendingCodeOwners = nil
 		for _, request := range requests.Nodes {

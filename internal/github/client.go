@@ -50,10 +50,13 @@ type PullRequest struct {
 	RequestedAgain bool
 	// ChangesRequested counts the latest reviews that request changes.
 	ChangesRequested int
+	// ID is GitHub's node ID.
+	ID string
+	// sig is what an incremental fetch compares to tell whether the pull
+	// request changed.
+	sig signature
 	// The fields below are read only for authored pull requests, and only
 	// when the client's [Needs] ask for them; each is unknown otherwise.
-	// ID is GitHub's node ID, read for the required checks.
-	ID string
 	// PendingCodeOwners names the code owners whose review is still
 	// requested, "" for one GitHub does not name. CodeOwnersKnown reports
 	// whether they were read.
@@ -122,6 +125,7 @@ func pullRequestFields(bots bool) string {
 		extra, head = botFields, headCheckFields
 	}
 	return `
+        id
         number
         title
         url
@@ -130,6 +134,7 @@ func pullRequestFields(bots bool) string {
         mergeStateStatus
         updatedAt
         createdAt
+        headRefOid
         additions
         deletions
         reviewDecision
@@ -232,6 +237,7 @@ func previewReviewRequestsQuery() string {
 
 // pullRequestNode decodes pullRequestFields plus the review-only fields.
 type pullRequestNode struct {
+	ID             string    `json:"id"`
 	Number         int       `json:"number"`
 	Title          string    `json:"title"`
 	URL            string    `json:"url"`
@@ -309,6 +315,7 @@ func (node *pullRequestNode) pullRequest(login string, bots []Bot) PullRequest {
 		Additions:      node.Additions,
 		Deletions:      node.Deletions,
 		Comments:       node.CommentCount.TotalCount,
+		ID:             node.ID,
 	}
 	if node.Author != nil {
 		pr.Author = node.Author.Login
@@ -356,6 +363,7 @@ func (node *pullRequestNode) pullRequest(login string, bots []Bot) PullRequest {
 	}
 	node.applyNeeds(&pr)
 	pr.Queue = node.queueEntry()
+	pr.sig = node.signature()
 	return pr
 }
 
@@ -764,4 +772,33 @@ func decodeRateLimit(data []byte) (RateLimit, error) {
 		return RateLimit{}, errors.New("decode GitHub rate limit: invalid rateLimit")
 	}
 	return RateLimit{Limit: *pool.Limit, Remaining: *pool.Remaining, Reset: *pool.ResetAt}, nil
+}
+
+// signature is what the cheap signature queries read of a pull request:
+// enough to tell whether the rest may have changed since it was fetched.
+type signature struct {
+	updatedAt   time.Time
+	headOid     string
+	mergeable   string
+	draft       bool
+	checks      string
+	githubQueue string
+}
+
+// same reports whether two signatures read the same pull request state.
+func (s signature) same(o signature) bool {
+	return s.updatedAt.Equal(o.updatedAt) && s.headOid == o.headOid && s.mergeable == o.mergeable &&
+		s.draft == o.draft && s.checks == o.checks && s.githubQueue == o.githubQueue
+}
+
+// signature reads a node's signature fields, which the full fields include.
+func (node *pullRequestNode) signature() signature {
+	s := signature{updatedAt: node.UpdatedAt, headOid: node.HeadRefOid, mergeable: node.Mergeable, draft: node.Draft}
+	if commits := node.Commits.Nodes; len(commits) > 0 && commits[0] != nil && commits[0].Commit.StatusCheckRollup != nil {
+		s.checks = commits[0].Commit.StatusCheckRollup.State
+	}
+	if entry := node.MergeQueueEntry; entry != nil {
+		s.githubQueue = entry.State
+	}
+	return s
 }

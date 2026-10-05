@@ -50,7 +50,6 @@ const activityItems = 50
 // review requests.
 func reviewedQuery(bots bool, now time.Time) string {
 	return searchQuery(reviewedSearch(now), bots, `
-        headRefOid
         activity: timelineItems(itemTypes: [PULL_REQUEST_REVIEW, ISSUE_COMMENT], last: `+strconv.Itoa(activityItems)+`) {
           nodes {
             __typename
