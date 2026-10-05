@@ -111,3 +111,13 @@ func (m *model) applyTitle(on bool) {
 	}
 	m.settingSaved(m.preferences.SaveTitle(on))
 }
+
+// applyFullRefresh uses and saves how often a fetch is complete, from the
+// next fetch on.
+func (m *model) applyFullRefresh(d time.Duration) {
+	m.fullRefresh = d
+	if m.client != nil {
+		m.client.SetFullRefresh(d)
+	}
+	m.settingSaved(m.preferences.SaveFullRefresh(d))
+}

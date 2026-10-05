@@ -90,6 +90,10 @@ type model struct {
 	err                 error
 	now                 func() time.Time
 	refreshInterval     time.Duration
+	// fullRefresh is how long after a complete fetch the next one is complete.
+	fullRefresh time.Duration
+	// forceFull makes the next fetch complete; it is the client's in the app.
+	forceFull func()
 	// refreshGeneration increments with every fetch so that auto-refresh
 	// ticks scheduled before it are ignored.
 	refreshGeneration uint64
@@ -251,6 +255,9 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m.bots = len(client.Bots()) > 0
 	m.openBrowser = client.OpenInBrowser
 	m.openLink = client.OpenLink
+	m.fullRefresh = preferences.FullRefresh()
+	m.forceFull = client.ForceFull
+	client.SetFullRefresh(m.fullRefresh)
 	m.listReviewers = client.Reviewers
 	m.requestReviews = client.RequestReviews
 	m.notify = preferences.Notify()
@@ -681,6 +688,9 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.cancel()
 		return tea.Quit
 	case key.Matches(msg, k.Refresh, k.Retry):
+		if m.forceFull != nil {
+			m.forceFull()
+		}
 		return m.startFetch()
 	case key.Matches(msg, k.Login):
 		m.loading = true

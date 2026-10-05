@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -17,6 +18,30 @@ import (
 
 // refreshChoices are the intervals Refresh every cycles through.
 var refreshChoices = []time.Duration{0, time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 15 * time.Minute, 30 * time.Minute}
+
+// fullRefreshChoices are the intervals Full refresh every cycles through;
+// zero is never.
+var fullRefreshChoices = []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour, 0}
+
+// nextFullRefresh is the choice after d, the last wrapping to the first; a
+// value that is not a choice goes to the default.
+func nextFullRefresh(d time.Duration) time.Duration {
+	i := slices.Index(fullRefreshChoices, d)
+	if i < 0 {
+		return preferences.DefaultFullRefresh
+	}
+	return fullRefreshChoices[(i+1)%len(fullRefreshChoices)]
+}
+
+func formatFullRefresh(d time.Duration) string {
+	switch {
+	case d == 0:
+		return "never"
+	case d%time.Hour == 0:
+		return fmt.Sprintf("%dh", d/time.Hour)
+	}
+	return preferences.FormatRefresh(d)
+}
 
 // settingKind is how a Settings row changes.
 type settingKind uint8
@@ -111,6 +136,9 @@ func settingRows() []settingRow {
 				return preferences.FormatRefresh(m.refreshInterval)
 			},
 			change: func(m *model) tea.Cmd { return m.applyRefresh(nextRefresh(m.refreshInterval)) }},
+		{kind: settingChoice, label: "Full refresh every", errKey: "fullRefresh",
+			value:  func(m *model) string { return formatFullRefresh(m.fullRefresh) },
+			change: func(m *model) tea.Cmd { m.applyFullRefresh(nextFullRefresh(m.fullRefresh)); return nil }},
 		{kind: settingToggle, label: "Desktop notifications", shortcut: "n",
 			value:  func(m *model) string { return onOff(m.notify) },
 			change: func(m *model) tea.Cmd { m.applyNotify(!m.notify); return nil }},

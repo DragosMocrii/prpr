@@ -38,6 +38,7 @@ func openSettingsModel(t *testing.T) *model {
 	t.Helper()
 	m := newPaneModel(t, 120, 30, []github.PullRequest{botPR(1)}, nil)
 	// Test models start without the saved settings New applies.
+	m.fullRefresh = m.preferences.FullRefresh()
 	m.refreshInterval, m.setTitle, m.notify, m.mouse = m.preferences.Refresh(), m.preferences.Title(), m.preferences.Notify(), m.preferences.Mouse()
 	pressMsg(m, letter(","))
 	if m.settings == nil {
@@ -50,7 +51,7 @@ func TestSettingsListsEverySettingWithItsValue(t *testing.T) {
 	m := openSettingsModel(t)
 	view := settingsView(m)
 	for _, want := range []string{"Icons", "Unicode", "Show drafts", "Legend", "Mouse", "Terminal title",
-		"Refresh every", "5m", "Desktop notifications", "Review bots", "Copilot, Codex, Claude",
+		"Refresh every", "Full refresh every", "5m", "Desktop notifications", "Review bots", "Copilot, Codex, Claude",
 		"Merge queues", "Trunk, GitHub", "Ready-to-merge rules", "Active hours"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("Settings lacks %q:\n%s", want, view)
@@ -269,4 +270,38 @@ func rowLine(t *testing.T, m *model, label string) string {
 	}
 	t.Fatalf("no %q row:\n%s", label, settingsView(m))
 	return ""
+}
+
+func TestFullRefreshCyclesAndSaves(t *testing.T) {
+	m := openSettingsModel(t)
+	if !strings.Contains(settingsView(m), "Full refresh every") || !strings.Contains(settingsView(m), "15m") {
+		t.Fatalf("Settings lacks the full refresh row:\n%s", settingsView(m))
+	}
+	moveTo(t, m, "Full refresh every")
+	for _, want := range []string{"30m", "1h", "never", "5m", "15m"} {
+		press(m, tea.Key{Code: tea.KeySpace, Text: " "})
+		line := ""
+		for _, l := range strings.Split(settingsView(m), "\n") {
+			if strings.Contains(l, "Full refresh every") {
+				line = l
+			}
+		}
+		if !strings.Contains(line, want) {
+			t.Fatalf("row %q, want %s", line, want)
+		}
+	}
+	press(m, tea.Key{Code: tea.KeySpace, Text: " "})
+	if m.preferences.FullRefresh() != 30*time.Minute {
+		t.Fatalf("saved %v", m.preferences.FullRefresh())
+	}
+}
+
+func TestRefreshKeyForcesACompleteFetch(t *testing.T) {
+	m := newPaneModel(t, 120, 30, manyPRs(2), nil)
+	forced := 0
+	m.forceFull = func() { forced++ }
+	m.handleKey(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if forced != 1 {
+		t.Fatalf("r forced %d complete fetches, want 1", forced)
+	}
 }
