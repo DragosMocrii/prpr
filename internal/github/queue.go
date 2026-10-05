@@ -296,6 +296,7 @@ func (c *Client) SetQueues(queues []Queue) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.queues = queues
+	c.dropCache()
 }
 
 func (c *Client) currentQueues() []Queue {

@@ -57,6 +57,7 @@ func (c *Client) UseAccount(login string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.login, c.token = login, ""
+	c.dropCache()
 }
 
 // PinnedAccount returns the pinned account, or "" when following gh's

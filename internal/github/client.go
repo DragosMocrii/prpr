@@ -107,6 +107,13 @@ type Client struct {
 	api func(ctx context.Context, message string, args ...string) ([]byte, error)
 	// clock is the time fetches use, for tests; nil is time.Now.
 	clock func() time.Time
+	// cache is what the next incremental fetch reuses; nil makes it complete.
+	// cacheGeneration increments when the cache is dropped, so a fetch that
+	// started before never writes it.
+	cache           *fetchCache
+	cacheGeneration uint64
+	// fullEvery is how often a fetch is complete; zero leaves it to drops.
+	fullEvery time.Duration
 }
 
 func (c *Client) currentTime() time.Time {
@@ -410,26 +417,53 @@ func (c *Client) SetBots(bots []Bot) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.bots = bots
+	c.dropCache()
 }
 
 // Fetch checks authentication, then fetches both lists, and the required
 // checks of authored pull requests when [Needs] asks for them; every query
 // must succeed. A pinned account's token is read from gh again first, so a
-// new login or refresh of that account takes effect.
+// new login or refresh of that account takes effect. A fetch is complete when
+// nothing is cached, after ForceFull or a setter dropped the cache, or once
+// SetFullRefresh's interval passed since the last complete fetch; otherwise it
+// is incremental (see fetchIncremental). Either returns every list in full.
 func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	if _, err := c.accountToken(ctx, true); err != nil {
+		c.ForceFull()
 		return Snapshot{}, err
 	}
 	if _, err := c.output(ctx, "GitHub authentication check failed", "auth", "status", "--active", "--hostname", "github.com"); err != nil {
+		c.ForceFull()
 		var authErr *AuthError
 		if errors.As(err, &authErr) {
 			return Snapshot{}, err
 		}
 		return Snapshot{}, &AuthError{Err: err}
 	}
-	bots := c.Bots()
-	needs := c.currentNeeds()
-	l, err := c.fetchComplete(ctx, bots, needs, c.currentQueues(), c.currentTime())
+	bots, needs, queues := c.Bots(), c.currentNeeds(), c.currentQueues()
+	now := c.currentTime()
+	c.mu.Lock()
+	cache, generation := c.cache, c.cacheGeneration
+	complete := cache == nil || (c.fullEvery > 0 && now.Sub(cache.lastComplete) >= c.fullEvery)
+	c.mu.Unlock()
+	var l lists
+	var err error
+	lastComplete := now
+	if complete {
+		l, err = c.fetchComplete(ctx, bots, needs, queues, now)
+	} else {
+		l, err = c.fetchIncremental(ctx, cache, bots, needs, queues, now)
+		lastComplete = cache.lastComplete
+	}
+	c.mu.Lock()
+	if c.cacheGeneration == generation {
+		if err != nil {
+			c.dropCache()
+		} else {
+			c.cache = newFetchCache(l, lastComplete)
+		}
+	}
+	c.mu.Unlock()
 	if err != nil {
 		return Snapshot{}, err
 	}

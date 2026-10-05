@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // signaturePageSize is larger than pageSize: signature fields resolve
@@ -161,4 +162,176 @@ func (c *Client) details(ctx context.Context, ids []string, fields string) ([]*p
 		nodes = append(nodes, found...)
 	}
 	return nodes, nil
+}
+
+// fetchCache is what an incremental fetch reuses: each list's pull
+// requests by node ID, as converted before mergeReviews, and when the last
+// complete fetch ran.
+type fetchCache struct {
+	authored, requests, reviewed map[string]listed
+	lastComplete                 time.Time
+}
+
+func byID(prs []listed) map[string]listed {
+	m := make(map[string]listed, len(prs))
+	for _, l := range prs {
+		m[l.pr.ID] = l
+	}
+	return m
+}
+
+func allKept(prs []PullRequest) []listed {
+	out := make([]listed, len(prs))
+	for i, pr := range prs {
+		out[i] = listed{pr: pr, keep: true}
+	}
+	return out
+}
+
+func newFetchCache(l lists, lastComplete time.Time) *fetchCache {
+	return &fetchCache{authored: byID(allKept(l.authored)), requests: byID(allKept(l.requests)), reviewed: byID(l.reviewed), lastComplete: lastComplete}
+}
+
+// dropCache makes the next fetch complete. The caller holds c.mu.
+func (c *Client) dropCache() {
+	c.cache = nil
+	c.cacheGeneration++
+}
+
+// ForceFull makes the next fetch complete.
+func (c *Client) ForceFull() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.dropCache()
+}
+
+// SetFullRefresh sets how long after a complete fetch the next fetch is
+// complete again; zero leaves it to ForceFull and the setters.
+func (c *Client) SetFullRefresh(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.fullEvery = d
+}
+
+// inTransition reports a pull request whose detail may change while its
+// signature does not: GitHub is still computing its merge state, its CI
+// runs, a merge queue holds it, or a bot has yet to act on its head.
+func inTransition(pr PullRequest) bool {
+	if pr.MergeState == "" || pr.MergeState == "UNKNOWN" || pr.Checks == "PENDING" || pr.Checks == "EXPECTED" ||
+		(pr.Queue != nil && pr.Queue.State.InQueue()) {
+		return true
+	}
+	for _, bot := range pr.Bots {
+		if bot.State == BotRunning || bot.State == BotStale {
+			return true
+		}
+	}
+	return false
+}
+
+// stale lists the IDs among list whose detail must be read again.
+func stale(list []entry, cache map[string]listed) []string {
+	var ids []string
+	for _, e := range list {
+		if cached, ok := cache[e.id]; !ok || !cached.pr.sig.same(e.sig) || inTransition(cached.pr) {
+			ids = append(ids, e.id)
+		}
+	}
+	return ids
+}
+
+// fetchIncremental lists every pull request by signature, reads the detail
+// of those that are new, changed, or in transition, and takes the rest from
+// cache. Every query must succeed.
+func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots []Bot, needs Needs, queues []Queue, now time.Time) (lists, error) {
+	out := c.graphqlLists(ctx, authoredSignatureQuery(queues), searchSignatureQuery(reviewSearch), searchSignatureQuery(reviewedSearch(now)))
+	if out[0].err != nil {
+		return lists{}, out[0].err
+	}
+	login, authored, err := decodeAuthoredSignatures(out[0].data)
+	if err != nil {
+		return lists{}, err
+	}
+	if out[1].err != nil {
+		return lists{}, out[1].err
+	}
+	requests, err := decodeSearchSignatures(out[1].data, "review request")
+	if err != nil {
+		return lists{}, err
+	}
+	if out[2].err != nil {
+		return lists{}, out[2].err
+	}
+	reviewed, err := decodeSearchSignatures(out[2].data, "reviewed pull request")
+	if err != nil {
+		return lists{}, err
+	}
+
+	// The lists' details are independent, so they are read at once.
+	hasBots := len(bots) > 0
+	type read struct {
+		ids   []string
+		nodes []*pullRequestNode
+		err   error
+	}
+	start := func(list []entry, cached map[string]listed, fields string) chan read {
+		result := make(chan read, 1)
+		ids := stale(list, cached)
+		go func() {
+			nodes, err := c.details(ctx, ids, fields)
+			result <- read{ids, nodes, err}
+		}()
+		return result
+	}
+	a := start(authored, cache.authored, authoredFields(hasBots, needs, queues))
+	r := start(requests, cache.requests, reviewFields(hasBots, ""))
+	d := start(reviewed, cache.reviewed, reviewFields(hasBots, reviewedExtra))
+	ra, rr, rd := <-a, <-r, <-d
+	for _, res := range []read{ra, rr, rd} {
+		if res.err != nil {
+			return lists{}, res.err
+		}
+	}
+
+	freshAuthored := make([]PullRequest, len(ra.nodes))
+	for i, node := range ra.nodes {
+		freshAuthored[i] = node.pullRequest("", bots)
+	}
+	if needs.RequiredChecks {
+		if err := c.requiredChecks(ctx, freshAuthored); err != nil {
+			return lists{}, err
+		}
+	}
+	freshRequests := make([]listed, len(rr.nodes))
+	for i, node := range rr.nodes {
+		freshRequests[i] = listed{pr: node.pullRequest(login, bots), keep: true}
+	}
+	freshReviewed := make([]listed, len(rd.nodes))
+	for i, node := range rd.nodes {
+		freshReviewed[i] = reviewedPullRequest(node, login, bots)
+	}
+
+	l := lists{login: login}
+	for _, x := range assemble(authored, cache.authored, byID(allKept(freshAuthored))) {
+		l.authored = append(l.authored, x.pr)
+	}
+	for _, x := range assemble(requests, cache.requests, byID(freshRequests)) {
+		l.requests = append(l.requests, x.pr)
+	}
+	l.reviewed = assemble(reviewed, cache.reviewed, byID(freshReviewed))
+	return l, nil
+}
+
+// assemble lists the pull requests in signature order, fresh ones first
+// and the rest from cache.
+func assemble(list []entry, cached, fresh map[string]listed) []listed {
+	out := make([]listed, 0, len(list))
+	for _, e := range list {
+		if x, ok := fresh[e.id]; ok {
+			out = append(out, x)
+		} else {
+			out = append(out, cached[e.id])
+		}
+	}
+	return out
 }

@@ -21,6 +21,9 @@ type Needs struct {
 func (c *Client) SetNeeds(needs Needs) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if needs != c.needs {
+		c.dropCache()
+	}
 	c.needs = needs
 }
 
