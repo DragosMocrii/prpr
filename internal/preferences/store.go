@@ -192,24 +192,25 @@ type Store struct {
 const appKey = "app"
 
 type appJSON struct {
-	Account  string          `json:"account,omitempty"`
-	Icons    string          `json:"icons,omitempty"`
-	Legend   bool            `json:"legend,omitempty"`
-	Drafts   bool            `json:"drafts,omitempty"`
-	Ready    json.RawMessage `json:"ready,omitempty"`
-	Schedule json.RawMessage `json:"schedule,omitempty"`
-	Refresh  json.RawMessage `json:"refresh,omitempty"`
-	Bots     json.RawMessage `json:"bots,omitempty"`
-	Queues   json.RawMessage `json:"queues,omitempty"`
-	Editor   json.RawMessage `json:"editor,omitempty"`
-	Notify   bool            `json:"notify,omitempty"`
-	Mouse    bool            `json:"mouse,omitempty"`
-	Title    *bool           `json:"title,omitempty"`
+	Account     string          `json:"account,omitempty"`
+	Icons       string          `json:"icons,omitempty"`
+	Legend      bool            `json:"legend,omitempty"`
+	Drafts      bool            `json:"drafts,omitempty"`
+	Ready       json.RawMessage `json:"ready,omitempty"`
+	Schedule    json.RawMessage `json:"schedule,omitempty"`
+	Refresh     json.RawMessage `json:"refresh,omitempty"`
+	FullRefresh json.RawMessage `json:"fullRefresh,omitempty"`
+	Bots        json.RawMessage `json:"bots,omitempty"`
+	Queues      json.RawMessage `json:"queues,omitempty"`
+	Editor      json.RawMessage `json:"editor,omitempty"`
+	Notify      bool            `json:"notify,omitempty"`
+	Mouse       bool            `json:"mouse,omitempty"`
+	Title       *bool           `json:"title,omitempty"`
 }
 
 func (a appJSON) empty() bool {
 	return a.Account == "" && a.Icons == "" && !a.Legend && !a.Drafts && len(a.Ready) == 0 && len(a.Schedule) == 0 &&
-		len(a.Refresh) == 0 && len(a.Bots) == 0 && len(a.Queues) == 0 && len(a.Editor) == 0 && !a.Notify && !a.Mouse && a.Title == nil
+		len(a.Refresh) == 0 && len(a.FullRefresh) == 0 && len(a.Bots) == 0 && len(a.Queues) == 0 && len(a.Editor) == 0 && !a.Notify && !a.Mouse && a.Title == nil
 }
 
 // app is the app settings as saved.

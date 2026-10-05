@@ -16,6 +16,8 @@ const (
 	DefaultRefresh = 5 * time.Minute
 	// MinRefresh keeps automatic refreshes from polling GitHub too often.
 	MinRefresh = 30 * time.Second
+	// DefaultFullRefresh is how long after a complete fetch the next one is complete.
+	DefaultFullRefresh = 15 * time.Minute
 )
 
 // Editor names, saved as the app key's editor.
@@ -32,17 +34,19 @@ var Editors = []string{EditorVSCode, EditorVSCodeInsiders, EditorGitHubDev}
 // refresh, bots, and queues the value as written, kept while it cannot be
 // read so a save of another setting does not lose it; editor is like them.
 type settings struct {
-	refresh    time.Duration
-	refreshRaw json.RawMessage
-	bots       []github.Bot
-	botsRaw    json.RawMessage
-	queues     []github.Queue
-	queuesRaw  json.RawMessage
-	editor     string
-	editorRaw  json.RawMessage
-	notify     bool
-	mouse      bool
-	title      bool
+	refresh        time.Duration
+	refreshRaw     json.RawMessage
+	fullRefresh    time.Duration
+	fullRefreshRaw json.RawMessage
+	bots           []github.Bot
+	botsRaw        json.RawMessage
+	queues         []github.Queue
+	queuesRaw      json.RawMessage
+	editor         string
+	editorRaw      json.RawMessage
+	notify         bool
+	mouse          bool
+	title          bool
 	// errs say why a value was not read, by key.
 	errs map[string]error
 }
@@ -50,7 +54,7 @@ type settings struct {
 func defaultSettings() settings {
 	bots, _ := github.ParseBots(github.DefaultBots)
 	queues, _ := github.ParseQueues(github.DefaultQueues)
-	return settings{refresh: DefaultRefresh, bots: bots, queues: queues, editor: EditorVSCode, title: true, errs: map[string]error{}}
+	return settings{refresh: DefaultRefresh, fullRefresh: DefaultFullRefresh, bots: bots, queues: queues, editor: EditorVSCode, title: true, errs: map[string]error{}}
 }
 
 // decodeSettings reads the settings from the app object; a value that
@@ -71,6 +75,18 @@ func decodeSettings(app appJSON, path string) settings {
 			s.errs["refresh"] = fmt.Errorf("refresh %q in %q not read, using %s: %w", refreshStr, path, FormatRefresh(DefaultRefresh), err)
 		} else {
 			s.refresh = d
+		}
+	}
+	// Full refresh: like refresh, a JSON string or nothing
+	if len(app.FullRefresh) != 0 && string(app.FullRefresh) != "null" {
+		s.fullRefreshRaw = app.FullRefresh
+		var value string
+		if err := json.Unmarshal(app.FullRefresh, &value); err != nil {
+			s.errs["fullRefresh"] = fmt.Errorf("full refresh in %q not read, using %s: %w", path, FormatRefresh(DefaultFullRefresh), err)
+		} else if d, err := parseRefresh(value); err != nil {
+			s.errs["fullRefresh"] = fmt.Errorf("full refresh %q in %q not read, using %s: %w", value, path, FormatRefresh(DefaultFullRefresh), err)
+		} else {
+			s.fullRefresh = d
 		}
 	}
 	// Bots: must be a JSON string, or nothing (not 5, not null, not an array)
@@ -116,6 +132,7 @@ func decodeSettings(app appJSON, path string) settings {
 // unreadable values as they were written.
 func (s settings) encode(app *appJSON) {
 	app.Refresh = s.refreshRaw
+	app.FullRefresh = s.fullRefreshRaw
 	app.Bots = s.botsRaw
 	app.Queues = s.queuesRaw
 	app.Editor = s.editorRaw
@@ -184,6 +201,24 @@ func (s *Store) SaveRefresh(d time.Duration) error {
 			c.refreshRaw, _ = json.Marshal(FormatRefresh(d))
 		}
 		delete(c.errs, "refresh")
+	})
+}
+
+// FullRefresh is how long after a complete fetch the next one is complete;
+// zero is never on a timer.
+func (s *Store) FullRefresh() time.Duration { return s.settings.fullRefresh }
+
+// SaveFullRefresh saves the full refresh interval: 0, or at least MinRefresh.
+func (s *Store) SaveFullRefresh(d time.Duration) error {
+	if d < 0 || (d > 0 && d < MinRefresh) {
+		return fmt.Errorf("full refresh must be 0 (never) or at least %s", FormatRefresh(MinRefresh))
+	}
+	return s.saveSettings(func(c *settings) {
+		c.fullRefresh, c.fullRefreshRaw = d, nil
+		if d != DefaultFullRefresh {
+			c.fullRefreshRaw, _ = json.Marshal(FormatRefresh(d))
+		}
+		delete(c.errs, "fullRefresh")
 	})
 }
 
@@ -285,13 +320,13 @@ func (s *Store) SaveTitle(on bool) error {
 }
 
 // SettingErr says why the saved value of key ("refresh", "bots", "queues",
-// or "editor") was not read; nil when it was.
+// "editor", or "fullRefresh") was not read; nil when it was.
 func (s *Store) SettingErr(key string) error { return s.settings.errs[key] }
 
 // SettingsErr joins every unreadable setting's error; nil when all were read.
 func (s *Store) SettingsErr() error {
 	var errs []error
-	for _, key := range []string{"refresh", "bots", "queues", "editor"} {
+	for _, key := range []string{"refresh", "bots", "queues", "editor", "fullRefresh"} {
 		if err := s.settings.errs[key]; err != nil {
 			errs = append(errs, err)
 		}
