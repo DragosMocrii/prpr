@@ -50,12 +50,27 @@ func TestTrunkCommentsThatAreNotQueueEntries(t *testing.T) {
 		"template":          {{Author: "trunk-io", Body: template}},
 		"reworded template": {{Author: "trunk-io", Body: "<!-- Trunk Merge -->\nThis repository merges through Trunk.\n\n<!-- Start PR Submit Checkbox -->\n- [ ] <!-- End PR Submit Checkbox -->Check the box to merge."}},
 		"merged":            {{Author: "trunk-io", Body: "<!-- Trunk Merge -->\n😎 Merged successfully - [details](https://app.trunk.io/acme/merge-queue/x/12)."}},
-		"no marker":         {{Author: "trunk-io", Body: "🧪 Running tests on this pull request"}},
+		"unmarked unknown":  {{Author: "trunk-io", Body: "Flaky tests report: 2 tests flaked on this pull request"}},
 		"impostor":          {{Author: "pat", Body: "<!-- Trunk Merge -->\n🧪 Running tests on this pull request"}},
 	} {
 		if entry := trunkEntry(comments); entry != nil {
 			t.Errorf("%s: entry %+v, want none", name, entry)
 		}
+	}
+}
+
+// Trunk drops the marker when it edits the template into a state.
+func TestUnmarkedTrunkCommentsReadByTheirState(t *testing.T) {
+	comments := []queueComment{
+		{Author: "trunk-io", Body: "Flaky tests report: 2 tests flaked on this pull request"},
+		{Author: "trunk-io", Body: "🧪\u2002Running tests on this pull request (testing on PR [#77](https://www.github.com/acme/api/pull/77)) - [details](https://app.trunk.io/acme/merge-queue/x/12)."},
+	}
+	entry := trunkEntry(comments)
+	if entry == nil || entry.State != QueueTesting || entry.Detail != "testing on #77" || entry.URL != "https://app.trunk.io/acme/merge-queue/x/12" {
+		t.Fatalf("entry %+v, want testing on #77", entry)
+	}
+	if entry := trunkEntry(comments[1:]); entry == nil || entry.State != QueueTesting {
+		t.Fatalf("lone unmarked comment: entry %+v", entry)
 	}
 }
 

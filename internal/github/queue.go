@@ -84,18 +84,23 @@ var (
 )
 
 // trunkEntry reads Trunk's comment: the first by trunk-io holding the
-// marker. The unsubmitted template (its first line, or an unchecked submit
-// box under a line no state matches), a merged pull request (which is
-// closed), and no comment at all give nil; text it does not recognize is
-// Unknown.
+// marker, or without it, which Trunk drops when it edits the template into
+// a state, whose first line matches a state. The unsubmitted template (its
+// first line, or an unchecked submit box under a line no state matches), a
+// merged pull request (which is closed), and no comment at all give nil;
+// marked text it does not recognize is Unknown, and unmarked text is
+// another comment.
 func trunkEntry(comments []queueComment) *QueueEntry {
 	for _, comment := range comments {
-		if !strings.EqualFold(comment.Author, trunkLogin) || !strings.Contains(comment.Body, trunkMarker) {
+		if !strings.EqualFold(comment.Author, trunkLogin) {
 			continue
 		}
-		_, rest, _ := strings.Cut(comment.Body, trunkMarker)
+		before, rest, marked := strings.Cut(comment.Body, trunkMarker)
+		if !marked {
+			rest = before
+		}
 		line := firstLine(rest)
-		if line == "" || strings.HasPrefix(line, "Merging to") || strings.HasPrefix(line, "😎") {
+		if marked && (line == "" || strings.HasPrefix(line, "Merging to") || strings.HasPrefix(line, "😎")) {
 			return nil
 		}
 		entry := &QueueEntry{Provider: "Trunk", State: QueueUnknown}
@@ -104,6 +109,9 @@ func trunkEntry(comments []queueComment) *QueueEntry {
 				entry.State = known.state
 				break
 			}
+		}
+		if entry.State == QueueUnknown && !marked {
+			continue
 		}
 		if entry.State == QueueUnknown && trunkUnchecked.MatchString(rest) {
 			return nil
