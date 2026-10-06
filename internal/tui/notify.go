@@ -107,9 +107,11 @@ func (m *model) alerts() []prAlert {
 		// A review row alerts when it starts needing the viewer: it arrives, or
 		// it stops waiting on others. A request made again alerts, whatever
 		// the row needed before.
-		// A hidden draft arrives when it leaves draft.
+		// A draft, shown or hidden, needs no one, and arrives when it leaves
+		// draft.
 		again := listed && requestedAgain(old, pr)
-		if pr.ReviewStatus.Waiting() || (listed && !old.ReviewStatus.Waiting() && m.inScope(old) && !again) || !m.inScope(pr) {
+		if pr.ReviewStatus.Waiting() || pr.Draft || !m.inScope(pr) ||
+			(listed && !old.ReviewStatus.Waiting() && !old.Draft && m.inScope(old) && !again) {
 			continue
 		}
 		kind := "review requested"

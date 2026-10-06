@@ -222,8 +222,9 @@ func TestDraftsAreHiddenUntilDShowsThemAndTheChoiceIsSaved(t *testing.T) {
 	if !strings.Contains(view, "drafts shown") || strings.Contains(view, "hidden") {
 		t.Fatalf("view with drafts shown:\n%s", view)
 	}
-	if m.categoryCount(3) != 2 || m.categoryCount(6) != 2 {
-		t.Fatalf("shown drafts are not counted: %d %d", m.categoryCount(3), m.categoryCount(6))
+	// Shown drafts are inert: their authors are still working on them.
+	if m.categoryCount(3) != 1 || m.categoryCount(6) != 1 {
+		t.Fatalf("shown drafts are counted: %d %d", m.categoryCount(3), m.categoryCount(6))
 	}
 	// Esc clears filters, not the saved choice.
 	press(m, tea.Key{Code: tea.KeyEsc})
@@ -262,6 +263,34 @@ func TestAHiddenDraftReviewRequestAlertsWhenItLeavesDraft(t *testing.T) {
 	ready.Draft = false
 	if got := fetch(m, nil, []github.PullRequest{ready}); len(got) != 1 || !strings.Contains(got[0], "acme/b#9 review requested") {
 		t.Fatalf("leaving draft notified %q", got)
+	}
+}
+
+func TestShownDraftsDoNotNeedYouAndOnlyAuthoredOnesAlert(t *testing.T) {
+	m := notifyModel(t, "")
+	m.showDrafts, m.setTitle = true, true
+	request := reviewedPR(9, github.ReviewRequested)
+	request.Draft = true
+	authored := changePR(1, "acme/a")
+	authored.Draft = true
+	fetch(m, []github.PullRequest{authored}, nil)
+	failing := authored
+	failing.Checks, failing.ReviewDecision = "FAILURE", "CHANGES_REQUESTED"
+	// The author's own drafts still alert; a draft's review request does not.
+	if got := fetch(m, []github.PullRequest{failing}, []github.PullRequest{request}); len(got) != 1 ||
+		!strings.Contains(got[0], "acme/a#1 failing CI, changes requested") || strings.Contains(got[0], "acme/b#9") {
+		t.Fatalf("shown drafts notified %q", got)
+	}
+	if got := m.needYouCount(); got != 0 {
+		t.Fatalf("need you with only drafts = %d", got)
+	}
+	ready := request
+	ready.Draft = false
+	if got := fetch(m, []github.PullRequest{failing}, []github.PullRequest{ready}); len(got) != 1 || !strings.Contains(got[0], "acme/b#9 review requested") {
+		t.Fatalf("leaving draft notified %q", got)
+	}
+	if got := m.needYouCount(); got != 1 {
+		t.Fatalf("need you after leaving draft = %d", got)
 	}
 }
 
