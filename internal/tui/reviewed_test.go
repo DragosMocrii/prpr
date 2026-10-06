@@ -43,8 +43,9 @@ func TestReviewedPullRequestStaysListedWhileWaitingOnTheAuthor(t *testing.T) {
 	if got := m.categoryCount(6); got != 1 {
 		t.Fatalf("awaiting review = %d, want the pending request only", got)
 	}
-	if mark := m.changes[paneReview].mark(&waiting); mark.kind != markChanged || mark.cells&cellName == 0 {
-		t.Fatalf("status change mark = %+v, want the name cell changed", mark)
+	// The viewer's own review leaves no mark.
+	if mark := m.changes[paneReview].mark(&waiting); mark.kind != markNone {
+		t.Fatalf("status change mark = %+v, want none", mark)
 	}
 
 	// New commits bring it back, with one notification.

@@ -205,7 +205,7 @@ func TestReviewRowDirections(t *testing.T) {
 		{"your own change request", func(pr *github.PullRequest) { pr.ReviewStatus = github.ReviewRequested },
 			func(pr *github.PullRequest) {
 				pr.ReviewStatus, pr.ReviewDecision = github.ReviewWaitingOnAuthor, "CHANGES_REQUESTED"
-			}, "•"},
+			}, " "},
 		{"failing CI on someone else's", func(*github.PullRequest) {},
 			func(pr *github.PullRequest) { pr.Checks = "FAILURE" }, "•"},
 	} {

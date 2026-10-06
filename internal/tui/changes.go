@@ -101,6 +101,10 @@ func (c *paneChanges) update(list []github.PullRequest) {
 			c.raised[key] = true
 			continue
 		}
+		if reviewedByViewer(old, pr) {
+			delete(c.marks, key)
+			continue
+		}
 		mark := c.marks[key]
 		cells := cellChanges(old, pr)
 		if cells == 0 && old.UpdatedAt.Equal(pr.UpdatedAt) {
@@ -126,6 +130,15 @@ func (c *paneChanges) update(list []github.PullRequest) {
 		}
 	}
 	c.baseline = list
+}
+
+// reviewedByViewer reports whether a review row stopped needing the viewer
+// because the viewer reviewed or commented: it waits on its author now. The
+// viewer saw what marked the row, so the mark goes. Authored pull requests
+// never wait this way.
+func reviewedByViewer(old, pr *github.PullRequest) bool {
+	return !old.ReviewStatus.Waiting() &&
+		(pr.ReviewStatus == github.ReviewWaitingOnAuthor || pr.ReviewStatus == github.ReviewApproved)
 }
 
 // cellChanges compares the columns a pull request shows. Age is left out: it
