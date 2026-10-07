@@ -32,6 +32,10 @@ type Reviewer struct {
 	Teams []string
 	// CodeOwner reports that one of Teams was requested as a code owner.
 	CodeOwner bool
+	// OnBehalfOf names the teams, as org/slug, that the reviewer's latest
+	// reviews answered. GitHub drops a team's request once a member answers
+	// it, so this is how an answered team is known.
+	OnBehalfOf []string
 }
 
 // ReviewerList is who can be asked to review a pull request, and its pending
@@ -42,6 +46,9 @@ type ReviewerList struct {
 	// UnreadableTeams counts the team requests GitHub would not show, such
 	// as when gh lacks the read:org scope.
 	UnreadableTeams int
+	// AnswersUnknown reports that GitHub would not show which teams some
+	// reviews answered.
+	AnswersUnknown bool
 }
 
 // TeamRequest is a pending review request of a team.
@@ -85,7 +92,10 @@ const reviewersQuery = `query($owner: String!, $name: String!, $number: Int!) {
     }
   }
 }
-fragment reviewerReview on PullRequestReview { state submittedAt author { __typename login } commit { oid } }`
+fragment reviewerReview on PullRequestReview {
+  state submittedAt author { __typename login } commit { oid }
+  onBehalfOf(first: 20) { nodes { combinedSlug } }
+}`
 
 // Reviewers lists the users whose review of a pull request can be requested
 // again, in GitHub's order: everyone who reviewed it but its author, then
@@ -118,6 +128,12 @@ type reviewerReview struct {
 	Commit *struct {
 		Oid string `json:"oid"`
 	} `json:"commit"`
+	// OnBehalfOf is null, with an error, when gh cannot read the teams.
+	OnBehalfOf *struct {
+		Nodes []*struct {
+			CombinedSlug string `json:"combinedSlug"`
+		} `json:"nodes"`
+	} `json:"onBehalfOf"`
 }
 
 // reviewRequestNode decodes a review request of a user or a team.
@@ -141,13 +157,14 @@ type graphQLError struct {
 	Path []any `json:"path"`
 }
 
-// withinReviewRequests reports whether every error is about a review
-// request, such as a team gh may not read without the read:org scope. GitHub
-// still answers the rest.
-func withinReviewRequests(errors []json.RawMessage) bool {
+// withinTeams reports whether every error is about a team: a review request,
+// or the teams a review answered, which gh may not read without the read:org
+// scope. GitHub still answers the rest.
+func withinTeams(errors []json.RawMessage) bool {
 	for _, raw := range errors {
 		var e graphQLError
-		if json.Unmarshal(raw, &e) != nil || !slices.Contains(e.Path, any("reviewRequests")) {
+		if json.Unmarshal(raw, &e) != nil ||
+			!slices.Contains(e.Path, any("reviewRequests")) && !slices.Contains(e.Path, any("onBehalfOf")) {
 			return false
 		}
 	}
@@ -180,7 +197,7 @@ func decodeReviewers(data []byte) (ReviewerList, error) {
 	if err := json.Unmarshal(data, &response); err != nil {
 		return ReviewerList{}, fmt.Errorf("decode GitHub reviewers: %w", err)
 	}
-	if len(response.Errors) != 0 && !withinReviewRequests(response.Errors) {
+	if len(response.Errors) != 0 && !withinTeams(response.Errors) {
 		return ReviewerList{}, fmt.Errorf("GitHub reviewer query returned GraphQL errors: %s", graphQLErrors(response.Errors))
 	}
 	if response.Data.Repository == nil || response.Data.Repository.PullRequest == nil {
@@ -237,6 +254,7 @@ func decodeReviewers(data []byte) (ReviewerList, error) {
 	}
 	opinions := make(map[string]string)
 	reviewed := make(map[string]time.Time)
+	answered := make(map[string][]string)
 	for _, review := range slices.Concat(pr.LatestReviews.Nodes, pr.LatestOpinionatedReviews.Nodes) {
 		login, ok := user(review)
 		if !ok {
@@ -245,6 +263,19 @@ func decodeReviewers(data []byte) (ReviewerList, error) {
 		key := strings.ToLower(login)
 		if review.SubmittedAt != nil && review.SubmittedAt.After(reviewed[key]) {
 			reviewed[key] = *review.SubmittedAt
+		}
+		if review.OnBehalfOf == nil && len(response.Errors) > 0 {
+			list.AnswersUnknown = true
+		}
+		if review.OnBehalfOf != nil && review.State != "DISMISSED" {
+			for _, team := range review.OnBehalfOf.Nodes {
+				if team == nil && len(response.Errors) > 0 {
+					list.AnswersUnknown = true
+				}
+				if team != nil && team.CombinedSlug != "" && !slices.Contains(answered[key], team.CombinedSlug) {
+					answered[key] = append(answered[key], team.CombinedSlug)
+				}
+			}
 		}
 	}
 	for _, review := range pr.LatestOpinionatedReviews.Nodes {
@@ -265,7 +296,8 @@ func decodeReviewers(data []byte) (ReviewerList, error) {
 			state = opinion
 		}
 		stale := review.Commit == nil || pr.HeadRefOid == "" || review.Commit.Oid != pr.HeadRefOid
-		reviewers = append(reviewers, Reviewer{Login: login, State: state, Stale: stale, Pending: requested[key], ReviewedAt: reviewed[key]})
+		reviewers = append(reviewers, Reviewer{Login: login, State: state, Stale: stale, Pending: requested[key], ReviewedAt: reviewed[key],
+			OnBehalfOf: answered[key]})
 	}
 	for _, login := range pending {
 		if !skip[strings.ToLower(login)] {

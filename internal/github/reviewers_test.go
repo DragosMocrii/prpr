@@ -277,3 +277,70 @@ func TestDecodeReviewersKeepsTheRestWhenATeamIsNotReadable(t *testing.T) {
 		t.Fatal("an error outside review requests was ignored")
 	}
 }
+
+func TestDecodeReviewersNamesTheTeamsAReviewAnswered(t *testing.T) {
+	data := []byte(`{"data":{"repository":{"pullRequest":{
+		"author":{"login":"me"},
+		"headRefOid":"head",
+		"latestReviews":{"nodes":[
+			{"state":"APPROVED","author":{"__typename":"User","login":"alice"},"commit":{"oid":"head"},
+				"onBehalfOf":{"nodes":[{"combinedSlug":"acme/web"},{"combinedSlug":"acme/api"}]}},
+			{"state":"DISMISSED","author":{"__typename":"User","login":"bob"},"commit":{"oid":"old"},
+				"onBehalfOf":{"nodes":[{"combinedSlug":"acme/infra"}]}}
+		]},
+		"latestOpinionatedReviews":{"nodes":[
+			{"state":"APPROVED","author":{"__typename":"User","login":"alice"},"commit":{"oid":"head"},
+				"onBehalfOf":{"nodes":[{"combinedSlug":"acme/web"}]}}
+		]},
+		"reviewRequests":{"nodes":[]}
+	}}}}`)
+	list, err := decodeReviewers(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Reviewers) != 2 || list.AnswersUnknown {
+		t.Fatalf("list = %+v", list)
+	}
+	if got := list.Reviewers[0].OnBehalfOf; !reflect.DeepEqual(got, []string{"acme/web", "acme/api"}) {
+		t.Errorf("alice answered %q", got)
+	}
+	// A dismissed review answers no team.
+	if got := list.Reviewers[1].OnBehalfOf; len(got) != 0 {
+		t.Errorf("bob answered %q", got)
+	}
+}
+
+func TestDecodeReviewersKeepsTheRestWhenAnsweredTeamsAreNotReadable(t *testing.T) {
+	data := []byte(`{"errors":[{"message":"Your token has not been granted the required scopes","path":["repository","pullRequest","latestReviews","nodes",0,"onBehalfOf"]}],
+	"data":{"repository":{"pullRequest":{
+		"author":{"login":"me"},
+		"headRefOid":"head",
+		"latestReviews":{"nodes":[{"state":"APPROVED","author":{"__typename":"User","login":"alice"},"commit":{"oid":"head"},"onBehalfOf":null}]},
+		"reviewRequests":{"nodes":[]}
+	}}}}`)
+	list, err := decodeReviewers(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Reviewers) != 1 || list.Reviewers[0].State != "APPROVED" || !list.AnswersUnknown {
+		t.Fatalf("list = %+v", list)
+	}
+}
+
+func TestDecodeReviewersNotesANulledAnsweredTeam(t *testing.T) {
+	data := []byte(`{"errors":[{"message":"not visible","path":["repository","pullRequest","latestReviews","nodes",0,"onBehalfOf","nodes",0]}],
+	"data":{"repository":{"pullRequest":{
+		"author":{"login":"me"},
+		"headRefOid":"head",
+		"latestReviews":{"nodes":[{"state":"APPROVED","author":{"__typename":"User","login":"alice"},"commit":{"oid":"head"},
+			"onBehalfOf":{"nodes":[null,{"combinedSlug":"acme/web"}]}}]},
+		"reviewRequests":{"nodes":[]}
+	}}}}`)
+	list, err := decodeReviewers(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !list.AnswersUnknown || !reflect.DeepEqual(list.Reviewers[0].OnBehalfOf, []string{"acme/web"}) {
+		t.Fatalf("list = %+v", list)
+	}
+}

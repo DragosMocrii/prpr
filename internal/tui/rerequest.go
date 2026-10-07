@@ -259,6 +259,8 @@ func (m *model) handleReviewsRequested(msg reviewsRequestedMsg) {
 		m.setNotice(singleLine(msg.err.Error()))
 		return
 	}
+	// The details read the reviewers again.
+	delete(m.reviewerLookups, msg.key)
 	text := fmt.Sprintf("Requested reviews of #%d from %s", msg.key.number, strings.Join(msg.logins, ", "))
 	if len(msg.skipped) > 0 {
 		text += "; not " + strings.Join(msg.skipped, ", ") + ", who reviewed it since"

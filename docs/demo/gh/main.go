@@ -187,8 +187,9 @@ func reviews(changed bool) []pr {
 	return []pr{rotate, avatars, offline, cursors}
 }
 
-// reviewers answers R's reviewer query for any pull request: a comment
-// review of the head commit, and two code-owner teams that share a member.
+// reviewers answers the reviewer query for any pull request: a comment
+// review of the head commit, an approval that answered a third code-owner
+// team, and two code-owner teams that share a member.
 func reviewers() any {
 	team := func(slug string, logins ...string) map[string]any {
 		members := []any{}
@@ -200,10 +201,12 @@ func reviewers() any {
 	}
 	review := map[string]any{"state": "COMMENTED", "submittedAt": ago(day), "author": map[string]any{"__typename": "User", "login": "jordan-k"},
 		"commit": map[string]any{"oid": "head"}}
+	approval := map[string]any{"state": "APPROVED", "submittedAt": ago(2 * time.Hour), "author": map[string]any{"__typename": "User", "login": "mira-s"},
+		"commit": map[string]any{"oid": "head"}, "onBehalfOf": map[string]any{"nodes": []any{map[string]any{"combinedSlug": "acme/mobile"}}}}
 	return map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{
 		"author": map[string]any{"login": login}, "headRefOid": "head",
-		"latestReviews":            map[string]any{"nodes": []any{review}},
-		"latestOpinionatedReviews": map[string]any{"nodes": []any{}},
+		"latestReviews":            map[string]any{"nodes": []any{review, approval}},
+		"latestOpinionatedReviews": map[string]any{"nodes": []any{approval}},
 		"reviewRequests": map[string]any{"nodes": []any{
 			team("platform", "sam-lee", "priya-n", "dana-r"),
 			team("api-owners", "jordan-k", "lee-t", "priya-n", "omar-b", "kim-s"),

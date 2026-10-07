@@ -61,6 +61,10 @@ type model struct {
 	rerequest      *rerequestEditor
 	listReviewers  func(context.Context, string, int) (github.ReviewerList, error)
 	requestReviews func(context.Context, string, int, []string, []string) error
+	// reviewerLookups are the details' reviewers of authored pull requests,
+	// read for reviewerAccount, the accountGeneration they belong to.
+	reviewerLookups map[prKey]*reviewerLookup
+	reviewerAccount uint64
 	// snoozeGeneration counts snooze timers; ticks from an older one are
 	// dropped.
 	snoozeGeneration uint64
@@ -468,7 +472,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.closeStaleDetails()
 	m.closeStaleHelp()
 	postScheduleCmd := m.reconcileSchedule()
-	return model, tea.Batch(scheduleCmd, cmd, postScheduleCmd, m.trackRest(msg), m.schedulePlead())
+	return model, tea.Batch(scheduleCmd, cmd, postScheduleCmd, m.trackRest(msg), m.schedulePlead(), m.lookupDetailReviewers())
 }
 
 func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -584,6 +588,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleBrowserOpened(msg)
 	case reviewersListedMsg:
 		return m, m.handleReviewersListed(msg)
+	case detailReviewersMsg:
+		m.handleDetailReviewers(msg)
 	case reviewersRecheckedMsg:
 		return m, m.handleReviewersRechecked(msg)
 	case reviewsRequestedMsg:
@@ -1465,6 +1471,8 @@ func singleLine(value string) string {
 	}, value)
 }
 
+// wrapWords wraps value at spaces to width cells; styled words keep their
+// styles, and a word wider than width is cut.
 func wrapWords(value string, width int) []string {
 	if width < 1 {
 		return nil
@@ -1472,17 +1480,22 @@ func wrapWords(value string, width int) []string {
 	var lines []string
 	line := ""
 	for _, word := range strings.Fields(value) {
-		for len(word) > width {
+		for ansi.StringWidth(word) > width {
 			if line != "" {
 				lines = append(lines, line)
 				line = ""
 			}
-			lines = append(lines, word[:width])
-			word = word[width:]
+			head := ansi.Cut(word, 0, width)
+			if ansi.StringWidth(head) == 0 {
+				// A character wider than width stays whole.
+				break
+			}
+			lines = append(lines, head)
+			word = ansi.Cut(word, ansi.StringWidth(head), ansi.StringWidth(word))
 		}
 		if line == "" {
 			line = word
-		} else if len(line)+1+len(word) <= width {
+		} else if ansi.StringWidth(line)+1+ansi.StringWidth(word) <= width {
 			line += " " + word
 		} else {
 			lines = append(lines, line)

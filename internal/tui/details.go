@@ -12,7 +12,7 @@ import (
 )
 
 // detailsLabelWidth fits the longest label, "Comments", and a space.
-const detailsLabelWidth = 9
+const detailsLabelWidth = 10
 
 const loadingDetails = "Loading details…"
 
@@ -186,6 +186,9 @@ func (m *model) detailRows(pr *github.PullRequest, gone bool) []detailRowText {
 	}
 	add("CI", pending(checksDetail(pr.Checks)))
 	add("Review", pending(reviewDetail(pr.ReviewDecision, pr.Approvals)))
+	if _, authored := m.detailsAuthoredPR(); authored && !review {
+		rows = append(rows, m.reviewerDetailRows(pr)...)
+	}
 	if m.bots {
 		if preview || len(pr.Bots) == 0 {
 			add("Bots", pending("–"))
