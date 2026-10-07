@@ -99,7 +99,7 @@ func (m *model) categoryMatches(number int, id paneID, pr *github.PullRequest, p
 func (m *model) categoryCount(number int) int {
 	count := 0
 	for _, id := range paneIDs {
-		source := m.source(id)
+		source := m.paneSource(id)
 		for i := range source {
 			if m.inScope(&source[i]) && m.categoryMatches(number, id, &source[i], m.snapshot.Preview) {
 				count++

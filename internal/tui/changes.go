@@ -286,7 +286,7 @@ func (m *model) changeLines(id paneID, pr *github.PullRequest) []changeLine {
 	was := mark.was
 	// Someone else's pull request needs the viewer only through its review
 	// status; its failures and conflicts are for its author.
-	review := id == paneReview || (id == paneSnoozed && m.snoozeList(pr) == paneReview)
+	review := id == paneReview || (id == paneSnoozed && m.snoozeList(pr) == listReview)
 	for _, cell = range changeCells {
 		if mark.cells&cell == 0 {
 			continue
@@ -615,7 +615,7 @@ func (m *model) wasRead(id paneID, pr *github.PullRequest, gone bool) bool {
 
 // rechanged starts the rest over when a fetch marked the row again.
 func (m *model) rechanged() {
-	for _, id := range trackedIDs {
+	for _, id := range allLists {
 		if m.changes[id].raised[m.rest.key] {
 			m.rest = restState{}
 			return

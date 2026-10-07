@@ -91,7 +91,7 @@ var needYouCategories = []int{1, 2, 3, 6}
 func (m *model) needYouCount() int {
 	count := 0
 	for _, id := range paneIDs {
-		source := m.source(id)
+		source := m.paneSource(id)
 		for i := range source {
 			pr := &source[i]
 			if !m.inScope(pr) {

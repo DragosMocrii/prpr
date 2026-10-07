@@ -43,7 +43,7 @@ func checksFailing(state string) bool {
 func (m *model) alerts() []prAlert {
 	var found []prAlert
 	previous := make(map[prKey]*github.PullRequest)
-	baseline := m.tracker(paneMine).baseline
+	baseline := m.changes[listAuthored].baseline
 	for i := range baseline {
 		previous[keyOf(&baseline[i])] = &baseline[i]
 	}
@@ -94,7 +94,7 @@ func (m *model) alerts() []prAlert {
 	m.readiness = readiness
 
 	reviews := make(map[prKey]*github.PullRequest)
-	reviewBaseline := m.tracker(paneReview).baseline
+	reviewBaseline := m.changes[listReview].baseline
 	for i := range reviewBaseline {
 		reviews[keyOf(&reviewBaseline[i])] = &reviewBaseline[i]
 	}

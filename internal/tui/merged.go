@@ -10,18 +10,18 @@ import (
 	"github.com/DragosMocrii/prpr/internal/preferences"
 )
 
-// movedOn tells pane id's tracker which pull requests that left its list
+// movedOn tells list's tracker which pull requests that left its list
 // are not gone: an authored pull request that merged moved to the Merged
 // pane, and one falling out of the Merged pane's last N is not news.
-func (m *model) movedOn(id paneID) func(prKey) bool {
-	switch id {
-	case paneMine:
+func (m *model) movedOn(list listID) func(prKey) bool {
+	switch list {
+	case listAuthored:
 		merged := make(map[prKey]bool, len(m.snapshot.Merged))
 		for i := range m.snapshot.Merged {
 			merged[keyOf(&m.snapshot.Merged[i])] = true
 		}
 		return func(key prKey) bool { return merged[key] }
-	case paneMerged:
+	case listMerged:
 		return func(prKey) bool { return true }
 	}
 	return nil

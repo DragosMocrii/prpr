@@ -85,7 +85,7 @@ func authoredPR(mutate func(*github.PullRequest)) *github.PullRequest {
 func TestEachAuthoredSignalWakesAlone(t *testing.T) {
 	m := testModel(testPreferences(t), 120, 30)
 	base := authoredPR(nil)
-	held, known := m.snoozeSignals(paneMine, base)
+	held, known := m.snoozeSignals(listAuthored, base)
 	snooze := preferences.Snooze{List: preferences.SnoozeMine, Seen: held}
 	for _, c := range []struct {
 		name   string
@@ -101,7 +101,7 @@ func TestEachAuthoredSignalWakesAlone(t *testing.T) {
 		{"queue canceled", func(pr *github.PullRequest) { pr.Queue = &github.QueueEntry{State: github.QueueRemovedCanceled} }, "queue canceled"},
 	} {
 		pr := authoredPR(c.mutate)
-		h, k := m.snoozeSignals(paneMine, pr)
+		h, k := m.snoozeSignals(listAuthored, pr)
 		if reason, _, _ := snoozeWake(snooze, h, k, pr); reason != c.reason {
 			t.Errorf("%s: reason = %q, want %q", c.name, reason, c.reason)
 		}
@@ -114,13 +114,13 @@ func TestEachAuthoredSignalWakesAlone(t *testing.T) {
 func TestNoiseDoesNotWake(t *testing.T) {
 	m := testModel(testPreferences(t), 120, 30)
 	base := authoredPR(nil)
-	held, _ := m.snoozeSignals(paneMine, base)
+	held, _ := m.snoozeSignals(listAuthored, base)
 	snooze := preferences.Snooze{List: preferences.SnoozeMine, Seen: held}
 	pr := authoredPR(func(pr *github.PullRequest) {
 		pr.Comments, pr.UpdatedAt, pr.Additions = 9, snoozeNow, 40
 		pr.Bots = []github.BotReview{{Name: "bot", State: github.BotConcerns}}
 	})
-	h, k := m.snoozeSignals(paneMine, pr)
+	h, k := m.snoozeSignals(listAuthored, pr)
 	if reason, _, _ := snoozeWake(snooze, h, k, pr); reason != "" {
 		t.Fatalf("comments, bots, and updatedAt woke it: %q", reason)
 	}
@@ -129,22 +129,22 @@ func TestNoiseDoesNotWake(t *testing.T) {
 func TestUnknownSignalsKeepWhatWasSeen(t *testing.T) {
 	m := testModel(testPreferences(t), 120, 30)
 	failing := authoredPR(func(pr *github.PullRequest) { pr.Checks, pr.ReviewDecision = "FAILURE", "APPROVED" })
-	held, _ := m.snoozeSignals(paneMine, failing)
+	held, _ := m.snoozeSignals(listAuthored, failing)
 	snooze := preferences.Snooze{List: preferences.SnoozeMine, Seen: held}
 	unknown := authoredPR(func(pr *github.PullRequest) {
 		pr.Checks, pr.ReviewDecision, pr.Mergeable, pr.MergeState = "", "", "UNKNOWN", "UNKNOWN"
 	})
-	h, k := m.snoozeSignals(paneMine, unknown)
+	h, k := m.snoozeSignals(listAuthored, unknown)
 	reason, seen, _ := snoozeWake(snooze, h, k, unknown)
 	if reason != "" || !slices.Contains(seen, signalFailing) || !slices.Contains(seen, signalApproved) {
 		t.Fatalf("unknown data: reason %q, seen %v; want no wake and failing, approved kept", reason, seen)
 	}
 	// Failing again after it passed wakes, as the failing-CI alert does.
 	passing := authoredPR(func(pr *github.PullRequest) { pr.Checks = "SUCCESS" })
-	h, k = m.snoozeSignals(paneMine, passing)
+	h, k = m.snoozeSignals(listAuthored, passing)
 	_, seen, _ = snoozeWake(snooze, h, k, passing)
 	snooze.Seen = seen
-	h, k = m.snoozeSignals(paneMine, failing)
+	h, k = m.snoozeSignals(listAuthored, failing)
 	if reason, _, _ := snoozeWake(snooze, h, k, failing); reason != "CI failing" {
 		t.Fatalf("failing again: reason %q", reason)
 	}
@@ -159,22 +159,22 @@ func TestReviewSignals(t *testing.T) {
 	m := testModel(testPreferences(t), 120, 30)
 	first := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	pending := reviewPR(github.ReviewRequested, first)
-	held, _ := m.snoozeSignals(paneReview, pending)
-	snooze := preferences.Snooze{List: preferences.SnoozeReview, Seen: held, Requested: requestedAt(paneReview, pending)}
+	held, _ := m.snoozeSignals(listReview, pending)
+	snooze := preferences.Snooze{List: preferences.SnoozeReview, Seen: held, Requested: requestedAt(listReview, pending)}
 	again := reviewPR(github.ReviewRequested, first.Add(time.Hour))
-	h, k := m.snoozeSignals(paneReview, again)
+	h, k := m.snoozeSignals(listReview, again)
 	if reason, _, requested := snoozeWake(snooze, h, k, again); reason != "review requested again" || !requested.Equal(first.Add(time.Hour)) {
 		t.Errorf("re-request: %q, %v", reason, requested)
 	}
 	for _, status := range []github.ReviewStatus{github.ReviewNewCommits, github.ReviewAuthorReplied, github.ReviewDismissed} {
 		pr := reviewPR(status, first.Add(time.Hour))
-		h, k := m.snoozeSignals(paneReview, pr)
+		h, k := m.snoozeSignals(listReview, pr)
 		if reason, _, _ := snoozeWake(snooze, h, k, pr); reason != "needs your review" {
 			t.Errorf("%v: reason %q", status, reason)
 		}
 	}
 	activity := reviewPR(github.ReviewNewActivity, first.Add(time.Hour))
-	h, k = m.snoozeSignals(paneReview, activity)
+	h, k = m.snoozeSignals(listReview, activity)
 	if reason, _, _ := snoozeWake(snooze, h, k, activity); reason != "" {
 		t.Errorf("new activity woke it: %q", reason)
 	}
@@ -184,22 +184,22 @@ func TestReviewingASnoozedRowDoesNotWakeIt(t *testing.T) {
 	m := testModel(testPreferences(t), 120, 30)
 	first := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	pending := reviewPR(github.ReviewRequested, first)
-	held, _ := m.snoozeSignals(paneReview, pending)
-	snooze := preferences.Snooze{List: preferences.SnoozeReview, Seen: held, Requested: requestedAt(paneReview, pending)}
+	held, _ := m.snoozeSignals(listReview, pending)
+	snooze := preferences.Snooze{List: preferences.SnoozeReview, Seen: held, Requested: requestedAt(listReview, pending)}
 	for _, status := range []github.ReviewStatus{github.ReviewWaitingOnAuthor, github.ReviewApproved} {
 		reviewed := reviewPR(status, first.Add(2*time.Hour))
-		h, k := m.snoozeSignals(paneReview, reviewed)
+		h, k := m.snoozeSignals(listReview, reviewed)
 		if reason, _, _ := snoozeWake(snooze, h, k, reviewed); reason != "" {
 			t.Errorf("reviewing (%v) woke it: %q", status, reason)
 		}
 	}
 	// Requested again after the review: pending again wakes.
 	waiting := reviewPR(github.ReviewWaitingOnAuthor, first.Add(2*time.Hour))
-	h, k := m.snoozeSignals(paneReview, waiting)
+	h, k := m.snoozeSignals(listReview, waiting)
 	_, seen, requested := snoozeWake(snooze, h, k, waiting)
 	snooze.Seen, snooze.Requested = seen, requested
 	again := reviewPR(github.ReviewRequested, first.Add(3*time.Hour))
-	h, k = m.snoozeSignals(paneReview, again)
+	h, k = m.snoozeSignals(listReview, again)
 	if reason, _, _ := snoozeWake(snooze, h, k, again); reason != "review requested again" {
 		t.Errorf("requested after a review: %q", reason)
 	}

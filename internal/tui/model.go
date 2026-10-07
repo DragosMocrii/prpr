@@ -48,7 +48,7 @@ type model struct {
 	snoozes map[prKey]preferences.Snooze
 	// snoozeClosed holds snoozed pull requests that closed: their list, for
 	// gone rows.
-	snoozeClosed map[prKey]paneID
+	snoozeClosed map[prKey]listID
 	// woke holds woken pull requests: the reason, until their row is left
 	// or marks are cleared.
 	woke map[prKey]string
@@ -396,7 +396,7 @@ const unknownRecheckDelay = 15 * time.Second
 // countUnknownRechecks records whether a full fetch left a merge state in
 // scope unknown.
 func (m *model) countUnknownRechecks() {
-	for _, id := range listIDs {
+	for _, id := range openLists {
 		for i := range m.source(id) {
 			if pr := &m.source(id)[i]; m.inScope(pr) && unknownMergeState(pr) {
 				m.unknownRechecks++
@@ -729,7 +729,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.setFocus(m.nextPane(step))
 	case key.Matches(msg, k.ClearMarks):
 		m.keepingSelection(func() {
-			for _, id := range trackedIDs {
+			for _, id := range allLists {
 				m.changes[id].clear()
 			}
 			m.woke = nil
@@ -947,7 +947,7 @@ func (m *model) rebuildVisiblePRs() {
 			m.rebuildSnoozed()
 			continue
 		}
-		source := m.source(id)
+		source := m.paneSource(id)
 		for index, pr := range source {
 			if m.shown(id, &pr, m.snapshot.Preview) {
 				pane.visible = append(pane.visible, index)
@@ -972,7 +972,7 @@ func (m *model) rebuildVisiblePRs() {
 func (m *model) rebuildSnoozed() {
 	pane := &m.panes[paneSnoozed]
 	offset := 0
-	for _, list := range listIDs {
+	for _, list := range openLists {
 		source := m.source(list)
 		for index := range source {
 			if m.shown(paneSnoozed, &source[index], m.snapshot.Preview) {
@@ -1052,7 +1052,7 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 			if !quiet {
 				alerts = append(alerts, m.reviewSnoozes(!reset)...)
 			}
-			for _, id := range trackedIDs {
+			for _, id := range allLists {
 				if reset {
 					m.changes[id].reset(m.source(id))
 				} else {
@@ -1218,7 +1218,7 @@ func (m *model) rebuildGone(id paneID) {
 	pane.gone = pane.gone[:0]
 	if id == paneSnoozed {
 		offset := 0
-		for _, list := range listIDs {
+		for _, list := range openLists {
 			gone := m.changes[list].gone
 			for index := range gone {
 				if m.shown(paneSnoozed, &gone[index], false) {

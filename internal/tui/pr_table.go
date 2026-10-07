@@ -418,7 +418,7 @@ func (m *model) snoozedRow(pr *github.PullRequest, gone bool, layout tableLayout
 		switch {
 		case queued(pr):
 			from = "queue"
-		case m.snoozeList(pr) == paneReview:
+		case m.snoozeList(pr) == listReview:
 			from = reviewStatusText(pr.ReviewStatus)
 			if from == "" {
 				from = "review"

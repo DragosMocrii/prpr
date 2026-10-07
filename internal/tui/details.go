@@ -138,7 +138,7 @@ type detailRowText struct {
 func (m *model) detailRows(pr *github.PullRequest, gone bool) []detailRowText {
 	// A preview row knows its conflicts, title, size, and dates only.
 	preview := m.snapshot.Preview && !gone
-	review := m.focus == paneReview || (m.focus == paneSnoozed && m.snoozeList(pr) == paneReview)
+	review := m.focus == paneReview || (m.focus == paneSnoozed && m.snoozeList(pr) == listReview)
 	now := m.now()
 	pending := func(text string) string {
 		if preview {
@@ -409,23 +409,23 @@ func (m *model) rowStatus() []string {
 		return []string{mergedDetail(pr, m.now())}
 	}
 	var facts []string
-	list := m.focus
-	if list == paneSnoozed {
+	review := m.focus == paneReview
+	if m.focus == paneSnoozed {
 		if s, ok := m.snoozes[keyOf(pr)]; ok {
 			facts = append(facts, "Snoozed until "+wakeText(s, m.now()))
 		}
-		list = m.snoozeList(pr)
+		review = m.snoozeList(pr) == listReview
 	}
-	if pr.Queue != nil && list != paneReview {
+	if pr.Queue != nil && !review {
 		facts = append(facts, "Queue: "+queueDetail(pr.Queue))
 	}
-	review := reviewStatus(pr.ReviewDecision, pr.Approvals)
-	if list == paneReview {
+	status := reviewStatus(pr.ReviewDecision, pr.Approvals)
+	if review {
 		facts = append(facts, m.requestStatus(pr))
 		// A review is required of every pending request; others' verdicts
 		// are the news.
 		if pr.ReviewDecision == "REVIEW_REQUIRED" {
-			review = ""
+			status = ""
 		}
 	} else {
 		facts = append(facts, m.mergeStatus(pr))
@@ -433,13 +433,13 @@ func (m *model) rowStatus() []string {
 		if pr.MergeState == "BLOCKED" && !pr.Draft {
 			switch pr.ReviewDecision {
 			case "REVIEW_REQUIRED", "CHANGES_REQUESTED":
-				review = ""
+				status = ""
 			}
 		}
 	}
 	facts = append(facts, checksStatus(pr.Checks))
-	if review != "" {
-		facts = append(facts, review)
+	if status != "" {
+		facts = append(facts, status)
 	}
 	if m.bots {
 		for _, bot := range pr.Bots {

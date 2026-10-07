@@ -44,7 +44,7 @@ func TestReviewedPullRequestStaysListedWhileWaitingOnTheAuthor(t *testing.T) {
 		t.Fatalf("awaiting review = %d, want the pending request only", got)
 	}
 	// The viewer's own review leaves no mark.
-	if mark := m.changes[paneReview].mark(&waiting); mark.kind != markNone {
+	if mark := m.changes[listReview].mark(&waiting); mark.kind != markNone {
 		t.Fatalf("status change mark = %+v, want none", mark)
 	}
 

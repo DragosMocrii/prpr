@@ -269,7 +269,7 @@ func TestReviewingARowClearsItsMark(t *testing.T) {
 	newCommits := reviewedPR(8, github.ReviewNewCommits)
 	newCommits.UpdatedAt = changeTime.Add(time.Hour)
 	fetch(m, nil, []github.PullRequest{request, newCommits})
-	reviews := m.changes[paneReview]
+	reviews := m.changes[listReview]
 	if reviews.mark(&request).kind != markNew || reviews.mark(&newCommits).kind != markChanged {
 		t.Fatalf("marks %+v %+v, want the request new and the new commits changed", reviews.mark(&request), reviews.mark(&newCommits))
 	}
@@ -279,7 +279,7 @@ func TestReviewingARowClearsItsMark(t *testing.T) {
 	commented.ReviewStatus, commented.UpdatedAt = github.ReviewWaitingOnAuthor, changeTime.Add(2*time.Hour)
 	commented.Comments++
 	fetch(m, nil, []github.PullRequest{approved, commented})
-	reviews = m.changes[paneReview]
+	reviews = m.changes[listReview]
 	if reviews.mark(&approved).kind != markNone || reviews.mark(&commented).kind != markNone || m.hasMarks() {
 		t.Fatalf("marks %+v %+v remain after the viewer reviewed", reviews.mark(&approved), reviews.mark(&commented))
 	}
@@ -287,7 +287,7 @@ func TestReviewingARowClearsItsMark(t *testing.T) {
 	draft := approved
 	draft.ReviewStatus, draft.UpdatedAt = github.ReviewBackInDraft, changeTime.Add(3*time.Hour)
 	fetch(m, nil, []github.PullRequest{draft, commented})
-	if m.changes[paneReview].mark(&draft).kind != markChanged {
-		t.Fatalf("back in draft mark %+v", m.changes[paneReview].mark(&draft))
+	if m.changes[listReview].mark(&draft).kind != markChanged {
+		t.Fatalf("back in draft mark %+v", m.changes[listReview].mark(&draft))
 	}
 }

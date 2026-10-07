@@ -31,13 +31,13 @@ func (m *model) shared() sharedRepositories {
 		mixedRepositories = mixedRepositories || !strings.EqualFold(pr.Repository, shared.repository)
 		mixedOwners = mixedOwners || !strings.EqualFold(owner, shared.owner)
 	}
-	for _, id := range trackedIDs {
-		list := m.source(id)
-		for i := range list {
-			note(&list[i])
+	for _, list := range allLists {
+		source := m.source(list)
+		for i := range source {
+			note(&source[i])
 		}
-		for i := range m.changes[id].gone {
-			note(&m.changes[id].gone[i])
+		for i := range m.changes[list].gone {
+			note(&m.changes[list].gone[i])
 		}
 	}
 	if mixedRepositories {

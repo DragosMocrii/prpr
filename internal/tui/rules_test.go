@@ -250,7 +250,7 @@ func TestRulesEditorNamesAnotherOwnerAndRemovesItsRules(t *testing.T) {
 func TestRuleFieldsTurningKnownMarkNothing(t *testing.T) {
 	m := changesModel(t)
 	fetch(m, []github.PullRequest{cleanPR(1, 0)}, nil)
-	m.changes[paneMine].clear()
+	m.changes[listAuthored].clear()
 	m.applyRules(readiness.Rules{Default: readiness.Rule{MergeButton: true, CodeOwners: true, ResolvedThreads: true, RequiredChecks: true}})
 	known := cleanPR(1, 0)
 	known.CodeOwnersKnown, known.ThreadsKnown, known.RequiredChecks = true, true, "SUCCESS"

@@ -162,9 +162,9 @@ var wakeReasons = []struct{ signal, text string }{
 }
 
 // snoozeSignals evaluates the wake signals of a pull request of list
-// (paneMine or paneReview): known lists every signal whose data is known,
+// (listAuthored or listReview): known lists every signal whose data is known,
 // held the ones that are true.
-func (m *model) snoozeSignals(list paneID, pr *github.PullRequest) (held, known []string) {
+func (m *model) snoozeSignals(list listID, pr *github.PullRequest) (held, known []string) {
 	add := func(signal string, isKnown, isHeld bool) {
 		if isKnown {
 			known = append(known, signal)
@@ -173,7 +173,7 @@ func (m *model) snoozeSignals(list paneID, pr *github.PullRequest) (held, known 
 			}
 		}
 	}
-	if list == paneReview {
+	if list == listReview {
 		add(signalNeedsYou, true, needsYou(pr.ReviewStatus))
 		add(signalRequested, true, pr.ReviewStatus == github.ReviewRequested)
 		slices.Sort(held)
@@ -197,8 +197,8 @@ func (m *model) snoozeSignals(list paneID, pr *github.PullRequest) (held, known 
 
 // requestedAt is the request time a review row records while a direct
 // request is pending; zero otherwise.
-func requestedAt(list paneID, pr *github.PullRequest) time.Time {
-	if list == paneReview && pr.ReviewStatus == github.ReviewRequested {
+func requestedAt(list listID, pr *github.PullRequest) time.Time {
+	if list == listReview && pr.ReviewStatus == github.ReviewRequested {
 		return pr.WaitingSince
 	}
 	return time.Time{}
@@ -218,9 +218,9 @@ func snoozeWake(s preferences.Snooze, held, known []string, pr *github.PullReque
 	slices.Sort(seen)
 	seen = slices.Compact(seen)
 	requested := s.Requested
-	list := paneMine
+	list := listAuthored
 	if s.List == preferences.SnoozeReview {
-		list = paneReview
+		list = listReview
 	}
 	if at := requestedAt(list, pr); !at.IsZero() {
 		requested = at
@@ -248,20 +248,20 @@ func (m *model) snoozed(pr *github.PullRequest) bool {
 	return ok
 }
 
-// snoozeList is the list a snoozed pull request was snoozed from: paneMine
-// or paneReview.
-func (m *model) snoozeList(pr *github.PullRequest) paneID {
+// snoozeList is the list a snoozed pull request was snoozed from: listAuthored
+// or listReview.
+func (m *model) snoozeList(pr *github.PullRequest) listID {
 	key := keyOf(pr)
 	if s, ok := m.snoozes[key]; ok {
 		if s.List == preferences.SnoozeReview {
-			return paneReview
+			return listReview
 		}
-		return paneMine
+		return listAuthored
 	}
-	if m.snoozeClosed[key] == paneReview {
-		return paneReview
+	if m.snoozeClosed[key] == listReview {
+		return listReview
 	}
-	return paneMine
+	return listAuthored
 }
 
 // snoozeAt is the snooze of the pull request at an index of the Snoozed
@@ -277,8 +277,8 @@ func (m *model) snoozeAt(index int) preferences.Snooze {
 }
 
 // listName is a list's name in a saved snooze.
-func listName(list paneID) string {
-	if list == paneReview {
+func listName(list listID) string {
+	if list == listReview {
 		return preferences.SnoozeReview
 	}
 	return preferences.SnoozeMine
@@ -298,7 +298,7 @@ const (
 type snoozeEditor struct {
 	form          *huh.Form
 	key           prKey
-	list          paneID
+	list          listID
 	title         string
 	choice, typed string
 }
@@ -316,9 +316,9 @@ func (m *model) openSnooze() tea.Cmd {
 		m.setNotice("Gone pull requests cannot be snoozed")
 		return nil
 	}
-	list := paneMine
+	list := listAuthored
 	if m.focus == paneReview {
-		list = paneReview
+		list = listReview
 	}
 	e := &snoozeEditor{key: keyOf(pr), list: list, choice: snoozeActivity,
 		title: "Snooze " + alertName(pr)}
@@ -401,7 +401,7 @@ func (m *model) snoozeLines() []string {
 }
 
 // snooze hides a pull request of list until a time, or until activity.
-func (m *model) snooze(key prKey, list paneID, until time.Time, activity bool) tea.Cmd {
+func (m *model) snooze(key prKey, list listID, until time.Time, activity bool) tea.Cmd {
 	var pr *github.PullRequest
 	source := m.source(list)
 	for i := range source {
@@ -417,7 +417,7 @@ func (m *model) snooze(key prKey, list paneID, until time.Time, activity bool) t
 	held, known := m.snoozeSignals(list, pr)
 	// An unknown merge state keeps the readiness last known, so a fetch that
 	// reads the state again does not wake it as newly ready.
-	if list == paneMine && !slices.Contains(known, signalReady) && m.readiness[key] {
+	if list == listAuthored && !slices.Contains(known, signalReady) && m.readiness[key] {
 		held = append(held, signalReady)
 		slices.Sort(held)
 	}
@@ -551,13 +551,13 @@ const snoozeCheckInterval = time.Minute
 // dropped.
 type snoozeTickMsg struct{ generation uint64 }
 
-// snoozeListID is the list a saved snooze belongs to: paneMine or
+// snoozeListID is the list a saved snooze belongs to: listAuthored or
 // paneReview.
-func snoozeListID(s preferences.Snooze) paneID {
+func snoozeListID(s preferences.Snooze) listID {
 	if s.List == preferences.SnoozeReview {
-		return paneReview
+		return listReview
 	}
-	return paneMine
+	return listAuthored
 }
 
 // markWoke records why a pull request woke, for its name tag.
@@ -599,7 +599,7 @@ func (m *model) loadSnoozes(login string) {
 // snoozedRow is a snoozed pull request listed in its own list.
 type snoozedRow struct {
 	key  prKey
-	list paneID
+	list listID
 	pr   *github.PullRequest
 }
 
@@ -608,7 +608,7 @@ type snoozedRow struct {
 // follow the same order as other alerts.
 func (m *model) listedSnoozes() []snoozedRow {
 	var rows []snoozedRow
-	for _, id := range listIDs {
+	for _, id := range openLists {
 		source := m.source(id)
 		for i := range source {
 			key := keyOf(&source[i])
@@ -685,7 +685,7 @@ func (m *model) reviewSnoozes(alert bool) []prAlert {
 		}
 		delete(m.snoozes, key)
 		if m.snoozeClosed == nil {
-			m.snoozeClosed = make(map[prKey]paneID)
+			m.snoozeClosed = make(map[prKey]listID)
 		}
 		m.snoozeClosed[key] = snoozeListID(s)
 		changed = true
@@ -693,7 +693,7 @@ func (m *model) reviewSnoozes(alert bool) []prAlert {
 	expired, woke := m.expire(alert)
 	alerts = append(alerts, expired...)
 	// A pull request listed again is no longer gone.
-	for _, id := range listIDs {
+	for _, id := range openLists {
 		source := m.source(id)
 		for i := range source {
 			delete(m.snoozeClosed, keyOf(&source[i]))

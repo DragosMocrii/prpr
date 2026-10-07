@@ -232,7 +232,7 @@ func TestSnoozeKeepsReadyWhileMergeStateIsUnknown(t *testing.T) {
 	unknown[1].MergeState = ""
 	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: unknown, ReviewRequests: review}})
 	m.readiness[key] = true
-	m.snooze(key, paneMine, snoozeNow.Add(24*time.Hour), false)
+	m.snooze(key, listAuthored, snoozeNow.Add(24*time.Hour), false)
 	if !slices.Contains(m.snoozes[key].Seen, signalReady) {
 		t.Fatalf("Seen = %v, want ready kept", m.snoozes[key].Seen)
 	}

@@ -30,7 +30,7 @@ func (m *model) ready(pr *github.PullRequest) bool {
 // query selects, so review rows are ready when GitHub would merge them. A
 // Snoozed row is ready as in the list it was snoozed from.
 func (m *model) readyIn(id paneID, pr *github.PullRequest) bool {
-	if id == paneReview || (id == paneSnoozed && m.snoozeList(pr) == paneReview) {
+	if id == paneReview || (id == paneSnoozed && m.snoozeList(pr) == listReview) {
 		return mergeReady(pr.Draft, pr.Mergeable, pr.MergeState)
 	}
 	return m.ready(pr)

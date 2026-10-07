@@ -43,8 +43,8 @@ func TestAMergingPullRequestMovesToMerged(t *testing.T) {
 	if got := shownNumbers(m, paneMerged); !slices.Equal(got, []int{2}) {
 		t.Fatalf("Merged = %v", got)
 	}
-	if m.changes[paneMerged].mark(&merged).kind != markNew {
-		t.Fatalf("mark %+v, want new", m.changes[paneMerged].mark(&merged))
+	if m.changes[listMerged].mark(&merged).kind != markNew {
+		t.Fatalf("mark %+v, want new", m.changes[listMerged].mark(&merged))
 	}
 	if pr, ok := m.selectedPR(); m.focus != paneMerged || !ok || pr.Number != 2 {
 		t.Fatalf("focus %d, selection %+v; want it to follow #2", m.focus, pr)

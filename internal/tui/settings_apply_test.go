@@ -31,14 +31,14 @@ func TestBotsChangeFetchesAndTheResultMarksNothing(t *testing.T) {
 	changed := botPR(1, github.BotReview{Name: "Copilot"})
 	changed.Title = "renamed"
 	updateSnapshot(m, "alice", changed)
-	if len(m.changes[paneMine].marks) != 0 || m.settingsBaseline {
-		t.Fatalf("the baseline fetch marked %v (baseline still %v)", m.changes[paneMine].marks, m.settingsBaseline)
+	if len(m.changes[listAuthored].marks) != 0 || m.settingsBaseline {
+		t.Fatalf("the baseline fetch marked %v (baseline still %v)", m.changes[listAuthored].marks, m.settingsBaseline)
 	}
 	// The next fetch tracks changes again.
 	changed.Title = "renamed again"
 	updateSnapshot(m, "alice", changed)
-	if len(m.changes[paneMine].marks) != 1 {
-		t.Fatalf("the next fetch marked %d rows, want 1", len(m.changes[paneMine].marks))
+	if len(m.changes[listAuthored].marks) != 1 {
+		t.Fatalf("the next fetch marked %d rows, want 1", len(m.changes[listAuthored].marks))
 	}
 }
 
@@ -58,8 +58,8 @@ func TestBotsChangeDuringAFetchIsSilent(t *testing.T) {
 		t.Fatal("the old fetch's result consumed the baseline")
 	}
 	updateSnapshot(m, "alice", changed)
-	if len(m.changes[paneMine].marks) != 0 {
-		t.Fatalf("the baseline fetch marked %v", m.changes[paneMine].marks)
+	if len(m.changes[listAuthored].marks) != 0 {
+		t.Fatalf("the baseline fetch marked %v", m.changes[listAuthored].marks)
 	}
 }
 
@@ -175,7 +175,7 @@ func TestBotsChangeAfterAFailedFetchStartsABaselineFetch(t *testing.T) {
 	changed := botPR(1, github.BotReview{Name: "Copilot"})
 	changed.Title = "renamed"
 	updateSnapshot(m, "alice", changed)
-	if len(m.changes[paneMine].marks) != 0 {
-		t.Fatalf("the baseline fetch marked %v", m.changes[paneMine].marks)
+	if len(m.changes[listAuthored].marks) != 0 {
+		t.Fatalf("the baseline fetch marked %v", m.changes[listAuthored].marks)
 	}
 }

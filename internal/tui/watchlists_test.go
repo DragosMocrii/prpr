@@ -51,7 +51,7 @@ func markRepository(t *testing.T, m *model, repository string) {
 func visibleRepositories(m *model, id paneID) []string {
 	var repositories []string
 	for _, index := range m.panes[id].visible {
-		repositories = append(repositories, m.source(id)[index].Repository)
+		repositories = append(repositories, m.paneSource(id)[index].Repository)
 	}
 	return repositories
 }

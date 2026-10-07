@@ -269,3 +269,20 @@ func TestWokeTagIsSeparatedFromTheNameInBothIconSets(t *testing.T) {
 		}
 	}
 }
+
+func TestSnoozedReviewRowKeepsItsListsMark(t *testing.T) {
+	mine, review := snoozePRs()
+	m := newPaneModel(t, 140, 40, mine, review)
+	snoozeFor(m, preferences.Snooze{Repository: "acme/web", Number: 7, List: preferences.SnoozeReview, Until: time.Now().Add(time.Hour)})
+	if m.snoozeList(&review[0]) != listReview {
+		t.Fatalf("snoozeList = %v, want the review list", m.snoozeList(&review[0]))
+	}
+	// The review list's next fetch drops #7: its gone row stays in Snoozed.
+	updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: mine}})
+	if got := paneNumbers(m, paneSnoozed); len(got) != 1 || got[0] != 7 {
+		t.Fatalf("Snoozed rows = %v, want the gone #7", got)
+	}
+	if pr, gone, ok := m.paneRow(paneSnoozed, 0); !ok || !gone || pr.Number != 7 {
+		t.Fatalf("row 0 = %+v gone %v ok %v", pr, gone, ok)
+	}
+}
