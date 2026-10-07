@@ -212,8 +212,8 @@ type paneLayout struct {
 }
 
 // listChromeHeight counts list lines outside the panes: the title, the
-// summary when shown, the legend when open, the selected URL, the status
-// line, and the help.
+// summary and footer rule when shown, the legend when open, the selected
+// URL, the status line, and the help.
 func (m *model) listChromeHeight() int {
 	return m.listChromeBase() + len(m.legendLines())
 }
@@ -225,7 +225,16 @@ func (m *model) listChromeBase() int {
 	if m.summaryShown() {
 		height++
 	}
+	if m.footerRuleShown() {
+		height++
+	}
 	return height
+}
+
+// footerRuleShown reports whether a rule sets the footer apart; like the
+// summary, it is dropped to leave rows for the lists on short terminals.
+func (m *model) footerRuleShown() bool {
+	return m.height >= minSummaryHeight
 }
 
 func (m *model) layoutPanes() paneLayout {

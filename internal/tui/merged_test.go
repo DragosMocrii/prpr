@@ -285,7 +285,7 @@ func TestMergedRowDetails(t *testing.T) {
 
 func TestDroppingAGoneRowThatMakesRoomForMergedStaysBounded(t *testing.T) {
 	m := notifyModel(t, "")
-	m.Update(tea.WindowSizeMsg{Width: 140, Height: 22})
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 23})
 	var mine, merged []github.PullRequest
 	for n := 1; n <= 8; n++ {
 		mine = append(mine, changePR(n, "acme/a"))
@@ -311,7 +311,7 @@ func TestDroppingAGoneRowThatMakesRoomForMergedStaysBounded(t *testing.T) {
 	if !slices.Contains(m.drawnPanes(), paneMerged) {
 		t.Fatal("dropping the gone row left no room for Merged; the test needs a larger terminal")
 	}
-	assertBounded(t, m, 140, 22)
+	assertBounded(t, m, 140, 23)
 	if !strings.Contains(ansi.Strip(m.View().Content), "Merged (5)") {
 		t.Fatal("Merged pane not laid out after it gained room")
 	}

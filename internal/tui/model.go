@@ -1386,6 +1386,10 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 		lines = append(lines, m.tableLines(id)...)
 	}
 	lines = append(lines, legendLines...)
+	// The rule sets the footer apart from whichever list or legend ends above it.
+	if m.footerRuleShown() {
+		lines = append(lines, lipgloss.NewStyle().Faint(true).Render(strings.Repeat("─", max(0, m.width))))
+	}
 	selected := ""
 	if pr, ok := m.selectedPR(); ok {
 		selected = singleLine(pr.URL)

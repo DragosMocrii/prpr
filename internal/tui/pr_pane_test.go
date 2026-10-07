@@ -392,3 +392,17 @@ func TestReviewPaneKeepsAgeAtStandardWidth(t *testing.T) {
 		t.Fatalf("Age column missing at 80 columns: %+v / %+v", m.panes[paneMine].table.Columns(), m.panes[paneReview].table.Columns())
 	}
 }
+
+func TestARuleSetsTheFooterApart(t *testing.T) {
+	m := newPaneModel(t, 100, 30, filterPRs(), filterReviews())
+	for _, legend := range []bool{false, true} {
+		m.legend = legend
+		m.rebuildPRTable(false)
+		lines := assertBounded(t, m, 100, 30)
+		pr, _ := m.selectedPR()
+		at := slices.IndexFunc(lines, func(line string) bool { return strings.HasPrefix(ansi.Strip(line), pr.URL) })
+		if at < 1 || ansi.Strip(lines[at-1]) != strings.Repeat("─", 100) {
+			t.Fatalf("legend %v: no rule right above the selected URL (line %d):\n%s", legend, at, ansi.Strip(strings.Join(lines, "\n")))
+		}
+	}
+}
