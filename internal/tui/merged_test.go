@@ -174,3 +174,95 @@ func TestTurningMergedOffMovesFocus(t *testing.T) {
 		t.Fatalf("focus %d, drawn %v", m.focus, m.drawnPanes())
 	}
 }
+
+// mergedLayoutModel is a model at width x height after a full fetch of
+// mine, review, and merged.
+func mergedLayoutModel(t *testing.T, width, height int, mine, review, merged []github.PullRequest) *model {
+	t.Helper()
+	m := notifyModel(t, "")
+	m.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: mine, ReviewRequests: review, Merged: merged}})
+	return m
+}
+
+func mergedPRs(n int) []github.PullRequest {
+	prs := make([]github.PullRequest, n)
+	for i := range prs {
+		prs[i] = mergedPR(changePR(200+i, "acme/m"), time.Duration(i+1)*time.Hour)
+	}
+	return prs
+}
+
+func TestMergedPaneTakesOnlyRoomTheOtherListsLeave(t *testing.T) {
+	mine, review := manyPRs(8), reviewPRs(8)
+	short := mergedLayoutModel(t, 80, 24, mine, review, mergedPRs(5))
+	without := mergedLayoutModel(t, 80, 24, mine, review, nil)
+	if slices.Contains(short.drawnPanes(), paneMerged) {
+		t.Fatalf("Merged drawn at 80x24: %v", short.drawnPanes())
+	}
+	got, want := short.layoutPanes(), without.layoutPanes()
+	if got.single || got.tables[paneMine] != want.tables[paneMine] || got.tables[paneReview] != want.tables[paneReview] {
+		t.Fatalf("80x24 layout %+v, without Merged %+v", got, want)
+	}
+	shorter := mergedLayoutModel(t, 80, 18, mine, review, mergedPRs(5))
+	if got, want := shorter.layoutPanes().single, mergedLayoutModel(t, 80, 18, mine, review, nil).layoutPanes().single; got != want {
+		t.Fatalf("80x18 single %v, without Merged %v", got, want)
+	}
+
+	tall := mergedLayoutModel(t, 140, 40, manyPRs(3), reviewPRs(2), mergedPRs(5))
+	if !slices.Contains(tall.drawnPanes(), paneMerged) {
+		t.Fatalf("Merged not drawn at 140x40: %v", tall.drawnPanes())
+	}
+	layout := tall.layoutPanes()
+	if layout.tables[paneMerged] != tableHeaderLen+5 || layout.tables[paneMine] < tableHeaderLen+3 || layout.tables[paneReview] < tableHeaderLen+2 {
+		t.Fatalf("140x40 tables %v", layout.tables)
+	}
+}
+
+func TestResizingLeavesMergedOutAndMovesFocus(t *testing.T) {
+	m := mergedLayoutModel(t, 140, 40, manyPRs(8), reviewPRs(8), mergedPRs(5))
+	m.setFocus(paneMerged)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if m.focus == paneMerged || !slices.Contains(m.drawnPanes(), m.focus) {
+		t.Fatalf("focus %d, drawn %v", m.focus, m.drawnPanes())
+	}
+}
+
+func TestMergedPaneFitsBesideFourPanes(t *testing.T) {
+	mine, review := snoozePRs()
+	mine = append(mine, github.PullRequest{Repository: "acme/api", Number: 3, Title: "Queued",
+		Queue: &github.QueueEntry{Provider: "Trunk", State: github.QueueTesting}})
+	for _, size := range [][2]int{{40, 8}, {60, 12}, {80, 20}, {140, 40}, {200, 60}} {
+		m := mergedLayoutModel(t, size[0], size[1], mine, review, mergedPRs(3))
+		snoozeFor(m, preferences.Snooze{Repository: "acme/api", Number: 1, List: preferences.SnoozeMine,
+			Until: time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)})
+		assertBounded(t, m, size[0], size[1])
+		for range 5 {
+			m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+			assertBounded(t, m, size[0], size[1])
+		}
+		if size[1] == 60 && len(m.drawnPanes()) != 5 {
+			t.Fatalf("200x60 draws %v, want five panes", m.drawnPanes())
+		}
+	}
+}
+
+func TestMergedRowDetails(t *testing.T) {
+	m := notifyModel(t, "")
+	pr := mergedPR(changePR(2, "acme/a"), time.Hour)
+	pr.Additions, pr.Deletions = 12, 3
+	fetchMerged(m, []github.PullRequest{changePR(1, "acme/a")}, []github.PullRequest{pr})
+	m.setFocus(paneMerged)
+	m.details = true
+	m.syncKeys()
+	if !m.detailsShown() {
+		t.Fatal("details not shown on a merged row")
+	}
+	view := ansi.Strip(strings.Join(m.detailsView(), "\n"))
+	if !strings.Contains(view, "Merged") || !strings.Contains(view, "by bob") || !strings.Contains(view, "+12 −3") {
+		t.Fatalf("details:\n%s", view)
+	}
+	if !m.keys.Editor.Enabled() {
+		t.Fatal("e disabled on a merged row's details")
+	}
+}

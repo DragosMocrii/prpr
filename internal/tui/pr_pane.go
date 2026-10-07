@@ -120,15 +120,47 @@ func (m *model) eachSourcePR(id paneID, fn func(*github.PullRequest)) {
 }
 
 // drawnPanes lists the panes on screen in order: the queue and Snoozed
-// panes only while they have rows.
+// panes only while they have rows, and the Merged pane only while it has
+// rows and room (see mergedRoom).
 func (m *model) drawnPanes() []paneID {
+	ids := m.openPanes()
+	if rowCount(&m.panes[paneMerged]) > 0 && m.mergedRoom() >= minDualTableHeight {
+		ids = append(ids, paneMerged)
+	}
+	return ids
+}
+
+// openPanes lists the drawn panes of open pull requests: every drawn pane
+// but Merged.
+func (m *model) openPanes() []paneID {
 	ids := make([]paneID, 0, len(paneIDs))
 	for _, id := range paneIDs {
-		if (id != paneQueue && id != paneSnoozed && id != paneMerged) || rowCount(&m.panes[id]) > 0 {
+		if id == paneMerged {
+			continue
+		}
+		if (id != paneQueue && id != paneSnoozed) || rowCount(&m.panes[id]) > 0 {
 			ids = append(ids, id)
 		}
 	}
 	return ids
+}
+
+// mergedRoom is how many lines the Merged pane's table may take: what the
+// list leaves once the panes of open pull requests have a title and every
+// row each, and the Merged pane its title. Merged pull requests need
+// nothing of the viewer, so they never squeeze the other lists or switch
+// them to one pane at a time.
+func (m *model) mergedRoom() int {
+	room := m.height - m.listChromeHeight() - 1
+	for _, id := range m.openPanes() {
+		room-- // title
+		if rows := rowCount(&m.panes[id]); rows > 0 {
+			room -= max(minDualTableHeight, tableHeaderLen+rows)
+		} else {
+			room-- // empty line
+		}
+	}
+	return room
 }
 
 // nextPane is the drawn pane step places after the focused one, wrapping.
@@ -198,6 +230,23 @@ func (m *model) listChromeBase() int {
 
 func (m *model) layoutPanes() paneLayout {
 	avail := m.height - m.listChromeHeight()
+	if slices.Contains(m.drawnPanes(), paneMerged) {
+		// Merged takes its rows, up to what the other panes leave; they
+		// share the rest.
+		layout := m.layoutOpenPanes(avail - 1 - m.layoutMerged())
+		layout.tables[paneMerged] = m.layoutMerged()
+		return layout
+	}
+	return m.layoutOpenPanes(avail)
+}
+
+// layoutMerged is the Merged pane's table height when it is drawn.
+func (m *model) layoutMerged() int {
+	return min(tableHeaderLen+rowCount(&m.panes[paneMerged]), m.mergedRoom())
+}
+
+// layoutOpenPanes lays out the panes of open pull requests in avail lines.
+func (m *model) layoutOpenPanes(avail int) paneLayout {
 	filled := func(id paneID) bool { return rowCount(&m.panes[id]) > 0 }
 	need := func(id paneID) int {
 		if filled(id) {
@@ -205,7 +254,7 @@ func (m *model) layoutPanes() paneLayout {
 		}
 		return 2 // title and empty line
 	}
-	drawn := m.drawnPanes()
+	drawn := m.openPanes()
 	total := 0
 	var full []paneID
 	for _, id := range drawn {
@@ -228,7 +277,7 @@ func (m *model) layoutPanes() paneLayout {
 	// The queue and Snoozed panes are usually short: beside other filled
 	// panes, each table takes no more than its rows, and they share what it
 	// leaves.
-	for _, short := range []paneID{paneQueue, paneSnoozed, paneMerged} {
+	for _, short := range []paneID{paneQueue, paneSnoozed} {
 		if len(full) > 1 && filled(short) {
 			fit := max(minDualTableHeight, tableHeaderLen+rowCount(&m.panes[short]))
 			layout.tables[short] = min(fit, rows/len(full))

@@ -31,8 +31,8 @@ func (m *model) legendSections() []legendSection {
 	ic := m.icons
 	item := legendItem
 	var sections []legendSection
-	queuePane := slices.Contains(m.drawnPanes(), paneQueue)
-	snoozePane := slices.Contains(m.drawnPanes(), paneSnoozed)
+	queuePane := slices.Contains(m.openPanes(), paneQueue)
+	snoozePane := slices.Contains(m.openPanes(), paneSnoozed)
 	if ic.nerd {
 		columns := []string{"Merge", "Age", "Bots", "CI", "Review", "Comments", "Size", "Queue", "Wakes"}
 		var items []string
@@ -194,7 +194,8 @@ func (m *model) legendSectionLines(width int) [][]string {
 
 // legendRoom is how many lines the legend may take: what the list leaves
 // once the panes keep the smallest tables of their current layout, so
-// opening the legend never switches the panes to one at a time.
+// opening the legend never switches the panes to one at a time. The Merged
+// pane takes only what the legend leaves, so it is not counted.
 func (m *model) legendRoom() int {
 	avail := m.height - m.listChromeBase()
 	need := func(id paneID) int {
@@ -204,7 +205,7 @@ func (m *model) legendRoom() int {
 		return 2
 	}
 	dual := 0
-	for _, id := range m.drawnPanes() {
+	for _, id := range m.openPanes() {
 		dual += need(id)
 	}
 	if avail >= dual {
