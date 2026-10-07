@@ -9,8 +9,11 @@ import (
 func TestEveryPaneHasASpec(t *testing.T) {
 	for _, id := range paneIDs {
 		spec := paneSpecs[id]
-		if spec.name == "" || len(spec.lists) == 0 {
+		if spec.name == "" || spec.empty == nil || len(spec.lists) == 0 || len(spec.columns) == 0 {
 			t.Errorf("pane %d spec = %+v", id, spec)
+		}
+		if spec.collapsible && spec.saveCollapsed == nil {
+			t.Errorf("%s is collapsible but cannot save it", spec.name)
 		}
 	}
 }

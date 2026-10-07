@@ -90,6 +90,15 @@ func TestDismissingAGoneRowLaysOutTheTablesTheFramePlans(t *testing.T) {
 	if plan.tables == before.tables {
 		t.Fatalf("fixture: the dismissal left the plan's tables at %v", plan.tables)
 	}
+	assertTablesFollowPlan(t, m)
+}
+
+// assertTablesFollowPlan checks that every pane on screen draws its title
+// where the frame plan puts it, its table is built at the planned height,
+// and each row line hit testing finds draws that row.
+func assertTablesFollowPlan(t *testing.T, m *model) {
+	t.Helper()
+	plan := m.framePlan()
 	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
 	for _, p := range plan.screen {
 		if !strings.Contains(lines[p.top], paneSpecs[p.id].name) {
@@ -112,5 +121,53 @@ func TestDismissingAGoneRowLaysOutTheTablesTheFramePlans(t *testing.T) {
 				t.Errorf("line %d = %q, hit row %d is %s", line, lines[line], hit.row, want)
 			}
 		}
+	}
+}
+
+func TestPleadDismissalWithTheLegendLaysOutTheTablesTheFramePlans(t *testing.T) {
+	// Dismissing the only marker drops the legend's plead entry, which gives
+	// the tables a line.
+	for _, height := range []int{30, 40, 50, 60} {
+		t.Run(fmt.Sprint(height), func(t *testing.T) {
+			review := reviewPRs(21)
+			review[0].RequestedAgain = true
+			m := newPaneModel(t, 140, height, manyPRs(20), review)
+			pressL(m)
+			m.setFocus(paneReview)
+			before := m.framePlan()
+			press(m, tea.Key{Code: 'X', Text: "X"})
+			if m.pleadShown() {
+				t.Fatalf("X left the marker")
+			}
+			if m.framePlan().tables == before.tables {
+				t.Fatalf("fixture: the dismissal left the plan's tables at %v", before.tables)
+			}
+			assertTablesFollowPlan(t, m)
+		})
+	}
+}
+
+func TestReadingAWokeRowWithTheLegendLaysOutTheTablesTheFramePlans(t *testing.T) {
+	// Reading the only woke row drops the legend's woke entry, which gives
+	// the tables a line.
+	for _, height := range []int{30, 40, 50, 60} {
+		t.Run(fmt.Sprint(height), func(t *testing.T) {
+			mine := manyPRs(20)
+			m := newPaneModel(t, 140, height, mine, reviewPRs(21))
+			m.markWoke(keyOf(&mine[0]), "snooze ended")
+			m.rebuildPRTable(false)
+			pressL(m)
+			m.setFocus(paneMine)
+			before := m.framePlan()
+			rest(m)
+			press(m, tea.Key{Code: 'j', Text: "j"})
+			if m.wokeShown() {
+				t.Fatalf("leaving the row kept its woke tag")
+			}
+			if m.framePlan().tables == before.tables {
+				t.Fatalf("fixture: reading the row left the plan's tables at %v", before.tables)
+			}
+			assertTablesFollowPlan(t, m)
+		})
 	}
 }

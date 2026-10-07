@@ -28,7 +28,7 @@ func TestRankedColumnsDropInRankOrder(t *testing.T) {
 	}
 	// Review requested gives up Review first, then Size, then Comments.
 	dropped := []string{}
-	// Comments goes at 58, once Repository is gone below 80.
+	// Comments drops once Repository leaves below 80.
 	for width := 199; width >= 40; width-- {
 		m.Update(windowSize(width, 30))
 		titles := columnTitles(m, paneReview)

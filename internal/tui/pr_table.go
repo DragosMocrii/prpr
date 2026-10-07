@@ -31,6 +31,7 @@ func (m *model) rebuildPRTable(resetSelection bool) {
 	m.sharedRows = m.shared()
 	// Planned after the focus fix-up: single-pane mode follows the focus.
 	plan := m.framePlan()
+	m.builtDrawn = plan.drawn
 	for _, id := range paneIDs {
 		// Hidden and empty panes keep a minimal table so cursors survive.
 		m.rebuildPane(id, max(minTableHeight, plan.tables[id]), resetSelection)
@@ -61,7 +62,9 @@ func (m *model) rebuildPane(id paneID, height int, resetSelection bool) {
 }
 
 // redrawRows replaces a pane's rows in place after its marks or gone rows
-// change, keeping the table's cursor and scroll position.
+// change, keeping the table's cursor and scroll position. When the change
+// moves the frame plan (a legend entry that goes, say), every table is
+// rebuilt for it instead.
 func (m *model) redrawRows(id paneID) {
 	pane := &m.panes[id]
 	layout := m.layoutColumns(id)
@@ -69,6 +72,24 @@ func (m *model) redrawRows(id paneID) {
 	pane.table.SetColumns(layout.tableColumns(m.icons))
 	pane.table.SetRows(m.buildRows(id, layout))
 	m.syncPages(id)
+	if !m.tablesFollow(m.framePlan()) {
+		m.rebuildPRTable(false)
+	}
+}
+
+// tablesFollow reports whether the built tables are the ones plan draws:
+// the same panes, each on screen with rows at its planned height.
+func (m *model) tablesFollow(plan framePlan) bool {
+	if !slices.Equal(plan.drawn, m.builtDrawn) {
+		return false
+	}
+	for _, p := range plan.screen {
+		pane := &m.panes[p.id]
+		if rowCount(pane) > 0 && tableHeaderLen+pane.table.Height() != max(minTableHeight, plan.tables[p.id]) {
+			return false
+		}
+	}
+	return true
 }
 
 // nameTagSeparator follows a tag in front of a pull request's name.

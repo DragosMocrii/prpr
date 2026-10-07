@@ -12,8 +12,8 @@
 - `internal/tui/model.go` owns app transitions and scope state.
 - `internal/tui/repository_picker.go` owns repository-picker input and requests.
 - `internal/tui/watchlists.go` owns watchlist editing in the picker: marks, the name input, and saving, renaming, and deleting watchlists.
-- `internal/tui/pr_pane.go` owns the pull-request panes: per-pane selection, titles, and the page indicator; `frame.go`'s `framePlan` owns which panes are drawn, their lines, and which can take focus.
-- `internal/tui/pane_spec.go` holds `paneSpecs`: each pane's name, empty text, lists, tracker, and layout flags (drawn only with rows, short, leftover, collapsible, attention, quick filters).
+- `internal/tui/pr_pane.go` owns the pull-request panes: per-pane selection, titles, the page indicator, the open panes (`openPanes`, `openPanesNeed`), their table heights (`openTables`), and the list chrome (`listChromeHeight`); `frame.go`'s `framePlan` combines them into which panes are drawn, their lines, and which can take focus.
+- `internal/tui/pane_spec.go` holds `paneSpecs`: each pane's name, empty text, lists, tracker, layout flags (drawn only with rows, short, leftover, collapsible, attention, quick filters), columns, name tags, and `rowStyle`.
 - `internal/tui/quota.go` owns rate-limit polling and the status line; `internal/tui/details.go`'s `rowStatus` words the selected row there.
 - `internal/tui/changes.go` owns change tracking between refreshes: row marks, changed cells and their direction and wording, gone pull requests, and when a mark counts as read.
 - `internal/tui/mouse.go` owns mouse mode: mapping screen lines to panes and rows, hover, clicks, and the wheel.

@@ -47,7 +47,6 @@ type columnContext struct {
 // rowContext is what filling one row's cells needs.
 type rowContext struct {
 	m        *model
-	id       paneID
 	pr       *github.PullRequest
 	gone     bool
 	preview  bool
@@ -82,7 +81,7 @@ func iconTitle(text string) func(*iconSet) string {
 }
 func fixedWidth(w int) func(*columnContext) int { return func(*columnContext) int { return w } }
 
-// iconWidth is w, or 1 with the Nerd set, whose header is one icon.
+// iconWidth is w, or nerd with the Nerd set, whose header is one icon.
 func iconWidth(w, nerd int) func(*columnContext) int {
 	return func(c *columnContext) int {
 		if c.ic.nerd {
@@ -226,7 +225,8 @@ func (m *model) layoutColumns(id paneID) tableLayout {
 			layout.widths[i] = max(8, nameWidth)
 		}
 	}
-	layout.plead = id == paneReview && m.pleadShown()
+	// The mark column, first in every pane, widens only for 🙏.
+	layout.plead = layout.widths[0] == pleadWidth
 	return layout
 }
 
@@ -250,7 +250,7 @@ func (m *model) buildRows(id paneID, layout tableLayout) []table.Row {
 		if !ok {
 			continue
 		}
-		r := &rowContext{m: m, id: id, pr: pr, gone: gone, now: now, ic: m.icons, layout: &layout,
+		r := &rowContext{m: m, pr: pr, gone: gone, now: now, ic: m.icons, layout: &layout,
 			preview: m.snapshot.Preview && !gone, mark: m.rowMark(id, pr)}
 		if !gone {
 			r.lines = m.changeLines(id, pr)

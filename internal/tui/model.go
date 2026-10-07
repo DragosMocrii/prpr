@@ -123,6 +123,8 @@ type model struct {
 	// sharedRows is the repository or owner every row shares, as of the
 	// last table rebuild.
 	sharedRows sharedRepositories
+	// builtDrawn is the frame plan's drawn panes as of the last table rebuild.
+	builtDrawn []paneID
 	// showDrafts puts draft pull requests in scope; it is saved.
 	showDrafts bool
 	// merged is how many merged pull requests the Merged pane lists; 0 is off.
