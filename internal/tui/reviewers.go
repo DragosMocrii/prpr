@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/DragosMocrii/prpr/internal/github"
 )
@@ -38,7 +39,9 @@ const (
 	detailTeamsMax     = 6
 )
 
-const loadingReviewers = "Loading reviewers…"
+// reviewerErrorWidth caps a failed lookup's error in the details, since gh's
+// errors can run long.
+const reviewerErrorWidth = 80
 
 // lookupDetailReviewers reads the reviewers of the authored pull request the
 // details show, unless they were read since it last changed or are being
@@ -68,10 +71,24 @@ func (m *model) lookupDetailReviewers() tea.Cmd {
 	m.reviewerLookups[key] = &reviewerLookup{updated: pr.UpdatedAt}
 	ctx, list, repository, number := m.ctx, m.listReviewers, pr.Repository, pr.Number
 	account, updated := m.accountGeneration, pr.UpdatedAt
-	return func() tea.Msg {
+	return tea.Batch(func() tea.Msg {
 		reviewers, err := list(ctx, repository, number)
 		return detailReviewersMsg{account: account, key: key, updated: updated, list: reviewers, err: err}
+	}, m.spinner.Tick)
+}
+
+// loadingReviewers reports whether the details show reviewers still being
+// read, which keeps the spinner turning.
+func (m *model) loadingReviewers() bool {
+	if !m.detailsShown() {
+		return false
 	}
+	pr, ok := m.detailsAuthoredPR()
+	if !ok {
+		return false
+	}
+	lookup := m.reviewerLookups[keyOf(pr)]
+	return lookup != nil && !lookup.done
 }
 
 // detailsAuthoredPR is the listed authored pull request the details show:
@@ -108,9 +125,16 @@ func (m *model) reviewerDetailRows(pr *github.PullRequest) []detailRowText {
 	lookup := m.reviewerLookups[keyOf(pr)]
 	switch {
 	case lookup == nil || !lookup.done:
-		return []detailRowText{{"Reviewers", []string{loadingReviewers}}}
+		return []detailRowText{
+			{"Reviewers", []string{m.spinner.View() + " Loading reviewers"}},
+			{"Teams", []string{m.spinner.View() + " Loading teams"}},
+		}
 	case lookup.err != nil:
-		return []detailRowText{{"Reviewers", []string{singleLine(lookup.err.Error())}}}
+		reason := ansi.Truncate(singleLine(lookup.err.Error()), reviewerErrorWidth, "…")
+		return []detailRowText{
+			{"Reviewers", []string{rerequestBad.Render("✗") + " Couldn't load reviewers: " + reason}},
+			{"Teams", []string{"Unknown; reopen the details to try again"}},
+		}
 	}
 	list := lookup.list
 	var people []string
@@ -151,10 +175,10 @@ func (m *model) reviewerDetailRows(pr *github.PullRequest) []detailRowText {
 	if list.AnswersUnknown {
 		teams = append(teams, "Teams that reviews answered are not readable; gh may need the read:org scope (gh auth refresh -s read:org)")
 	}
-	if len(teams) > 0 {
-		rows = append(rows, detailRowText{"Teams", teams})
+	if len(teams) == 0 {
+		teams = []string{"No team reviews requested"}
 	}
-	return rows
+	return append(rows, detailRowText{"Teams", teams})
 }
 
 // capped keeps the first n values, and says how many more there are.

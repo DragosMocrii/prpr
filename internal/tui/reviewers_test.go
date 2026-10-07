@@ -202,3 +202,46 @@ func TestDetailsCapLongReviewerLists(t *testing.T) {
 		t.Fatalf("long list not capped:\n%s", view)
 	}
 }
+
+func TestDetailsShowBothReviewerRowsWhileLoadingAndAfterFailing(t *testing.T) {
+	mine, review := snoozePRs()
+	m := newPaneModel(t, 140, 50, mine, review)
+	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) {
+		return github.ReviewerList{}, errors.New("GitHub reviewer query failed")
+	}
+	m.setFocus(paneMine)
+	m.selectPR(paneMine, "acme/api", 2)
+	// The lookup has not answered yet.
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	view := detailsText(m)
+	if !strings.Contains(view, "Reviewers") || !strings.Contains(view, "Teams") {
+		t.Fatalf("loading details lack the reviewer rows:\n%s", view)
+	}
+	if !m.spinning() {
+		t.Fatal("the spinner stops while reviewers load")
+	}
+	for _, msg := range runQuick(cmd) {
+		if _, ok := msg.(detailReviewersMsg); ok {
+			m.Update(msg)
+		}
+	}
+	view = detailsText(m)
+	if !strings.Contains(view, "Teams") || !strings.Contains(view, "GitHub reviewer query failed") {
+		t.Fatalf("failed details lack the reviewer rows:\n%s", view)
+	}
+	if m.spinning() {
+		t.Fatal("the spinner turns after the lookup failed")
+	}
+}
+
+func TestDetailsShowTheTeamsRowWithoutTeams(t *testing.T) {
+	mine, review := snoozePRs()
+	m := newPaneModel(t, 140, 50, mine, review)
+	stubLookups(m, github.ReviewerList{Reviewers: []github.Reviewer{{Login: "alice", State: "APPROVED"}}}, nil)
+	m.setFocus(paneMine)
+	m.selectPR(paneMine, "acme/api", 2)
+	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if view := detailsText(m); !strings.Contains(view, "Teams") {
+		t.Fatalf("details lack the Teams row:\n%s", view)
+	}
+}

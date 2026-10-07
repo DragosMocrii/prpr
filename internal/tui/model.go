@@ -463,7 +463,8 @@ func (m *model) refreshing() bool {
 // spinning reports whether a visible request is in flight. Spinner ticks
 // that arrive otherwise are dropped, which ends the tick loop.
 func (m *model) spinning() bool {
-	return (m.loading && !m.loginActive) || (m.picker != nil && m.picker.busy) || (m.accounts != nil && m.accounts.busy)
+	return (m.loading && !m.loginActive) || (m.picker != nil && m.picker.busy) || (m.accounts != nil && m.accounts.busy) ||
+		m.loadingReviewers()
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
