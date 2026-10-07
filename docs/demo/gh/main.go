@@ -277,6 +277,13 @@ func main() {
 				"mergedAt": ago(2 * day), "mergedBy": map[string]any{"login": "sam-lee"}, "additions": 210, "deletions": 95,
 				"repository": map[string]any{"nameWithOwner": "acme/web"}},
 		}
+		if ran("mine") {
+			// #1301 left the authored list after the first fetch: it merged.
+			flaky := map[string]any{"id": "PR_acme_web_1301", "number": 1301, "title": "Fix the flaky checkout test", "url": "https://github.com/acme/web/pull/1301",
+				"mergedAt": ago(3 * time.Minute), "mergedBy": map[string]any{"login": login}, "additions": 12, "deletions": 9,
+				"repository": map[string]any{"nameWithOwner": "acme/web"}}
+			merged = append([]any{flaky}, merged...)
+		}
 		data = map[string]any{"data": map[string]any{"viewer": map[string]any{"login": login, "pullRequests": map[string]any{"nodes": merged}}}}
 	case strings.Contains(args, "rateLimit"):
 		data = map[string]any{"data": map[string]any{"rateLimit": map[string]any{
