@@ -2,8 +2,11 @@ package github
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func mergedNode(id string, number int, mergedAt string) map[string]any {
@@ -100,5 +103,66 @@ func TestPreviewNeverRunsTheMergedQuery(t *testing.T) {
 	}
 	if f.mergedQueries != 0 {
 		t.Fatalf("preview ran %d merged queries", f.mergedQueries)
+	}
+}
+
+func TestAFailedMergedQueryStopsTheLists(t *testing.T) {
+	f := cleanFake(t)
+	c := f.client()
+	c.SetMerged(5)
+	f.failMerged, f.stallLists = true, true
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := c.Fetch(ctx)
+	if err == nil || !strings.Contains(err.Error(), "merged pull request query failed") {
+		t.Fatalf("fetch error %v, want the merged query's", err)
+	}
+	if !errors.Is(f.stalledErr, context.Canceled) {
+		t.Fatalf("lists stopped by %v, want the fetch canceling them", f.stalledErr)
+	}
+}
+
+func TestAFailedListStopsTheMergedQuery(t *testing.T) {
+	f := cleanFake(t)
+	c := f.client()
+	c.SetMerged(5)
+	fetch(t, f, c)
+	f.failSignature, f.stallMerged = true, true
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := c.Fetch(ctx)
+	if err == nil || !strings.Contains(err.Error(), "list query failed") {
+		t.Fatalf("fetch error %v, want the list query's", err)
+	}
+	if !errors.Is(f.stalledErr, context.Canceled) {
+		t.Fatalf("merged query stopped by %v, want the fetch canceling it", f.stalledErr)
+	}
+}
+
+func TestAPullRequestInBothListsIsOnlyMerged(t *testing.T) {
+	f := cleanFake(t)
+	c := f.client()
+	c.SetMerged(5)
+	// #2 merged between the authored query and the merged one.
+	f.merged = []map[string]any{mergedNode("PR_2", 2, "2026-10-05T11:59:00Z")}
+	snapshot, _ := fetch(t, f, c)
+	var numbers []int
+	for _, pr := range snapshot.PullRequests {
+		numbers = append(numbers, pr.Number)
+	}
+	if !slices.Equal(numbers, []int{1, 3}) || len(snapshot.Merged) != 1 {
+		t.Fatalf("authored %v, merged %+v", numbers, snapshot.Merged)
+	}
+	// The cache keeps it, so the next fetch lists it without reading it again.
+	f.merged = nil
+	before := len(f.nodeIDs)
+	snapshot, kind := fetch(t, f, c)
+	if kind != "signature" || len(snapshot.PullRequests) != 3 {
+		t.Fatalf("%s fetch listed %d authored", kind, len(snapshot.PullRequests))
+	}
+	for _, ids := range f.nodeIDs[before:] {
+		if slices.Contains(ids, "PR_2") {
+			t.Fatalf("read #2 again: %v", ids)
+		}
 	}
 }

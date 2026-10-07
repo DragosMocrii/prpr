@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -96,8 +97,8 @@ type Snapshot struct {
 type Client struct {
 	path string
 	// mu guards the pinned account and its token, which requests read from
-	// several goroutines, and the settings fetches read: bots, needs, and
-	// queues.
+	// several goroutines, and the settings fetches read: bots, needs,
+	// queues, and merged.
 	mu sync.Mutex
 	// bots are the review bots fetches judge.
 	bots []Bot
@@ -460,6 +461,10 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 		prs []PullRequest
 		err error
 	}
+	// Either half failing fails the fetch, so it stops the other; the
+	// cause is the first failure, not the cancellation it led to.
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	mergedDone := make(chan mergedResult, 1)
 	go func() {
 		if mergedLimit == 0 {
@@ -467,6 +472,9 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 			return
 		}
 		prs, err := c.fetchMerged(ctx, mergedLimit)
+		if err != nil {
+			cancel(err)
+		}
 		mergedDone <- mergedResult{prs, err}
 	}()
 	var l lists
@@ -481,9 +489,12 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 			lastComplete = cache.lastComplete
 		}
 	}
+	if err != nil {
+		cancel(err)
+	}
 	merged := <-mergedDone
-	if err == nil {
-		err = merged.err
+	if err != nil || merged.err != nil {
+		err = context.Cause(ctx)
 	}
 	c.mu.Lock()
 	if c.cacheGeneration == generation {
@@ -499,6 +510,16 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	}
 	snapshot := l.snapshot()
 	snapshot.Merged = merged.prs
+	if len(merged.prs) > 0 {
+		// A pull request that merged while the queries ran can be in both;
+		// it is no longer open, so the merged list wins. Only the snapshot
+		// drops it; the cache is the lists as fetched.
+		snapshot.PullRequests = slices.DeleteFunc(slices.Clone(snapshot.PullRequests), func(pr PullRequest) bool {
+			return slices.ContainsFunc(merged.prs, func(m PullRequest) bool {
+				return (m.ID != "" && m.ID == pr.ID) || (strings.EqualFold(m.Repository, pr.Repository) && m.Number == pr.Number)
+			})
+		})
+	}
 	return snapshot, nil
 }
 

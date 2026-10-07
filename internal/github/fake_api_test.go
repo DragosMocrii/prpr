@@ -40,6 +40,20 @@ type fakeAPI struct {
 	merged        []map[string]any
 	failMerged    bool
 	mergedQueries int
+	// stallMerged and stallLists make the merged query, or the list
+	// queries, wait for their context to end; stalledErr records why the
+	// last one stopped.
+	stallMerged, stallLists bool
+	stalledErr              error
+}
+
+// stall waits for ctx to end, as a gh command that never answers does.
+func (f *fakeAPI) stall(ctx context.Context) error {
+	<-ctx.Done()
+	f.mu.Lock()
+	f.stalledErr = ctx.Err()
+	f.mu.Unlock()
+	return ctx.Err()
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
@@ -76,7 +90,7 @@ func page(key string, nodes []map[string]any, login string) []any {
 	return []any{map[string]any{"data": map[string]any{key: connection}}}
 }
 
-func (f *fakeAPI) call(_ context.Context, _ string, args ...string) ([]byte, error) {
+func (f *fakeAPI) call(ctx context.Context, _ string, args ...string) ([]byte, error) {
 	if len(args) > 0 && args[0] == "auth" {
 		return nil, nil
 	}
@@ -90,6 +104,9 @@ func (f *fakeAPI) call(_ context.Context, _ string, args ...string) ([]byte, err
 		}
 	}
 	if strings.Contains(query, "states: [MERGED]") {
+		if f.stallMerged {
+			return nil, f.stall(ctx)
+		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.mergedQueries++
@@ -107,6 +124,9 @@ func (f *fakeAPI) call(_ context.Context, _ string, args ...string) ([]byte, err
 		kind = "nodes"
 	case strings.Contains(query, "mergeStateStatus"):
 		kind = "complete"
+	}
+	if f.stallLists {
+		return nil, f.stall(ctx)
 	}
 	if f.onCall != nil && kind != "required" {
 		f.onCall(kind)
