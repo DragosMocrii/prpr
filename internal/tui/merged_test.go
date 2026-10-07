@@ -29,7 +29,7 @@ func TestAMergingPullRequestMovesToMerged(t *testing.T) {
 	m := notifyModel(t, "")
 	a, b := changePR(1, "acme/a"), changePR(2, "acme/a")
 	fetchMerged(m, []github.PullRequest{a, b}, nil)
-	if slices.Contains(m.drawnPanes(), paneMerged) {
+	if slices.Contains(m.framePlan().drawn, paneMerged) {
 		t.Fatal("an empty Merged pane is drawn")
 	}
 	m.selectPR(paneMine, "acme/a", 2)
@@ -56,8 +56,8 @@ func TestAMergingPullRequestMovesToMerged(t *testing.T) {
 	}
 	// Falling out of the last N is not news.
 	fetchMerged(m, nil, nil)
-	if len(m.panes[paneMerged].gone) != 0 || slices.Contains(m.drawnPanes(), paneMerged) {
-		t.Fatalf("Merged gone %v, drawn %v", m.panes[paneMerged].gone, m.drawnPanes())
+	if len(m.panes[paneMerged].gone) != 0 || slices.Contains(m.framePlan().drawn, paneMerged) {
+		t.Fatalf("Merged gone %v, drawn %v", m.panes[paneMerged].gone, m.framePlan().drawn)
 	}
 }
 
@@ -93,7 +93,7 @@ func TestMergedPaneFollowsScopeSearchAndFilters(t *testing.T) {
 	}
 	m.search = "nothing matches"
 	m.applyFilters()
-	if slices.Contains(m.drawnPanes(), paneMerged) {
+	if slices.Contains(m.framePlan().drawn, paneMerged) {
 		t.Fatal("Merged drawn while the search matches none of it")
 	}
 	m.search = ""
@@ -173,8 +173,8 @@ func TestTurningMergedOffMovesFocus(t *testing.T) {
 	m.setFocus(paneMerged)
 	m.applyMerged(0)
 	fetchMerged(m, []github.PullRequest{changePR(1, "acme/a")}, nil)
-	if m.focus == paneMerged || slices.Contains(m.drawnPanes(), paneMerged) {
-		t.Fatalf("focus %d, drawn %v", m.focus, m.drawnPanes())
+	if m.focus == paneMerged || slices.Contains(m.framePlan().drawn, paneMerged) {
+		t.Fatalf("focus %d, drawn %v", m.focus, m.framePlan().drawn)
 	}
 }
 
@@ -200,23 +200,23 @@ func TestMergedPaneTakesOnlyRoomTheOtherListsLeave(t *testing.T) {
 	mine, review := manyPRs(8), reviewPRs(8)
 	short := mergedLayoutModel(t, 80, 24, mine, review, mergedPRs(5))
 	without := mergedLayoutModel(t, 80, 24, mine, review, nil)
-	if slices.Contains(short.drawnPanes(), paneMerged) {
-		t.Fatalf("Merged drawn at 80x24: %v", short.drawnPanes())
+	if slices.Contains(short.framePlan().drawn, paneMerged) {
+		t.Fatalf("Merged drawn at 80x24: %v", short.framePlan().drawn)
 	}
-	got, want := short.layoutPanes(), without.layoutPanes()
+	got, want := short.framePlan(), without.framePlan()
 	if got.single || got.tables[paneMine] != want.tables[paneMine] || got.tables[paneReview] != want.tables[paneReview] {
 		t.Fatalf("80x24 layout %+v, without Merged %+v", got, want)
 	}
 	shorter := mergedLayoutModel(t, 80, 18, mine, review, mergedPRs(5))
-	if got, want := shorter.layoutPanes().single, mergedLayoutModel(t, 80, 18, mine, review, nil).layoutPanes().single; got != want {
+	if got, want := shorter.framePlan().single, mergedLayoutModel(t, 80, 18, mine, review, nil).framePlan().single; got != want {
 		t.Fatalf("80x18 single %v, without Merged %v", got, want)
 	}
 
 	tall := mergedLayoutModel(t, 140, 40, manyPRs(3), reviewPRs(2), mergedPRs(5))
-	if !slices.Contains(tall.drawnPanes(), paneMerged) {
-		t.Fatalf("Merged not drawn at 140x40: %v", tall.drawnPanes())
+	if !slices.Contains(tall.framePlan().drawn, paneMerged) {
+		t.Fatalf("Merged not drawn at 140x40: %v", tall.framePlan().drawn)
 	}
-	layout := tall.layoutPanes()
+	layout := tall.framePlan()
 	if layout.tables[paneMerged] != tableHeaderLen+5 || layout.tables[paneMine] < tableHeaderLen+3 || layout.tables[paneReview] < tableHeaderLen+2 {
 		t.Fatalf("140x40 tables %v", layout.tables)
 	}
@@ -226,8 +226,8 @@ func TestResizingLeavesMergedOutAndMovesFocus(t *testing.T) {
 	m := mergedLayoutModel(t, 140, 40, manyPRs(8), reviewPRs(8), mergedPRs(5))
 	m.setFocus(paneMerged)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	if m.focus == paneMerged || !slices.Contains(m.drawnPanes(), m.focus) {
-		t.Fatalf("focus %d, drawn %v", m.focus, m.drawnPanes())
+	if m.focus == paneMerged || !slices.Contains(m.framePlan().drawn, m.focus) {
+		t.Fatalf("focus %d, drawn %v", m.focus, m.framePlan().drawn)
 	}
 }
 
@@ -245,8 +245,8 @@ func TestMergedPaneFitsBesideFourPanes(t *testing.T) {
 			assertBounded(t, m, size[0], size[1])
 		}
 		if size[1] == 60 {
-			if len(m.drawnPanes()) != 5 {
-				t.Fatalf("200x60 draws %v, want five panes", m.drawnPanes())
+			if len(m.framePlan().drawn) != 5 {
+				t.Fatalf("200x60 draws %v, want five panes", m.framePlan().drawn)
 			}
 			// Hit testing follows the layout with Merged drawn last.
 			m.mouse = true
@@ -296,7 +296,7 @@ func TestDroppingAGoneRowThatMakesRoomForMergedStaysBounded(t *testing.T) {
 	fetchMerged(m, mine, merged)
 	// #8 closes without merging and stays behind as a gone row.
 	fetchMerged(m, mine[:7], merged)
-	if slices.Contains(m.drawnPanes(), paneMerged) {
+	if slices.Contains(m.framePlan().drawn, paneMerged) {
 		t.Fatal("Merged drawn before the gone row is dropped; the test needs a smaller terminal")
 	}
 	down, up := tea.Key{Code: 'j', Text: "j"}, tea.Key{Code: 'k', Text: "k"}
@@ -308,7 +308,7 @@ func TestDroppingAGoneRowThatMakesRoomForMergedStaysBounded(t *testing.T) {
 	}
 	rest(m)
 	press(m, up)
-	if !slices.Contains(m.drawnPanes(), paneMerged) {
+	if !slices.Contains(m.framePlan().drawn, paneMerged) {
 		t.Fatal("dropping the gone row left no room for Merged; the test needs a larger terminal")
 	}
 	assertBounded(t, m, 140, 23)

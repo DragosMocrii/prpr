@@ -48,7 +48,7 @@ func paneNumbers(m *model, id paneID) []int {
 func TestSnoozedPaneIndexesBothLists(t *testing.T) {
 	mine, review := snoozePRs()
 	m := newPaneModel(t, 140, 40, mine, review)
-	if slices.Contains(m.drawnPanes(), paneSnoozed) {
+	if slices.Contains(m.framePlan().drawn, paneSnoozed) {
 		t.Fatal("Snoozed pane drawn without snoozes")
 	}
 	until := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
@@ -217,7 +217,7 @@ func TestSnoozedGoneRowsIndexBothGoneLists(t *testing.T) {
 	}
 	// x clears the gone rows and the closed snoozes.
 	m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
-	if len(m.snoozeClosed) != 0 || slices.Contains(m.drawnPanes(), paneSnoozed) {
+	if len(m.snoozeClosed) != 0 || slices.Contains(m.framePlan().drawn, paneSnoozed) {
 		t.Fatalf("x kept closed snoozes %v or the Snoozed pane", m.snoozeClosed)
 	}
 }

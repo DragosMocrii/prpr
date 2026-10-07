@@ -35,41 +35,29 @@ func (m *model) toggleMouse() {
 	m.applyMouse(!m.mouse)
 }
 
-// hitTest maps a screen line of the list screen to a pane. It follows
-// listLines: the title line and the summary when shown, then each drawn
-// pane's title and its table or empty line.
+// hitTest maps a screen line of the list screen to a pane, by the frame
+// plan the screen was drawn from.
 func (m *model) hitTest(y int) (paneHit, bool) {
-	layout := m.layoutPanes()
-	top := 1
-	if m.summaryShown() {
-		top++
+	return m.hitIn(m.framePlan(), y)
+}
+
+// hitIn maps a screen line to a pane by the given frame plan.
+func (m *model) hitIn(plan framePlan, y int) (paneHit, bool) {
+	p, ok := plan.at(y)
+	if !ok {
+		return paneHit{}, false
 	}
-	for _, id := range m.drawnPanes() {
-		if layout.single && id != m.focus {
-			continue
-		}
-		pane := &m.panes[id]
-		height := 1
-		if m.collapsed[id] {
-			height = 0
-		} else if rowCount(pane) > 0 {
-			height = tableHeaderLen + pane.table.Height()
-		}
-		switch {
-		case y == top:
-			return paneHit{pane: id, row: -1, title: true}, true
-		case y > top && y <= top+height:
-			hit := paneHit{pane: id, row: -1}
-			if line := y - top - 1 - tableHeaderLen; rowCount(pane) > 0 && line >= 0 {
-				if row := firstVisibleRow(pane.table) + line; row < rowCount(pane) {
-					hit.row = row
-				}
-			}
-			return hit, true
-		}
-		top += 1 + height
+	if y == p.top {
+		return paneHit{pane: p.id, row: -1, title: true}, true
 	}
-	return paneHit{}, false
+	hit := paneHit{pane: p.id, row: -1}
+	pane := &m.panes[p.id]
+	if line := y - p.top - 1 - tableHeaderLen; rowCount(pane) > 0 && line >= 0 {
+		if row := firstVisibleRow(pane.table) + line; row < rowCount(pane) {
+			hit.row = row
+		}
+	}
+	return hit, true
 }
 
 // probeBackground marks the selected row when finding a table's scroll
@@ -96,18 +84,6 @@ func firstVisibleRow(t table.Model) int {
 		}
 	}
 	return 0
-}
-
-// hoveredRow returns the pane's row under the pointer, or -1.
-func (m *model) hoveredRow(id paneID) int {
-	if !m.mouse || !m.pointer.known {
-		return -1
-	}
-	hit, ok := m.hitTest(m.pointer.y)
-	if !ok || hit.pane != id {
-		return -1
-	}
-	return hit.row
 }
 
 // handleMouse applies mouse events while mouse mode is on and the lists are

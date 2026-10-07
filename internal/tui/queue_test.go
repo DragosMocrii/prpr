@@ -33,7 +33,7 @@ func TestQueuedPullRequestsMoveToTheQueuePane(t *testing.T) {
 func TestQueuePaneIsNotDrawnWhenEmpty(t *testing.T) {
 	m := newPaneModel(t, 120, 40, manyPRs(4), reviewPRs(3))
 	view := ansi.Strip(strings.Join(assertBounded(t, m, 120, 40), "\n"))
-	if strings.Contains(view, "Merge queue") || len(m.drawnPanes()) != 2 {
+	if strings.Contains(view, "Merge queue") || len(m.framePlan().drawn) != 2 {
 		t.Fatalf("empty queue pane drawn:\n%s", view)
 	}
 }
@@ -60,7 +60,7 @@ func TestQueueEmptyingMovesFocusToADrawnPane(t *testing.T) {
 	snapshot := m.snapshot
 	snapshot.PullRequests = manyPRs(4)
 	m.applySnapshot(snapshot)
-	if m.focus == paneQueue || slicesContains(m.drawnPanes(), paneQueue) {
+	if m.focus == paneQueue || slicesContains(m.framePlan().drawn, paneQueue) {
 		t.Fatalf("focus %v on an undrawn pane", m.focus)
 	}
 }
@@ -303,7 +303,7 @@ func TestSelectionFollowsAPullRequestBetweenMyPRsAndTheQueue(t *testing.T) {
 			t.Fatalf("%v: out of the queue selected %+v focus %v details %v", size, pr, m.focus, m.details)
 		}
 		assertBounded(t, m, size[0], size[1])
-		if m.layoutPanes().tables[m.focus] == 0 {
+		if m.framePlan().tables[m.focus] == 0 {
 			t.Fatalf("%v: focused pane %v is not drawn", size, m.focus)
 		}
 
@@ -315,7 +315,7 @@ func TestSelectionFollowsAPullRequestBetweenMyPRsAndTheQueue(t *testing.T) {
 			t.Fatalf("%v: into the queue selected %+v focus %v details %v", size, pr, m.focus, m.details)
 		}
 		assertBounded(t, m, size[0], size[1])
-		if m.layoutPanes().tables[m.focus] == 0 {
+		if m.framePlan().tables[m.focus] == 0 {
 			t.Fatalf("%v: focused pane %v is not drawn", size, m.focus)
 		}
 	}
@@ -364,11 +364,11 @@ func TestQueuePaneTakesOnlyTheRowsItNeeds(t *testing.T) {
 	mine := manyPRs(30)
 	mine[0].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueTesting}
 	m := newPaneModel(t, 120, 40, mine, reviewPRs(30))
-	layout := m.layoutPanes()
+	layout := m.framePlan()
 	if layout.single || layout.tables[paneQueue] != minDualTableHeight {
 		t.Fatalf("queue table = %d, want %d", layout.tables[paneQueue], minDualTableHeight)
 	}
-	rows := m.height - m.listChromeHeight() - len(m.drawnPanes())
+	rows := m.height - m.listChromeHeight() - len(m.framePlan().drawn)
 	if total := layout.tables[paneMine] + layout.tables[paneQueue] + layout.tables[paneReview]; total != rows {
 		t.Fatalf("tables %v use %d of %d lines", layout.tables, total, rows)
 	}
@@ -385,8 +385,8 @@ func TestPreviewDrawsNoQueuePane(t *testing.T) {
 	}
 	m := testModel(store, 120, 40)
 	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", Preview: true, PullRequests: manyPRs(4), ReviewRequests: reviewPRs(2)}})
-	if len(m.panes[paneMine].visible) != 4 || len(m.panes[paneQueue].visible) != 0 || slicesContains(m.drawnPanes(), paneQueue) {
-		t.Fatalf("preview mine %v queue %v drawn %v", m.panes[paneMine].visible, m.panes[paneQueue].visible, m.drawnPanes())
+	if len(m.panes[paneMine].visible) != 4 || len(m.panes[paneQueue].visible) != 0 || slicesContains(m.framePlan().drawn, paneQueue) {
+		t.Fatalf("preview mine %v queue %v drawn %v", m.panes[paneMine].visible, m.panes[paneQueue].visible, m.framePlan().drawn)
 	}
 	if view := ansi.Strip(strings.Join(assertBounded(t, m, 120, 40), "\n")); strings.Contains(view, "Merge queue") {
 		t.Fatalf("preview draws the queue pane:\n%s", view)

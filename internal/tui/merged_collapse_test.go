@@ -57,11 +57,11 @@ func TestHCollapsesMergedToItsTitleAndSavesIt(t *testing.T) {
 func TestCollapsedMergedFitsWhereItsTableWouldNot(t *testing.T) {
 	// The other lists fill the screen, so the table has no room.
 	m := mergedLayoutModel(t, 100, 20, manyPRs(12), reviewPRs(12), mergedPRs(3))
-	if slices.Contains(m.drawnPanes(), paneMerged) {
+	if slices.Contains(m.framePlan().drawn, paneMerged) {
 		t.Fatal("expanded Merged drawn without room")
 	}
 	m.toggleCollapsed(paneMerged)
-	if !slices.Contains(m.drawnPanes(), paneMerged) || titleLineOf(m, "Merged") < 0 {
+	if !slices.Contains(m.framePlan().drawn, paneMerged) || titleLineOf(m, "Merged") < 0 {
 		t.Fatalf("collapsed Merged not drawn:\n%s", ansi.Strip(m.View().Content))
 	}
 	for _, size := range [][2]int{{40, 10}, {80, 14}, {100, 20}, {140, 30}} {

@@ -53,7 +53,7 @@ func TestTableRowsAreStripedAndSelectionSpansTheRow(t *testing.T) {
 		}
 		m.Update(tea.BackgroundColorMsg{Color: bgColor})
 		plain := strings.Split(m.panes[paneMine].table.View(), "\n")
-		lines := m.tableLines(paneMine)
+		lines := m.tableLines(paneMine, -1)
 		if len(lines) != len(plain) {
 			t.Fatalf("dark %t: %d lines, want %d", dark, len(lines), len(plain))
 		}
@@ -85,7 +85,7 @@ func TestUnfocusedPaneIsStripedWithoutSelection(t *testing.T) {
 	m.Update(tea.BackgroundColorMsg{Color: color.Black})
 	m.snapshot.ReviewRequests = m.snapshot.PullRequests
 	m.rebuildVisiblePRs()
-	lines := m.tableLines(paneReview)
+	lines := m.tableLines(paneReview, -1)
 	for i, line := range lines[tableHeaderLen : tableHeaderLen+4] {
 		striped := strings.Contains(line, background(darkStripe))
 		if striped != (i%2 == 1) || strings.Contains(line, background(darkSelected)) {

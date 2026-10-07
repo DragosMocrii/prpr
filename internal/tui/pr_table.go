@@ -19,10 +19,10 @@ import (
 // rebuildPRTable rebuilds both panes' tables for the current layout.
 func (m *model) rebuildPRTable(resetSelection bool) {
 	// An emptied queue pane is no longer drawn, nor a Merged pane the
-	// terminal has no room for, so neither can keep the focus.
-	if drawn := m.focusPanes(); !slices.Contains(drawn, m.focus) {
+	// terminal has no room for, nor a collapsed one, so none can keep the focus.
+	if focusable := m.framePlan().focusable(m); !slices.Contains(focusable, m.focus) {
 		m.focus = paneMine
-		for _, id := range drawn {
+		for _, id := range focusable {
 			if len(m.panes[id].visible) > 0 {
 				m.focus = id
 				break
@@ -30,10 +30,11 @@ func (m *model) rebuildPRTable(resetSelection bool) {
 		}
 	}
 	m.sharedRows = m.shared()
-	layout := m.layoutPanes()
+	// Planned after the focus fix-up: single-pane mode follows the focus.
+	plan := m.framePlan()
 	for _, id := range paneIDs {
 		// Hidden and empty panes keep a minimal table so cursors survive.
-		m.rebuildPane(id, max(minTableHeight, layout.tables[id]), resetSelection)
+		m.rebuildPane(id, max(minTableHeight, plan.tables[id]), resetSelection)
 	}
 }
 

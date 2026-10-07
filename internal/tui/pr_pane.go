@@ -122,23 +122,6 @@ func (m *model) eachSourcePR(id paneID, fn func(*github.PullRequest)) {
 	}
 }
 
-// drawnPanes lists the panes on screen in order: the queue and Snoozed
-// panes only while they have rows, and the Merged pane only while it has
-// rows and room (see mergedRoom).
-func (m *model) drawnPanes() []paneID {
-	ids := m.openPanes()
-	if rowCount(&m.panes[paneMerged]) == 0 {
-		return ids
-	}
-	// Collapsed, the Merged pane is a title line, which the other panes
-	// give up while they keep their smallest tables.
-	if m.collapsed[paneMerged] && m.height-m.listChromeHeight()-1 >= m.openPanesNeed(ids) ||
-		!m.collapsed[paneMerged] && m.mergedRoom() >= minDualTableHeight {
-		ids = append(ids, paneMerged)
-	}
-	return ids
-}
-
 // openPanesNeed is the fewest lines the panes of open pull requests take
 // side by side: a title and the smallest table each, or a title and an
 // empty line.
@@ -152,12 +135,6 @@ func (m *model) openPanesNeed(ids []paneID) int {
 		}
 	}
 	return total
-}
-
-// focusPanes lists the drawn panes that can take the focus: all but a
-// collapsed one.
-func (m *model) focusPanes() []paneID {
-	return slices.DeleteFunc(m.drawnPanes(), func(id paneID) bool { return m.collapsed[id] })
 }
 
 // openPanes lists the drawn panes of open pull requests: every drawn pane
@@ -174,27 +151,9 @@ func (m *model) openPanes() []paneID {
 	return ids
 }
 
-// mergedRoom is how many lines the Merged pane's table may take: what the
-// list leaves once the panes of open pull requests have a title and every
-// row each, and the Merged pane its title. Merged pull requests need
-// nothing of the viewer, so they never squeeze the other lists or switch
-// them to one pane at a time.
-func (m *model) mergedRoom() int {
-	room := m.height - m.listChromeHeight() - 1
-	for _, id := range m.openPanes() {
-		room-- // title
-		if rows := rowCount(&m.panes[id]); rows > 0 {
-			room -= max(minDualTableHeight, tableHeaderLen+rows)
-		} else {
-			room-- // empty line
-		}
-	}
-	return room
-}
-
 // nextPane is the drawn pane step places after the focused one, wrapping.
 func (m *model) nextPane(step int) paneID {
-	drawn := m.focusPanes()
+	drawn := m.framePlan().focusable(m)
 	at := slices.Index(drawn, m.focus)
 	if at < 0 {
 		return drawn[0]
@@ -233,13 +192,6 @@ const minTableHeight = 3
 // several panes are drawn.
 const minDualTableHeight = 4
 
-// paneLayout gives each pane's table height, including its header. A zero
-// height means the pane is empty or not drawn.
-type paneLayout struct {
-	single bool // only the focused pane is drawn
-	tables [len(paneIDs)]int
-}
-
 // listChromeHeight counts list lines outside the panes: the title, the
 // summary and footer rule when shown, the legend when open, the selected
 // URL, the status line, and the help.
@@ -266,31 +218,10 @@ func (m *model) footerRuleShown() bool {
 	return m.height >= minSummaryHeight
 }
 
-func (m *model) layoutPanes() paneLayout {
-	avail := m.height - m.listChromeHeight()
-	switch {
-	case !slices.Contains(m.drawnPanes(), paneMerged):
-		return m.layoutOpenPanes(avail)
-	case m.collapsed[paneMerged]:
-		return m.layoutOpenPanes(avail - 1)
-	}
-	// Merged takes its rows, up to what the other panes leave; they share
-	// the rest.
-	merged := m.layoutMerged()
-	layout := m.layoutOpenPanes(avail - 1 - merged)
-	layout.tables[paneMerged] = merged
-	return layout
-}
-
-// layoutMerged is the Merged pane's table height when it is drawn.
-func (m *model) layoutMerged() int {
-	return min(tableHeaderLen+rowCount(&m.panes[paneMerged]), m.mergedRoom())
-}
-
-// layoutOpenPanes lays out the panes of open pull requests in avail lines.
-func (m *model) layoutOpenPanes(avail int) paneLayout {
+// openTables lays out the tables of the drawn panes of open pull requests
+// in avail lines, into tables. It reports whether only the focused pane fits.
+func (m *model) openTables(drawn []paneID, avail int, tables [len(paneIDs)]int) (bool, [len(paneIDs)]int) {
 	filled := func(id paneID) bool { return rowCount(&m.panes[id]) > 0 }
-	drawn := m.openPanes()
 	total := m.openPanesNeed(drawn)
 	var full []paneID
 	for _, id := range drawn {
@@ -298,13 +229,11 @@ func (m *model) layoutOpenPanes(avail int) paneLayout {
 			full = append(full, id)
 		}
 	}
-	var layout paneLayout
 	if avail < total {
-		layout.single = true
 		if filled(m.focus) {
-			layout.tables[m.focus] = max(minTableHeight, avail-1)
+			tables[m.focus] = max(minTableHeight, avail-1)
 		}
-		return layout
+		return true, tables
 	}
 	// Pane titles, then an empty line for each pane without rows; filled
 	// panes share the rest, earlier panes taking the remainder.
@@ -318,18 +247,18 @@ func (m *model) layoutOpenPanes(avail int) paneLayout {
 		}
 		if len(full) > 1 && filled(short) {
 			fit := max(minDualTableHeight, tableHeaderLen+rowCount(&m.panes[short]))
-			layout.tables[short] = min(fit, rows/len(full))
-			rows -= layout.tables[short]
+			tables[short] = min(fit, rows/len(full))
+			rows -= tables[short]
 			full = slices.DeleteFunc(full, func(id paneID) bool { return id == short })
 		}
 	}
 	for i, id := range full {
-		layout.tables[id] = rows / len(full)
+		tables[id] = rows / len(full)
 		if i < rows%len(full) {
-			layout.tables[id]++
+			tables[id]++
 		}
 	}
-	return layout
+	return false, tables
 }
 
 // source is the pull requests of a fetched list.
@@ -487,7 +416,7 @@ func tableStyles(focused, dark bool) table.Styles {
 // hovered row highlighted. Cells end
 // their colors with full resets, so each row's background, the selected
 // row's included, is turned back on after every reset to span the row.
-func (m *model) tableLines(id paneID) []string {
+func (m *model) tableLines(id paneID, hoveredRow int) []string {
 	pane := &m.panes[id]
 	lines := strings.Split(pane.table.View(), "\n")
 	stripe, hover := lightStripe, lightHover
@@ -495,7 +424,7 @@ func (m *model) tableLines(id paneID) []string {
 		stripe, hover = darkStripe, darkHover
 	}
 	hovered := -1
-	if row := m.hoveredRow(id); row >= 0 {
+	if row := hoveredRow; row >= 0 {
 		hovered = tableHeaderLen + row - firstVisibleRow(pane.table)
 	}
 	for i := tableHeaderLen; i < len(lines) && i-tableHeaderLen < len(pane.table.Rows()); i++ {
@@ -655,11 +584,15 @@ func (m *model) snoozedShows(list listID) bool {
 	return false
 }
 
-// setFocus moves key input to a pane. When only the focused pane fits on
-// screen, the tables are rebuilt so the newly shown pane gets the room.
+// setFocus moves key input to a pane that can take it. When only the
+// focused pane fits on screen, the tables are rebuilt so the newly shown
+// pane gets the room.
 func (m *model) setFocus(id paneID) {
+	if !slices.Contains(m.framePlan().focusable(m), id) {
+		return
+	}
 	m.focus = id
-	if m.layoutPanes().single {
+	if m.framePlan().single {
 		m.rebuildPRTable(false)
 		return
 	}

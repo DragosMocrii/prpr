@@ -112,7 +112,7 @@ func TestLegendWrapsAndYieldsToTheTables(t *testing.T) {
 	// Shorter: only whole sections that leave both tables their minimum.
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 19})
 	lines = assertBounded(t, m, 120, 19)
-	if layout := m.layoutPanes(); layout.single {
+	if layout := m.framePlan(); layout.single {
 		t.Fatal("the legend switched the panes to one at a time")
 	}
 	if text := legendText(m); !strings.Contains(text, "taller terminal") || strings.Contains(text, "Marks") {

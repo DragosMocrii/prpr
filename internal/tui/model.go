@@ -845,7 +845,7 @@ func (m *model) leaveRow(id paneID, row int) {
 		}
 		return
 	}
-	drawn := m.drawnPanes()
+	drawn := m.framePlan().drawn
 	m.trackerFor(id, pr).dismiss(pr)
 	if id == paneSnoozed {
 		delete(m.snoozeClosed, key)
@@ -863,7 +863,7 @@ func (m *model) leaveRow(id paneID, row int) {
 	// a layout of its own.
 	// So can one with the last row of another repository, whose column
 	// then goes.
-	if slices.Equal(drawn, m.drawnPanes()) && m.sharedRows == m.shared() {
+	if slices.Equal(drawn, m.framePlan().drawn) && m.sharedRows == m.shared() {
 		m.redrawRows(id)
 	} else {
 		m.rebuildPRTable(false)
@@ -1065,7 +1065,7 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 	})
 	if accountChanged {
 		focus := paneMine
-		for _, id := range m.focusPanes() {
+		for _, id := range m.framePlan().focusable(m) {
 			if len(m.panes[id].visible) > 0 {
 				focus = id
 				break
@@ -1120,7 +1120,7 @@ func (m *model) keepSelection(rebuild func(), follow bool) {
 	if !follow || !selected.ok || m.selectPR(focus, selected.repository, selected.number) {
 		return
 	}
-	for _, to := range m.focusPanes() {
+	for _, to := range m.framePlan().focusable(m) {
 		if to != focus && m.selectPR(to, selected.repository, selected.number) {
 			m.setFocus(to)
 			m.selectPR(to, selected.repository, selected.number)
@@ -1360,12 +1360,8 @@ func (m *model) errorLines() []string {
 
 // panesFit reports whether every drawn pane with rows has room for its columns.
 func (m *model) panesFit() bool {
-	layout := m.layoutPanes()
-	for _, id := range m.drawnPanes() {
-		if layout.single && id != m.focus {
-			continue
-		}
-		if pane := &m.panes[id]; rowCount(pane) > 0 && !pane.fits {
+	for _, p := range m.framePlan().screen {
+		if pane := &m.panes[p.id]; rowCount(pane) > 0 && !pane.fits {
 			return false
 		}
 	}
@@ -1399,20 +1395,26 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 	if m.summaryShown() {
 		lines = append(lines, m.summaryLine())
 	}
-	layout := m.layoutPanes()
-	for _, id := range m.drawnPanes() {
-		if layout.single && id != m.focus {
-			continue
+	plan := m.framePlan()
+	hover := paneHit{row: -1}
+	if m.mouse && m.pointer.known {
+		if hit, ok := m.hitIn(plan, m.pointer.y); ok {
+			hover = hit
 		}
-		lines = append(lines, m.paneTitle(id, layout.single))
-		if m.collapsed[id] {
-			continue
+	}
+	for _, p := range plan.screen {
+		lines = append(lines, m.paneTitle(p.id, plan.single))
+		switch {
+		case m.collapsed[p.id]:
+		case rowCount(&m.panes[p.id]) == 0:
+			lines = append(lines, m.emptyPaneLine(p.id))
+		default:
+			row := -1
+			if hover.pane == p.id && !hover.title {
+				row = hover.row
+			}
+			lines = append(lines, m.tableLines(p.id, row)...)
 		}
-		if rowCount(&m.panes[id]) == 0 {
-			lines = append(lines, m.emptyPaneLine(id))
-			continue
-		}
-		lines = append(lines, m.tableLines(id)...)
 	}
 	lines = append(lines, legendLines...)
 	// The rule sets the footer apart from whichever list or legend ends above it.

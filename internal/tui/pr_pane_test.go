@@ -151,7 +151,7 @@ func TestPanesStayBoundedAcrossSizes(t *testing.T) {
 
 func TestShortTerminalShowsOnlyFocusedPane(t *testing.T) {
 	m := newPaneModel(t, 80, 10, manyPRs(30), reviewPRs(30))
-	if !m.layoutPanes().single {
+	if !m.framePlan().single {
 		t.Fatal("10 rows with two filled panes should use the single-pane layout")
 	}
 	view := ansi.Strip(strings.Join(assertBounded(t, m, 80, 10), "\n"))
@@ -367,9 +367,9 @@ func TestDualLayoutGivesEachPaneHeaderPlusTwoRows(t *testing.T) {
 	const width = 80
 	for height := 8; height <= 20; height++ {
 		m := newPaneModel(t, width, height, manyPRs(30), reviewPRs(30))
-		layout := m.layoutPanes()
+		layout := m.framePlan()
 		if !layout.single {
-			for _, id := range m.drawnPanes() {
+			for _, id := range m.framePlan().drawn {
 				// Height is the row viewport; the header takes two more lines.
 				if got := m.panes[id].table.Height(); got < 2 {
 					t.Fatalf("height %d: pane %d shows %d rows, want at least 2", height, id, got)
@@ -381,7 +381,7 @@ func TestDualLayoutGivesEachPaneHeaderPlusTwoRows(t *testing.T) {
 		}
 		assertBounded(t, m, width, height)
 	}
-	if m := newPaneModel(t, width, 12, manyPRs(30), reviewPRs(30)); !m.layoutPanes().single {
+	if m := newPaneModel(t, width, 12, manyPRs(30), reviewPRs(30)); !m.framePlan().single {
 		t.Fatal("80x12 should use the single-pane layout")
 	}
 }
