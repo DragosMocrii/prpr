@@ -79,8 +79,9 @@ func (c *paneChanges) reset(list []github.PullRequest) {
 }
 
 // update marks the differences between the baseline and list, then makes
-// list the baseline.
-func (c *paneChanges) update(list []github.PullRequest) {
+// list the baseline. A pull request that left the list is gone unless
+// notGone says it moved on.
+func (c *paneChanges) update(list []github.PullRequest, notGone func(prKey) bool) {
 	if c.marks == nil {
 		c.marks = make(map[prKey]rowMark)
 	}
@@ -126,7 +127,9 @@ func (c *paneChanges) update(list []github.PullRequest) {
 	for i := range c.baseline {
 		if key := keyOf(&c.baseline[i]); !current[key] {
 			delete(c.marks, key)
-			c.gone = append(c.gone, c.baseline[i])
+			if notGone == nil || !notGone(key) {
+				c.gone = append(c.gone, c.baseline[i])
+			}
 		}
 	}
 	c.baseline = list
@@ -612,7 +615,7 @@ func (m *model) wasRead(id paneID, pr *github.PullRequest, gone bool) bool {
 
 // rechanged starts the rest over when a fetch marked the row again.
 func (m *model) rechanged() {
-	for _, id := range listIDs {
+	for _, id := range trackedIDs {
 		if m.changes[id].raised[m.rest.key] {
 			m.rest = restState{}
 			return

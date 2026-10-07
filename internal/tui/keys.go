@@ -287,9 +287,9 @@ func (m *model) syncKeys() {
 		k.Legend.SetHelp("L", "show legend")
 	}
 	k.Settings.SetEnabled(listing && m.settings == nil && m.rulesEditor == nil)
-	k.Snooze.SetEnabled(listing && rows && m.snoozeEditor == nil)
+	k.Snooze.SetEnabled(listing && rows && m.snoozeEditor == nil && m.focus != paneMerged)
 	k.Undo.SetEnabled(listing && m.snoozeEditor == nil)
-	k.Rerequest.SetEnabled(listing && rows && m.focus != paneReview && m.rerequest == nil)
+	k.Rerequest.SetEnabled(listing && rows && m.focus != paneReview && m.focus != paneMerged && m.rerequest == nil)
 	k.DismissPlead.SetEnabled(listing && rows && m.selectedPleading())
 	if m.focus == paneSnoozed {
 		k.Snooze.SetHelp("z", "wake")

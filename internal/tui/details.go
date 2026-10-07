@@ -156,6 +156,12 @@ func (m *model) detailRows(pr *github.PullRequest, gone bool) []detailRowText {
 			add("Changed", changed...)
 		}
 	}
+	if m.focus == paneMerged {
+		// The label already says Merged.
+		add("Merged", strings.TrimPrefix(mergedDetail(pr, now), "Merged "))
+		add("Size", fmt.Sprintf("+%d −%d lines", pr.Additions, pr.Deletions))
+		return rows
+	}
 	if review {
 		add("Author", singleLine(pr.Author))
 	}
@@ -395,6 +401,9 @@ func (m *model) rowStatus() []string {
 		return []string{"No longer listed"}
 	case m.snapshot.Preview:
 		return []string{loadingDetails}
+	}
+	if m.focus == paneMerged {
+		return []string{mergedDetail(pr, m.now())}
 	}
 	var facts []string
 	list := m.focus

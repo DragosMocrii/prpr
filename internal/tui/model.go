@@ -43,7 +43,7 @@ type model struct {
 	owner       string
 	filterLogin string
 	panes       [len(paneIDs)]prPane
-	changes     [2]paneChanges
+	changes     [len(paneIDs)]paneChanges
 	// snoozes are the account's snoozed pull requests.
 	snoozes map[prKey]preferences.Snooze
 	// snoozeClosed holds snoozed pull requests that closed: their list, for
@@ -314,7 +314,9 @@ func newModel(ctx context.Context, client *github.Client, preferences *preferenc
 	} else if m.scheduleErr == nil {
 		m.scheduleErr = err
 	}
-	m.panes = [len(paneIDs)]prPane{newPRPane(), newPRPane(), newPRPane(), newPRPane()}
+	for id := range m.panes {
+		m.panes[id] = newPRPane()
+	}
 	m.rebuildPRTable(true)
 	return m
 }
@@ -710,7 +712,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.setFocus(m.nextPane(step))
 	case key.Matches(msg, k.ClearMarks):
 		m.keepingSelection(func() {
-			for _, id := range listIDs {
+			for _, id := range trackedIDs {
 				m.changes[id].clear()
 			}
 			m.woke = nil
@@ -1033,11 +1035,11 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 			if !quiet {
 				alerts = append(alerts, m.reviewSnoozes(!reset)...)
 			}
-			for _, id := range listIDs {
+			for _, id := range trackedIDs {
 				if reset {
 					m.changes[id].reset(m.source(id))
 				} else {
-					m.changes[id].update(m.source(id))
+					m.changes[id].update(m.source(id), m.movedOn(id))
 				}
 			}
 			m.rechanged()

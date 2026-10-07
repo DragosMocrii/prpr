@@ -66,6 +66,7 @@ type tableLayout struct {
 	stats            []statColumn
 	detail           bool // the queue pane's Detail column is shown
 	from             bool // the Snoozed pane's From column is shown
+	mergedBy         bool // the Merged pane's Merged by column is shown
 	plead            bool // the mark column is wide enough for the asked-again marker
 	fits             bool
 }
@@ -74,12 +75,13 @@ func (m *model) paneLayout(id paneID) tableLayout {
 	pane := &m.panes[id]
 	review := id == paneReview
 	// Number, Repository, and Author are as wide as their longest value.
-	maxNumberWidth, maxRepository, maxAuthor := 6, 0, 0
+	maxNumberWidth, maxRepository, maxAuthor, maxMergedBy := 6, 0, 0, 0
 	for row := range rowCount(pane) {
 		if pr, _, ok := m.paneRow(id, row); ok {
 			maxNumberWidth = max(maxNumberWidth, ansi.StringWidth(fmt.Sprintf("#%d", pr.Number)))
 			maxRepository = max(maxRepository, ansi.StringWidth(singleLine(pr.Repository)))
 			maxAuthor = max(maxAuthor, ansi.StringWidth(singleLine(pr.Author)))
+			maxMergedBy = max(maxMergedBy, ansi.StringWidth(singleLine(pr.MergedBy)))
 		}
 	}
 	width := max(1, m.width)
@@ -125,6 +127,25 @@ func (m *model) paneLayout(id paneID) tableLayout {
 		withFrom := append(slices.Clone(columns), table.Column{Title: "From", Width: 12})
 		if remainingWidth(width, withFrom) >= minStatsNameWidth {
 			columns, layout.from = withFrom, true
+		}
+		nameWidth := remainingWidth(width, columns)
+		layout.fits = nameWidth >= 8
+		columns[nameColumn].Width = max(8, nameWidth)
+		layout.columns = columns
+		return layout
+	}
+	if id == paneMerged {
+		columns := []table.Column{{Title: "", Width: 1}, {Title: ic.header("Merged"), Width: 6}}
+		if layout.repositoryColumn {
+			columns = append(columns, table.Column{Title: "Repository", Width: repositoryWidth})
+		}
+		columns = append(columns, table.Column{Title: "Number", Width: maxNumberWidth})
+		nameColumn := len(columns)
+		columns = append(columns, table.Column{Title: "PR name"})
+		// Like the queue's Detail, Merged by stays only while the name keeps room.
+		withBy := append(slices.Clone(columns), table.Column{Title: "Merged by", Width: min(16, max(len("Merged by"), maxMergedBy))})
+		if remainingWidth(width, withBy) >= minStatsNameWidth {
+			columns, layout.mergedBy = withBy, true
 		}
 		nameWidth := remainingWidth(width, columns)
 		layout.fits = nameWidth >= 8
@@ -279,6 +300,19 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			} else if tag != "" {
 				name = tag + " · " + name
 			}
+		}
+		// Merged rows are never gone: falling out of the last N is not news.
+		if id == paneMerged {
+			cells := table.Row{markCell, ageText(pr.MergedAt, now)}
+			if layout.repositoryColumn {
+				cells = append(cells, singleLine(pr.Repository))
+			}
+			cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(cellName, name))
+			if layout.mergedBy {
+				cells = append(cells, singleLine(pr.MergedBy))
+			}
+			rows = append(rows, cells)
+			continue
 		}
 		if reason, ok := m.woke[keyOf(pr)]; ok && id != paneSnoozed {
 			name = wokeTag(ic, singleLine(reason)) + " · " + name
