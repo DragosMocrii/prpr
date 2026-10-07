@@ -830,6 +830,7 @@ func (m *model) leaveRow(id paneID, row int) {
 		}
 		return
 	}
+	drawn := m.drawnPanes()
 	m.trackerFor(id, pr).dismiss(pr)
 	if id == paneSnoozed {
 		delete(m.snoozeClosed, key)
@@ -843,7 +844,13 @@ func (m *model) leaveRow(id paneID, row int) {
 	if row < target {
 		target--
 	}
-	m.redrawRows(id)
+	// A shorter pane can leave room for the Merged pane, which then needs
+	// a layout of its own.
+	if slices.Equal(drawn, m.drawnPanes()) {
+		m.redrawRows(id)
+	} else {
+		m.rebuildPRTable(false)
+	}
 	moveCursor(&pane.table, target)
 	m.syncPages(id)
 }

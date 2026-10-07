@@ -282,3 +282,37 @@ func TestMergedRowDetails(t *testing.T) {
 		t.Fatal("e disabled on a merged row's details")
 	}
 }
+
+func TestDroppingAGoneRowThatMakesRoomForMergedStaysBounded(t *testing.T) {
+	m := notifyModel(t, "")
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 22})
+	var mine, merged []github.PullRequest
+	for n := 1; n <= 8; n++ {
+		mine = append(mine, changePR(n, "acme/a"))
+	}
+	for n := 11; n <= 15; n++ {
+		merged = append(merged, mergedPR(changePR(n, "acme/m"), time.Duration(n)*time.Hour))
+	}
+	fetchMerged(m, mine, merged)
+	// #8 closes without merging and stays behind as a gone row.
+	fetchMerged(m, mine[:7], merged)
+	if slices.Contains(m.drawnPanes(), paneMerged) {
+		t.Fatal("Merged drawn before the gone row is dropped; the test needs a smaller terminal")
+	}
+	down, up := tea.Key{Code: 'j', Text: "j"}, tea.Key{Code: 'k', Text: "k"}
+	for range 7 {
+		press(m, down)
+	}
+	if pr, gone, _ := m.paneRow(paneMine, m.panes[paneMine].table.Cursor()); !gone || pr.Number != 8 {
+		t.Fatalf("cursor on %+v (gone %v), want gone #8", pr, gone)
+	}
+	rest(m)
+	press(m, up)
+	if !slices.Contains(m.drawnPanes(), paneMerged) {
+		t.Fatal("dropping the gone row left no room for Merged; the test needs a larger terminal")
+	}
+	assertBounded(t, m, 140, 22)
+	if !strings.Contains(ansi.Strip(m.View().Content), "Merged (5)") {
+		t.Fatal("Merged pane not laid out after it gained room")
+	}
+}
