@@ -269,17 +269,18 @@ func (m *model) footerRuleShown() bool {
 
 func (m *model) layoutPanes() paneLayout {
 	avail := m.height - m.listChromeHeight()
-	if slices.Contains(m.drawnPanes(), paneMerged) && m.mergedCollapsed {
+	switch {
+	case !slices.Contains(m.drawnPanes(), paneMerged):
+		return m.layoutOpenPanes(avail)
+	case m.mergedCollapsed:
 		return m.layoutOpenPanes(avail - 1)
 	}
-	if slices.Contains(m.drawnPanes(), paneMerged) {
-		// Merged takes its rows, up to what the other panes leave; they
-		// share the rest.
-		layout := m.layoutOpenPanes(avail - 1 - m.layoutMerged())
-		layout.tables[paneMerged] = m.layoutMerged()
-		return layout
-	}
-	return m.layoutOpenPanes(avail)
+	// Merged takes its rows, up to what the other panes leave; they share
+	// the rest.
+	merged := m.layoutMerged()
+	layout := m.layoutOpenPanes(avail - 1 - merged)
+	layout.tables[paneMerged] = merged
+	return layout
 }
 
 // layoutMerged is the Merged pane's table height when it is drawn.

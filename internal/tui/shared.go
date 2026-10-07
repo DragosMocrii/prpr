@@ -14,6 +14,8 @@ type sharedRepositories struct {
 	repository, owner string
 }
 
+// shared finds it afresh; rebuildPRTable keeps it in sharedRows, which the
+// tables and the title read.
 func (m *model) shared() sharedRepositories {
 	var shared sharedRepositories
 	first, mixedOwners, mixedRepositories := true, false, false
@@ -29,12 +31,11 @@ func (m *model) shared() sharedRepositories {
 		mixedRepositories = mixedRepositories || !strings.EqualFold(pr.Repository, shared.repository)
 		mixedOwners = mixedOwners || !strings.EqualFold(owner, shared.owner)
 	}
-	for _, list := range [][]github.PullRequest{m.snapshot.PullRequests, m.snapshot.ReviewRequests, m.snapshot.Merged} {
+	for _, id := range trackedIDs {
+		list := m.source(id)
 		for i := range list {
 			note(&list[i])
 		}
-	}
-	for _, id := range trackedIDs {
 		for i := range m.changes[id].gone {
 			note(&m.changes[id].gone[i])
 		}
@@ -64,7 +65,7 @@ func (m *model) sharedLabel() string {
 	if m.selectedRepository != "" {
 		return ""
 	}
-	shared := m.shared()
+	shared := m.sharedRows
 	switch {
 	case shared.repository != "":
 		return "only " + singleLine(shared.repository)

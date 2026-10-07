@@ -120,6 +120,9 @@ type model struct {
 	legend bool
 	// mergedCollapsed draws the Merged pane as its title alone.
 	mergedCollapsed bool
+	// sharedRows is the repository or owner every row shares, as of the
+	// last table rebuild.
+	sharedRows sharedRepositories
 	// showDrafts puts draft pull requests in scope; it is saved.
 	showDrafts bool
 	// merged is how many merged pull requests the Merged pane lists; 0 is off.
@@ -842,7 +845,7 @@ func (m *model) leaveRow(id paneID, row int) {
 		}
 		return
 	}
-	drawn, shared := m.drawnPanes(), m.shared()
+	drawn := m.drawnPanes()
 	m.trackerFor(id, pr).dismiss(pr)
 	if id == paneSnoozed {
 		delete(m.snoozeClosed, key)
@@ -860,7 +863,7 @@ func (m *model) leaveRow(id paneID, row int) {
 	// a layout of its own.
 	// So can one with the last row of another repository, whose column
 	// then goes.
-	if slices.Equal(drawn, m.drawnPanes()) && shared == m.shared() {
+	if slices.Equal(drawn, m.drawnPanes()) && m.sharedRows == m.shared() {
 		m.redrawRows(id)
 	} else {
 		m.rebuildPRTable(false)

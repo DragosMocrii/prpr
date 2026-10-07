@@ -29,6 +29,7 @@ func (m *model) rebuildPRTable(resetSelection bool) {
 			}
 		}
 	}
+	m.sharedRows = m.shared()
 	layout := m.layoutPanes()
 	for _, id := range paneIDs {
 		// Hidden and empty panes keep a minimal table so cursors survive.
@@ -89,7 +90,7 @@ func (m *model) paneLayout(id paneID) tableLayout {
 	review := id == paneReview
 	// Number, Repository, and Author are as wide as their longest value.
 	maxNumberWidth, maxRepository, maxAuthor, maxMergedBy := 6, 0, 0, 0
-	shared := m.shared()
+	shared := m.sharedRows
 	for row := range rowCount(pane) {
 		if pr, _, ok := m.paneRow(id, row); ok {
 			maxNumberWidth = max(maxNumberWidth, ansi.StringWidth(fmt.Sprintf("#%d", pr.Number)))
@@ -321,7 +322,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		if id == paneMerged {
 			cells := table.Row{markCell, ageText(pr.MergedAt, now)}
 			if layout.repositoryColumn {
-				cells = append(cells, layout.shared.repositoryText(pr))
+				cells = append(cells, shared.repositoryText(pr))
 			}
 			cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(cellName, name))
 			if layout.mergedBy {
@@ -340,7 +341,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		if id == paneQueue {
 			cells := table.Row{markCell, changed(cellQueue, queueText(ic, pr.Queue.State))}
 			if layout.repositoryColumn {
-				cells = append(cells, layout.shared.repositoryText(pr))
+				cells = append(cells, shared.repositoryText(pr))
 			}
 			cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(cellName, name))
 			if layout.detail {
@@ -369,7 +370,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			cells = append(cells, changed(lastCell, last))
 		}
 		if layout.repositoryColumn {
-			cells = append(cells, layout.shared.repositoryText(pr))
+			cells = append(cells, shared.repositoryText(pr))
 		}
 		cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(nameCells, name))
 		if review {

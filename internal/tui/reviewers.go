@@ -7,7 +7,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/DragosMocrii/prpr/internal/github"
@@ -57,8 +56,11 @@ func (m *model) lookupDetailReviewers() tea.Cmd {
 			}
 		}
 	}
+	if m.listReviewers == nil || !m.detailsShown() {
+		return nil
+	}
 	pr, ok := m.detailsAuthoredPR()
-	if !ok || m.listReviewers == nil || !m.detailsShown() {
+	if !ok {
 		return nil
 	}
 	key := keyOf(pr)
@@ -173,7 +175,7 @@ func (m *model) reviewerDetailRows(pr *github.PullRequest) []detailRowText {
 		teams = append(teams, unreadableTeams(list.UnreadableTeams))
 	}
 	if list.AnswersUnknown {
-		teams = append(teams, "Teams that reviews answered are not readable; gh may need the read:org scope (gh auth refresh -s read:org)")
+		teams = append(teams, "Teams that reviews answered are not readable"+readOrgHint)
 	}
 	if len(teams) == 0 {
 		teams = []string{"No team reviews requested"}
@@ -247,8 +249,6 @@ func teamAnswers(list github.ReviewerList) []teamAnswer {
 	return answers
 }
 
-var teamPending = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-
 // line marks the team ✓ when a member approved (the latest commits, for a
 // team still requested), ◐ when members reviewed otherwise or are requested
 // in person, else ✗, and names them.
@@ -258,7 +258,7 @@ func (a teamAnswer) line() string {
 	case len(a.approved) > 0:
 		mark = rerequestGood.Render("✓")
 	case len(a.others) > 0:
-		mark = teamPending.Render("◐")
+		mark = rerequestPartial.Render("◐")
 	}
 	line := mark + " " + shortTeam(singleLine(a.name))
 	if a.requested && !a.codeOwner {

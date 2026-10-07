@@ -275,15 +275,19 @@ func shortTeam(name string) string {
 	return name
 }
 
+// readOrgHint ends the text of teams GitHub would not show.
+const readOrgHint = "; gh may need the read:org scope (gh auth refresh -s read:org)"
+
 // unreadableTeams says that GitHub would not show some team requests.
 func unreadableTeams(n int) string {
-	return plural(n, "team request") + " not readable; gh may need the read:org scope (gh auth refresh -s read:org)"
+	return plural(n, "team request") + " not readable" + readOrgHint
 }
 
 var (
 	rerequestHeading = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	rerequestGood    = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	rerequestBad     = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	rerequestPartial = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	rerequestFaint   = lipgloss.NewStyle().Faint(true)
 	rerequestBold    = lipgloss.NewStyle().Bold(true)
 )
