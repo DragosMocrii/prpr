@@ -268,6 +268,16 @@ func main() {
 	case strings.Contains(args, "reviewed-by:@me"):
 		// The demo has no pull requests the viewer already reviewed.
 		data = []any{map[string]any{"data": map[string]any{"search": page(nil, true)}}}
+	case strings.Contains(args, "states: [MERGED]"):
+		merged := []any{
+			map[string]any{"id": "PR_merged_1", "number": 405, "title": "Retry failed webhooks", "url": "https://github.com/acme/api/pull/405",
+				"mergedAt": ago(5 * hour), "mergedBy": map[string]any{"login": login}, "additions": 64, "deletions": 12,
+				"repository": map[string]any{"nameWithOwner": "acme/api"}},
+			map[string]any{"id": "PR_merged_2", "number": 1279, "title": "Lazy-load the dashboard charts", "url": "https://github.com/acme/web/pull/1279",
+				"mergedAt": ago(2 * day), "mergedBy": map[string]any{"login": "sam-lee"}, "additions": 210, "deletions": 95,
+				"repository": map[string]any{"nameWithOwner": "acme/web"}},
+		}
+		data = map[string]any{"data": map[string]any{"viewer": map[string]any{"login": login, "pullRequests": map[string]any{"nodes": merged}}}}
 	case strings.Contains(args, "rateLimit"):
 		data = map[string]any{"data": map[string]any{"rateLimit": map[string]any{
 			"limit": 5000, "remaining": 4874, "resetAt": now.Add(41 * time.Minute).Format(time.RFC3339)}}}
