@@ -123,6 +123,9 @@ func TestASnoozedPullRequestThatMergesMovesToMerged(t *testing.T) {
 	if got := shownNumbers(m, paneMerged); !slices.Equal(got, []int{6}) {
 		t.Fatalf("Merged = %v", got)
 	}
+	if _, ok := m.snoozes[keyOf(&pr)]; ok || len(m.preferences.Snoozes("alice")) != 0 {
+		t.Fatalf("snooze kept: %v, saved %v", m.snoozes, m.preferences.Snoozes("alice"))
+	}
 }
 
 func TestMergedPaneDrawsAndClicksWithEveryPane(t *testing.T) {
@@ -241,8 +244,21 @@ func TestMergedPaneFitsBesideFourPanes(t *testing.T) {
 			m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 			assertBounded(t, m, size[0], size[1])
 		}
-		if size[1] == 60 && len(m.drawnPanes()) != 5 {
-			t.Fatalf("200x60 draws %v, want five panes", m.drawnPanes())
+		if size[1] == 60 {
+			if len(m.drawnPanes()) != 5 {
+				t.Fatalf("200x60 draws %v, want five panes", m.drawnPanes())
+			}
+			// Hit testing follows the layout with Merged drawn last.
+			m.mouse = true
+			for _, want := range []struct {
+				pane   paneID
+				number int
+			}{{paneReview, 7}, {paneMerged, 201}, {paneQueue, 3}} {
+				click(m, lineOf(m, want.number))
+				if pr, ok := m.selectedPR(); m.focus != want.pane || !ok || pr.Number != want.number {
+					t.Fatalf("click on #%d selected focus %d %+v", want.number, m.focus, pr)
+				}
+			}
 		}
 	}
 }
@@ -259,7 +275,7 @@ func TestMergedRowDetails(t *testing.T) {
 		t.Fatal("details not shown on a merged row")
 	}
 	view := ansi.Strip(strings.Join(m.detailsView(), "\n"))
-	if !strings.Contains(view, "Merged") || !strings.Contains(view, "by bob") || !strings.Contains(view, "+12 −3") {
+	if merged := strings.TrimPrefix(mergedDetail(&pr, m.now()), "Merged "); !strings.Contains(view, merged) || !strings.Contains(view, "+12 −3") {
 		t.Fatalf("details:\n%s", view)
 	}
 	if !m.keys.Editor.Enabled() {
