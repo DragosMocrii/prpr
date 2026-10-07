@@ -132,6 +132,9 @@ func run() error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	if err := client.CheckVersion(ctx); err != nil {
+		return err
+	}
 
 	_, err = tea.NewProgram(tui.New(ctx, client, store)).Run()
 	return err

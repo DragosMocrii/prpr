@@ -245,6 +245,9 @@ func main() {
 		return map[string]any{"nodes": nodes(prs, full), "pageInfo": map[string]any{"hasNextPage": false, "endCursor": nil}}
 	}
 	switch {
+	case args == "--version":
+		fmt.Println("gh version 2.97.0 (demo)")
+		return
 	case strings.HasPrefix(args, "auth status"):
 		return
 	case !strings.HasPrefix(args, "api graphql"):
