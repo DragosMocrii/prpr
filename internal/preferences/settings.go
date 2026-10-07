@@ -36,8 +36,9 @@ var Editors = []string{EditorVSCode, EditorVSCodeInsiders, EditorGitHubDev}
 var MergedChoices = []int{0, 3, 5, 10, 20}
 
 // settings are the app settings that were flags: each value, and for
-// refresh, bots, and queues the value as written, kept while it cannot be
-// read so a save of another setting does not lose it; editor is like them.
+// refresh, fullRefresh, bots, queues, and merged the value as written, kept
+// while it cannot be read so a save of another setting does not lose it;
+// editor is like them.
 type settings struct {
 	refresh        time.Duration
 	refreshRaw     json.RawMessage
