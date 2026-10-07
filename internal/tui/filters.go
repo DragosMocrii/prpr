@@ -64,6 +64,9 @@ func (m *model) shown(id paneID, pr *github.PullRequest, preview bool) bool {
 	if !m.inScope(pr) || !m.inPane(id, pr) {
 		return false
 	}
+	if (m.quick != quickNone || m.category != 0) && !paneSpecs[id].quickFilters {
+		return false
+	}
 	if m.category != 0 && !m.categoryMatches(m.category, id, pr, preview) {
 		return false
 	}

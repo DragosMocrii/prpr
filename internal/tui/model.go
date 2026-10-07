@@ -118,8 +118,8 @@ type model struct {
 	bots bool
 	// legend is whether the icon legend panel is open; it is saved.
 	legend bool
-	// mergedCollapsed draws the Merged pane as its title alone.
-	mergedCollapsed bool
+	// collapsed panes are drawn as their title alone; saved for those that can be.
+	collapsed [len(paneIDs)]bool
 	// sharedRows is the repository or owner every row shares, as of the
 	// last table rebuild.
 	sharedRows sharedRepositories
@@ -276,7 +276,7 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m.mouse = preferences.Mouse()
 	m.icons = iconsNamed(preferences.Icons())
 	m.legend = preferences.Legend()
-	m.mergedCollapsed = preferences.MergedCollapsed()
+	m.collapsed[paneMerged] = preferences.MergedCollapsed()
 	m.showDrafts = preferences.ShowDrafts()
 	m.rules = preferences.Rules()
 	client.SetNeeds(m.rules.Needs())
@@ -729,8 +729,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.setFocus(m.nextPane(step))
 	case key.Matches(msg, k.ClearMarks):
 		m.keepingSelection(func() {
-			for _, id := range allLists {
-				m.changes[id].clear()
+			for _, list := range allLists {
+				m.changes[list].clear()
 			}
 			m.woke = nil
 			m.snoozeClosed = nil
@@ -769,7 +769,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, k.Legend):
 		m.toggleLegend()
 	case key.Matches(msg, k.CollapseMerged):
-		m.toggleMergedCollapsed()
+		m.toggleCollapsed(paneMerged)
 	case key.Matches(msg, k.Settings):
 		return m.openSettings()
 	case key.Matches(msg, k.Schedule):
@@ -1052,11 +1052,11 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 			if !quiet {
 				alerts = append(alerts, m.reviewSnoozes(!reset)...)
 			}
-			for _, id := range allLists {
+			for _, list := range allLists {
 				if reset {
-					m.changes[id].reset(m.source(id))
+					m.changes[list].reset(m.source(list))
 				} else {
-					m.changes[id].update(m.source(id), m.movedOn(id))
+					m.changes[list].update(m.source(list), m.movedOn(list))
 				}
 			}
 			m.rechanged()
@@ -1405,7 +1405,7 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 			continue
 		}
 		lines = append(lines, m.paneTitle(id, layout.single))
-		if m.collapsed(id) {
+		if m.collapsed[id] {
 			continue
 		}
 		if rowCount(&m.panes[id]) == 0 {

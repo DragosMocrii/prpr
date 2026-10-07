@@ -176,12 +176,12 @@ func settingRows() []settingRow {
 			change: func(m *model) tea.Cmd { return m.applyMerged(nextMerged(m.merged)) }},
 		{kind: settingToggle, label: "Merged list", shortcut: "H",
 			value: func(m *model) string {
-				if m.mergedCollapsed {
+				if m.collapsed[paneMerged] {
 					return "collapsed"
 				}
 				return "shown"
 			},
-			change: func(m *model) tea.Cmd { m.toggleMergedCollapsed(); return nil }},
+			change: func(m *model) tea.Cmd { m.toggleCollapsed(paneMerged); return nil }},
 		{kind: settingHeading, label: "Editors"},
 		{kind: settingEditor, label: "Ready-to-merge rules",
 			value: func(m *model) string {

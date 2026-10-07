@@ -26,8 +26,8 @@ func TestHCollapsesMergedToItsTitleAndSavesIt(t *testing.T) {
 	m := mergedLayoutModel(t, 140, 30, manyPRs(2), nil, mergedPRs(3))
 	m.setFocus(paneMerged)
 	pressMsg(m, letter("H"))
-	if !m.mergedCollapsed || !m.preferences.MergedCollapsed() {
-		t.Fatalf("collapsed %t, saved %t", m.mergedCollapsed, m.preferences.MergedCollapsed())
+	if !m.collapsed[paneMerged] || !m.preferences.MergedCollapsed() {
+		t.Fatalf("collapsed %t, saved %t", m.collapsed[paneMerged], m.preferences.MergedCollapsed())
 	}
 	view := ansi.Strip(m.View().Content)
 	if !strings.Contains(view, "Merged (3)") {
@@ -49,7 +49,7 @@ func TestHCollapsesMergedToItsTitleAndSavesIt(t *testing.T) {
 	}
 	assertBounded(t, m, 140, 30)
 	pressMsg(m, letter("H"))
-	if m.mergedCollapsed || m.preferences.MergedCollapsed() || lineOf(m, 200) < 0 {
+	if m.collapsed[paneMerged] || m.preferences.MergedCollapsed() || lineOf(m, 200) < 0 {
 		t.Fatalf("H did not show Merged again")
 	}
 }
@@ -60,7 +60,7 @@ func TestCollapsedMergedFitsWhereItsTableWouldNot(t *testing.T) {
 	if slices.Contains(m.drawnPanes(), paneMerged) {
 		t.Fatal("expanded Merged drawn without room")
 	}
-	m.toggleMergedCollapsed()
+	m.toggleCollapsed(paneMerged)
 	if !slices.Contains(m.drawnPanes(), paneMerged) || titleLineOf(m, "Merged") < 0 {
 		t.Fatalf("collapsed Merged not drawn:\n%s", ansi.Strip(m.View().Content))
 	}
@@ -74,7 +74,7 @@ func TestCollapsedMergedCountsNewRowsAndKeepsFocusOut(t *testing.T) {
 	m := notifyModel(t, "")
 	a, b := changePR(1, "acme/a"), changePR(2, "acme/a")
 	fetchMerged(m, []github.PullRequest{a, b}, []github.PullRequest{mergedPR(changePR(9, "acme/a"), time.Hour)})
-	m.toggleMergedCollapsed()
+	m.toggleCollapsed(paneMerged)
 	m.selectPR(paneMine, "acme/a", 2)
 	fetchMerged(m, []github.PullRequest{a}, []github.PullRequest{mergedPR(b, 0), mergedPR(changePR(9, "acme/a"), time.Hour)})
 	if m.focus == paneMerged {
@@ -89,9 +89,9 @@ func TestCollapsedMergedCountsNewRowsAndKeepsFocusOut(t *testing.T) {
 func TestClickingTheCollapsedTitleShowsMerged(t *testing.T) {
 	m := mergedLayoutModel(t, 140, 30, manyPRs(2), nil, mergedPRs(3))
 	m.mouse = true
-	m.toggleMergedCollapsed()
+	m.toggleCollapsed(paneMerged)
 	click(m, titleLineOf(m, "Merged"))
-	if m.mergedCollapsed {
+	if m.collapsed[paneMerged] {
 		t.Fatal("clicking the collapsed title did not show Merged")
 	}
 }

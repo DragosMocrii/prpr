@@ -289,7 +289,7 @@ func (m *model) syncKeys() {
 		k.Legend.SetHelp("L", "show legend")
 	}
 	k.CollapseMerged.SetEnabled(listing && rowCount(&m.panes[paneMerged]) > 0)
-	if m.mergedCollapsed {
+	if m.collapsed[paneMerged] {
 		k.CollapseMerged.SetHelp("H", "show merged")
 	} else {
 		k.CollapseMerged.SetHelp("H", "collapse merged")

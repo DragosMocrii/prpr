@@ -50,7 +50,7 @@ func (m *model) hitTest(y int) (paneHit, bool) {
 		}
 		pane := &m.panes[id]
 		height := 1
-		if m.collapsed(id) {
+		if m.collapsed[id] {
 			height = 0
 		} else if rowCount(pane) > 0 {
 			height = tableHeaderLen + pane.table.Height()
@@ -132,8 +132,8 @@ func (m *model) handleMouse(msg tea.MouseMsg) {
 		if !ok {
 			return
 		}
-		if m.collapsed(hit.pane) {
-			m.toggleMergedCollapsed()
+		if m.collapsed[hit.pane] {
+			m.toggleCollapsed(hit.pane)
 			return
 		}
 		if hit.pane != m.focus {
@@ -144,7 +144,7 @@ func (m *model) handleMouse(msg tea.MouseMsg) {
 		}
 	case tea.MouseWheelMsg:
 		hit, ok := m.hitTest(mouse.Y)
-		if !ok || rowCount(&m.panes[hit.pane]) == 0 || m.collapsed(hit.pane) {
+		if !ok || rowCount(&m.panes[hit.pane]) == 0 || m.collapsed[hit.pane] {
 			return
 		}
 		if hit.pane != m.focus {

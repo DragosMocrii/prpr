@@ -615,8 +615,8 @@ func (m *model) wasRead(id paneID, pr *github.PullRequest, gone bool) bool {
 
 // rechanged starts the rest over when a fetch marked the row again.
 func (m *model) rechanged() {
-	for _, id := range allLists {
-		if m.changes[id].raised[m.rest.key] {
+	for _, list := range allLists {
+		if m.changes[list].raised[m.rest.key] {
 			m.rest = restState{}
 			return
 		}

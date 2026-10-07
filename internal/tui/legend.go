@@ -198,16 +198,7 @@ func (m *model) legendSectionLines(width int) [][]string {
 // pane takes only what the legend leaves, so it is not counted.
 func (m *model) legendRoom() int {
 	avail := m.height - m.listChromeBase()
-	need := func(id paneID) int {
-		if rowCount(&m.panes[id]) > 0 {
-			return 1 + minDualTableHeight
-		}
-		return 2
-	}
-	dual := 0
-	for _, id := range m.openPanes() {
-		dual += need(id)
-	}
+	dual := m.openPanesNeed(m.openPanes())
 	if avail >= dual {
 		return avail - dual
 	}

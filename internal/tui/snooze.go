@@ -293,8 +293,8 @@ const (
 	snoozeCustom   = "custom"
 )
 
-// snoozeEditor is the snooze form for one pull request of list (paneMine or
-// paneReview). Its fields write to choice and typed.
+// snoozeEditor is the snooze form for one pull request of list (listAuthored or
+// listReview). Its fields write to choice and typed.
 type snoozeEditor struct {
 	form          *huh.Form
 	key           prKey
@@ -552,7 +552,7 @@ const snoozeCheckInterval = time.Minute
 type snoozeTickMsg struct{ generation uint64 }
 
 // snoozeListID is the list a saved snooze belongs to: listAuthored or
-// paneReview.
+// listReview.
 func snoozeListID(s preferences.Snooze) listID {
 	if s.List == preferences.SnoozeReview {
 		return listReview

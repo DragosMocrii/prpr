@@ -49,18 +49,6 @@ var openLists = [...]listID{listAuthored, listReview}
 // merged list.
 var allLists = [...]listID{listAuthored, listReview, listMerged}
 
-// paneList is the list a pane draws from and tracks changes with. The
-// Snoozed pane has none of its own; its rows use snoozeList.
-func paneList(id paneID) listID {
-	switch id {
-	case paneReview:
-		return listReview
-	case paneMerged:
-		return listMerged
-	}
-	return listAuthored
-}
-
 // queued reports whether a merge queue holds an authored pull request.
 func queued(pr *github.PullRequest) bool {
 	return pr.Queue != nil && pr.Queue.State.InQueue()
@@ -90,13 +78,13 @@ func (m *model) inPane(id paneID, pr *github.PullRequest) bool {
 // tracker is the change tracker of a pane's list. The Snoozed pane has no
 // list of its own: use trackerFor.
 func (m *model) tracker(id paneID) *paneChanges {
-	return &m.changes[paneList(id)]
+	return &m.changes[paneSpecs[id].tracker]
 }
 
 // trackerFor is the change tracker of a pull request in pane id: for the
 // Snoozed pane, the tracker of the list it was snoozed from.
 func (m *model) trackerFor(id paneID, pr *github.PullRequest) *paneChanges {
-	if id == paneSnoozed {
+	if paneSpecs[id].perRowTracker {
 		return &m.changes[m.snoozeList(pr)]
 	}
 	return m.tracker(id)
@@ -126,11 +114,7 @@ func splitIndex(index, authored int) (listID, int) {
 // eachSourcePR calls fn with every pull request of the lists pane id
 // draws from: both for the Snoozed pane.
 func (m *model) eachSourcePR(id paneID, fn func(*github.PullRequest)) {
-	lists := []listID{paneList(id)}
-	if id == paneSnoozed {
-		lists = openLists[:]
-	}
-	for _, list := range lists {
+	for _, list := range paneSpecs[id].lists {
 		source := m.source(list)
 		for i := range source {
 			fn(&source[i])
@@ -148,8 +132,8 @@ func (m *model) drawnPanes() []paneID {
 	}
 	// Collapsed, the Merged pane is a title line, which the other panes
 	// give up while they keep their smallest tables.
-	if m.mergedCollapsed && m.height-m.listChromeHeight()-1 >= m.openPanesNeed(ids) ||
-		!m.mergedCollapsed && m.mergedRoom() >= minDualTableHeight {
+	if m.collapsed[paneMerged] && m.height-m.listChromeHeight()-1 >= m.openPanesNeed(ids) ||
+		!m.collapsed[paneMerged] && m.mergedRoom() >= minDualTableHeight {
 		ids = append(ids, paneMerged)
 	}
 	return ids
@@ -170,13 +154,10 @@ func (m *model) openPanesNeed(ids []paneID) int {
 	return total
 }
 
-// collapsed reports whether a pane is drawn as its title alone.
-func (m *model) collapsed(id paneID) bool { return id == paneMerged && m.mergedCollapsed }
-
 // focusPanes lists the drawn panes that can take the focus: all but a
 // collapsed one.
 func (m *model) focusPanes() []paneID {
-	return slices.DeleteFunc(m.drawnPanes(), m.collapsed)
+	return slices.DeleteFunc(m.drawnPanes(), func(id paneID) bool { return m.collapsed[id] })
 }
 
 // openPanes lists the drawn panes of open pull requests: every drawn pane
@@ -184,12 +165,11 @@ func (m *model) focusPanes() []paneID {
 func (m *model) openPanes() []paneID {
 	ids := make([]paneID, 0, len(paneIDs))
 	for _, id := range paneIDs {
-		if id == paneMerged {
+		spec := &paneSpecs[id]
+		if spec.leftover || spec.onlyWithRows && rowCount(&m.panes[id]) == 0 {
 			continue
 		}
-		if (id != paneQueue && id != paneSnoozed) || rowCount(&m.panes[id]) > 0 {
-			ids = append(ids, id)
-		}
+		ids = append(ids, id)
 	}
 	return ids
 }
@@ -291,7 +271,7 @@ func (m *model) layoutPanes() paneLayout {
 	switch {
 	case !slices.Contains(m.drawnPanes(), paneMerged):
 		return m.layoutOpenPanes(avail)
-	case m.mergedCollapsed:
+	case m.collapsed[paneMerged]:
 		return m.layoutOpenPanes(avail - 1)
 	}
 	// Merged takes its rows, up to what the other panes leave; they share
@@ -332,7 +312,10 @@ func (m *model) layoutOpenPanes(avail int) paneLayout {
 	// The queue and Snoozed panes are usually short: beside other filled
 	// panes, each table takes no more than its rows, and they share what it
 	// leaves.
-	for _, short := range []paneID{paneQueue, paneSnoozed} {
+	for _, short := range paneIDs {
+		if !paneSpecs[short].short {
+			continue
+		}
 		if len(full) > 1 && filled(short) {
 			fit := max(minDualTableHeight, tableHeaderLen+rowCount(&m.panes[short]))
 			layout.tables[short] = min(fit, rows/len(full))
@@ -349,8 +332,7 @@ func (m *model) layoutOpenPanes(avail int) paneLayout {
 	return layout
 }
 
-// source is the list a pane draws from. The Snoozed pane draws from both
-// lists, so it has none; see paneRow.
+// source is the pull requests of a fetched list.
 func (m *model) source(list listID) []github.PullRequest {
 	switch list {
 	case listReview:
@@ -361,13 +343,13 @@ func (m *model) source(list listID) []github.PullRequest {
 	return m.snapshot.PullRequests
 }
 
-// paneSource is the list a pane draws from; nil for the Snoozed pane, which
-// draws from both (see paneRow).
+// paneSource is the list a pane draws from; nil for a pane drawing from
+// several (see paneRow).
 func (m *model) paneSource(id paneID) []github.PullRequest {
-	if id == paneSnoozed {
-		return nil
+	if lists := paneSpecs[id].lists; len(lists) == 1 {
+		return m.source(lists[0])
 	}
-	return m.source(paneList(id))
+	return nil
 }
 
 func (m *model) focused() *prPane {
@@ -383,7 +365,7 @@ func (m *model) paneRow(id paneID, row int) (*github.PullRequest, bool, bool) {
 	}
 	if row < len(pane.visible) {
 		index, source := pane.visible[row], m.paneSource(id)
-		if id == paneSnoozed {
+		if len(paneSpecs[id].lists) > 1 {
 			var list listID
 			list, index = splitIndex(index, len(m.snapshot.PullRequests))
 			source = m.source(list)
@@ -560,17 +542,7 @@ func keepBackground(line, sgr string) string {
 }
 
 func (m *model) paneTitle(id paneID, single bool) string {
-	name := "My PRs"
-	switch id {
-	case paneReview:
-		name = "Review requested"
-	case paneQueue:
-		name = "Merge queue"
-	case paneSnoozed:
-		name = "Snoozed"
-	case paneMerged:
-		name = "Merged"
-	}
+	name := paneSpecs[id].name
 	title := fmt.Sprintf("%s (%d)", name, len(m.panes[id].visible))
 	if m.filtersActive() {
 		total := 0
@@ -596,7 +568,7 @@ func (m *model) paneTitle(id paneID, single bool) string {
 	if single {
 		title += " · tab: other list"
 	}
-	if m.collapsed(id) {
+	if m.collapsed[id] {
 		title += " · collapsed, H to show"
 	}
 	// The summary is dropped rather than truncated so the title stays whole;
@@ -653,26 +625,7 @@ func (m *model) changeSummary(id paneID) string {
 }
 
 func (m *model) emptyPaneLine(id paneID) string {
-	text := "No open pull requests"
-	switch id {
-	case paneMine:
-		if m.snoozedShows(listAuthored) {
-			text = "No other open pull requests"
-		} else if len(m.panes[paneQueue].visible) > 0 {
-			text = "No open pull requests outside the merge queue"
-		}
-	case paneReview:
-		text = "No review requests"
-		if m.snoozedShows(listReview) {
-			text = "No other review requests"
-		}
-	case paneQueue:
-		text = "Nothing in a merge queue"
-	case paneSnoozed:
-		text = "Nothing snoozed"
-	case paneMerged:
-		text = "Nothing merged recently"
-	}
+	text := paneSpecs[id].empty(m)
 	if m.filtersActive() {
 		return "  No pull requests match the filters; esc clears them."
 	}
