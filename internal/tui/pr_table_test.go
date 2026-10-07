@@ -77,13 +77,14 @@ func TestAllTableShowsRepositoryIdentityAndIndependentStatuses(t *testing.T) {
 		t.Fatalf("All table columns = %+v", columns)
 	}
 	rows := m.panes[paneMine].table.Rows()
-	if ansi.Strip(rows[0][4]) != "draft · draft" || ansi.Strip(rows[1][4]) != "conflicts" || ansi.Strip(rows[0][1]) != "–" || ansi.Strip(rows[1][1]) != "✗" || ansi.Strip(rows[2][1]) != "?" {
+	// The draft sorts after the open pull requests.
+	if ansi.Strip(rows[2][4]) != "draft · draft" || ansi.Strip(rows[0][4]) != "conflicts" || ansi.Strip(rows[2][1]) != "–" || ansi.Strip(rows[0][1]) != "✗" || ansi.Strip(rows[1][1]) != "?" {
 		t.Fatalf("state/merge rows = %+v", rows)
 	}
 	m.width = 79
 	m.rebuildPRTable(true)
-	if m.panes[paneMine].table.Columns()[2].Title == "Repository" || !strings.HasPrefix(ansi.Strip(m.panes[paneMine].table.Rows()[0][3]), "draft · acme/a — ") {
-		t.Fatalf("narrow All table lost repository identity: cols %+v row %+v", m.panes[paneMine].table.Columns(), m.panes[paneMine].table.Rows()[0])
+	if m.panes[paneMine].table.Columns()[2].Title == "Repository" || !strings.HasPrefix(ansi.Strip(m.panes[paneMine].table.Rows()[2][3]), "draft · acme/a — ") {
+		t.Fatalf("narrow All table lost repository identity: cols %+v row %+v", m.panes[paneMine].table.Columns(), m.panes[paneMine].table.Rows()[2])
 	}
 }
 

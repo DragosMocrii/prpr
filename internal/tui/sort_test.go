@@ -8,7 +8,7 @@ import (
 	"github.com/DragosMocrii/prpr/internal/github"
 )
 
-func TestMyPRsSortReadyToMergeFirstThenOldestCreated(t *testing.T) {
+func TestMyPRsSortReadyToMergeFirstDraftsLastThenOldestCreated(t *testing.T) {
 	pr := func(number int, state string, created int) github.PullRequest {
 		p := changePR(number, "acme/a")
 		p.MergeState, p.CreatedAt = state, changeTime.Add(time.Duration(created)*time.Hour)
@@ -16,9 +16,11 @@ func TestMyPRsSortReadyToMergeFirstThenOldestCreated(t *testing.T) {
 	}
 	draft := pr(5, "CLEAN", 1)
 	draft.Draft = true
+	older := pr(10, "BLOCKED", -1)
+	older.Draft = true
 	// Fetched in updated order; #6 and #7 tie on created time.
-	m := changesModel(t, pr(1, "BLOCKED", 3), pr(2, "CLEAN", 4), draft, pr(3, "UNSTABLE", 2), pr(4, "BEHIND", 0), pr(6, "CLEAN", 9), pr(7, "CLEAN", 9))
-	// A clean draft is never ready, so it sorts with the rest.
+	m := changesModel(t, pr(1, "BLOCKED", 3), pr(2, "CLEAN", 4), draft, pr(3, "UNSTABLE", 2), pr(4, "BEHIND", 0), pr(6, "CLEAN", 9), pr(7, "CLEAN", 9), older)
+	// Drafts, a clean one too, follow every open pull request.
 	m.toggleDrafts()
 	order := func() []int {
 		var numbers []int
@@ -28,14 +30,14 @@ func TestMyPRsSortReadyToMergeFirstThenOldestCreated(t *testing.T) {
 		}
 		return numbers
 	}
-	if got, want := order(), []int{3, 2, 6, 7, 4, 5, 1}; !slices.Equal(got, want) {
+	if got, want := order(), []int{3, 2, 6, 7, 4, 1, 10, 5}; !slices.Equal(got, want) {
 		t.Fatalf("order = %v, want %v", got, want)
 	}
 
 	// #1 becomes mergeable and moves up, still selected.
 	m.selectPR(paneMine, "acme/a", 1)
-	updateSnapshot(m, "alice", pr(1, "CLEAN", 3), pr(2, "CLEAN", 4), draft, pr(3, "UNSTABLE", 2), pr(4, "BEHIND", 0), pr(6, "CLEAN", 9), pr(7, "CLEAN", 9))
-	if got, want := order(), []int{3, 1, 2, 6, 7, 4, 5}; !slices.Equal(got, want) {
+	updateSnapshot(m, "alice", pr(1, "CLEAN", 3), pr(2, "CLEAN", 4), draft, pr(3, "UNSTABLE", 2), pr(4, "BEHIND", 0), pr(6, "CLEAN", 9), pr(7, "CLEAN", 9), older)
+	if got, want := order(), []int{3, 1, 2, 6, 7, 4, 10, 5}; !slices.Equal(got, want) {
 		t.Fatalf("order after #1 became mergeable = %v, want %v", got, want)
 	}
 	if selected, _ := m.selectedPR(); selected.Number != 1 {

@@ -1126,8 +1126,8 @@ func (m *model) keepSelection(rebuild func(), follow bool) {
 	}
 }
 
-// sortMine orders authored pull requests ready to merge first, then oldest
-// created first. Ties keep the fetched order.
+// sortMine orders authored pull requests ready to merge first and drafts
+// last, then oldest created first. Ties keep the fetched order.
 func (m *model) sortMine(visible []int, source []github.PullRequest) {
 	// Rules are evaluated once per row, not once per comparison.
 	ready := make(map[int]bool, len(visible))
@@ -1136,6 +1136,12 @@ func (m *model) sortMine(visible []int, source []github.PullRequest) {
 	}
 	slices.SortStableFunc(visible, func(a, b int) int {
 		x, y := &source[a], &source[b]
+		if x.Draft != y.Draft {
+			if y.Draft {
+				return -1
+			}
+			return 1
+		}
 		readyX, readyY := ready[a], ready[b]
 		if readyX != readyY {
 			if readyX {
