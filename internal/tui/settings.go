@@ -171,6 +171,9 @@ func settingRows() []settingRow {
 				m.settings.queues, m.settings.queueCursor = append([]github.Queue{}, m.sessionQueues...), 0
 				return nil
 			}},
+		{kind: settingChoice, label: "Recently merged", errKey: "merged",
+			value:  func(m *model) string { return formatMerged(m.merged) },
+			change: func(m *model) tea.Cmd { return m.applyMerged(nextMerged(m.merged)) }},
 		{kind: settingHeading, label: "Editors"},
 		{kind: settingEditor, label: "Ready-to-merge rules",
 			value: func(m *model) string {

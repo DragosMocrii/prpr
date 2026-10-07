@@ -116,6 +116,8 @@ type model struct {
 	legend bool
 	// showDrafts puts draft pull requests in scope; it is saved.
 	showDrafts bool
+	// merged is how many merged pull requests the Merged pane lists; 0 is off.
+	merged int
 	// mouse is mouse mode: hover, click, and wheel input instead of the
 	// terminal's own selection. pointer is where the mouse was last seen.
 	mouse   bool
@@ -258,6 +260,7 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m.fullRefresh = preferences.FullRefresh()
 	m.forceFull = client.ForceFull
 	client.SetFullRefresh(m.fullRefresh)
+	client.SetMerged(m.merged)
 	m.listReviewers = client.Reviewers
 	m.requestReviews = client.RequestReviews
 	m.notify = preferences.Notify()
@@ -307,6 +310,7 @@ func newModel(ctx context.Context, client *github.Client, preferences *preferenc
 		scheduleErr:    preferences.ScheduleErr(),
 		sessionBots:    preferences.Bots(),
 		sessionQueues:  preferences.Queues(),
+		merged:         preferences.Merged(),
 		editor:         preferences.Editor(),
 	}
 	if window, err := schedule.Compile(m.scheduleConfig); err == nil {

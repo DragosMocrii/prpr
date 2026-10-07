@@ -145,3 +145,32 @@ func TestMergedPaneDrawsAndClicksWithEveryPane(t *testing.T) {
 		t.Fatalf("click selected focus %d %+v", m.focus, pr)
 	}
 }
+
+func TestRecentlyMergedSettingSavesAndResetsTheBaseline(t *testing.T) {
+	m := notifyModel(t, "")
+	fetchMerged(m, []github.PullRequest{changePR(1, "acme/a")}, nil)
+	if m.merged != preferences.DefaultMerged {
+		t.Fatalf("session merged %d", m.merged)
+	}
+	if nextMerged(5) != 10 || nextMerged(20) != 0 || nextMerged(0) != 3 || nextMerged(7) != 10 {
+		t.Fatal("choices do not cycle 0, 3, 5, 10, 20")
+	}
+	if formatMerged(0) != "off" || formatMerged(10) != "10" {
+		t.Fatalf("format %q %q", formatMerged(0), formatMerged(10))
+	}
+	m.applyMerged(10)
+	if m.merged != 10 || m.preferences.Merged() != 10 || !m.settingsBaseline {
+		t.Fatalf("merged %d saved %d baseline %v", m.merged, m.preferences.Merged(), m.settingsBaseline)
+	}
+}
+
+func TestTurningMergedOffMovesFocus(t *testing.T) {
+	m := notifyModel(t, "")
+	fetchMerged(m, []github.PullRequest{changePR(1, "acme/a")}, []github.PullRequest{mergedPR(changePR(2, "acme/a"), time.Hour)})
+	m.setFocus(paneMerged)
+	m.applyMerged(0)
+	fetchMerged(m, []github.PullRequest{changePR(1, "acme/a")}, nil)
+	if m.focus == paneMerged || slices.Contains(m.drawnPanes(), paneMerged) {
+		t.Fatalf("focus %d, drawn %v", m.focus, m.drawnPanes())
+	}
+}

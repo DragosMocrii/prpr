@@ -1,9 +1,13 @@
 package tui
 
 import (
+	"strconv"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/DragosMocrii/prpr/internal/github"
+	"github.com/DragosMocrii/prpr/internal/preferences"
 )
 
 // movedOn tells pane id's tracker which pull requests that left its list
@@ -30,4 +34,34 @@ func mergedDetail(pr *github.PullRequest, now time.Time) string {
 		text += " by " + singleLine(pr.MergedBy)
 	}
 	return text
+}
+
+// nextMerged is the first choice after n; a value between choices goes to
+// the next larger one, and the last wraps to off.
+func nextMerged(n int) int {
+	for _, choice := range preferences.MergedChoices {
+		if choice > n {
+			return choice
+		}
+	}
+	return preferences.MergedChoices[0]
+}
+
+func formatMerged(n int) string {
+	if n == 0 {
+		return "off"
+	}
+	return strconv.Itoa(n)
+}
+
+// applyMerged uses and saves how many merged pull requests to list. Like
+// new bots or queues, it fetches again, and the result becomes the change
+// baseline without marking.
+func (m *model) applyMerged(n int) tea.Cmd {
+	m.merged = n
+	if m.client != nil {
+		m.client.SetMerged(n)
+	}
+	m.settingSaved(m.preferences.SaveMerged(n))
+	return m.settingsFetch()
 }
