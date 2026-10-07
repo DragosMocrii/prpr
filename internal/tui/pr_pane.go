@@ -124,10 +124,40 @@ func (m *model) eachSourcePR(id paneID, fn func(*github.PullRequest)) {
 // rows and room (see mergedRoom).
 func (m *model) drawnPanes() []paneID {
 	ids := m.openPanes()
-	if rowCount(&m.panes[paneMerged]) > 0 && m.mergedRoom() >= minDualTableHeight {
+	if rowCount(&m.panes[paneMerged]) == 0 {
+		return ids
+	}
+	// Collapsed, the Merged pane is a title line, which the other panes
+	// give up while they keep their smallest tables.
+	if m.mergedCollapsed && m.height-m.listChromeHeight()-1 >= m.openPanesNeed(ids) ||
+		!m.mergedCollapsed && m.mergedRoom() >= minDualTableHeight {
 		ids = append(ids, paneMerged)
 	}
 	return ids
+}
+
+// openPanesNeed is the fewest lines the panes of open pull requests take
+// side by side: a title and the smallest table each, or a title and an
+// empty line.
+func (m *model) openPanesNeed(ids []paneID) int {
+	total := 0
+	for _, id := range ids {
+		if rowCount(&m.panes[id]) > 0 {
+			total += 1 + minDualTableHeight
+		} else {
+			total += 2
+		}
+	}
+	return total
+}
+
+// collapsed reports whether a pane is drawn as its title alone.
+func (m *model) collapsed(id paneID) bool { return id == paneMerged && m.mergedCollapsed }
+
+// focusPanes lists the drawn panes that can take the focus: all but a
+// collapsed one.
+func (m *model) focusPanes() []paneID {
+	return slices.DeleteFunc(m.drawnPanes(), m.collapsed)
 }
 
 // openPanes lists the drawn panes of open pull requests: every drawn pane
@@ -165,7 +195,7 @@ func (m *model) mergedRoom() int {
 
 // nextPane is the drawn pane step places after the focused one, wrapping.
 func (m *model) nextPane(step int) paneID {
-	drawn := m.drawnPanes()
+	drawn := m.focusPanes()
 	at := slices.Index(drawn, m.focus)
 	if at < 0 {
 		return drawn[0]
@@ -239,6 +269,9 @@ func (m *model) footerRuleShown() bool {
 
 func (m *model) layoutPanes() paneLayout {
 	avail := m.height - m.listChromeHeight()
+	if slices.Contains(m.drawnPanes(), paneMerged) && m.mergedCollapsed {
+		return m.layoutOpenPanes(avail - 1)
+	}
 	if slices.Contains(m.drawnPanes(), paneMerged) {
 		// Merged takes its rows, up to what the other panes leave; they
 		// share the rest.
@@ -257,17 +290,10 @@ func (m *model) layoutMerged() int {
 // layoutOpenPanes lays out the panes of open pull requests in avail lines.
 func (m *model) layoutOpenPanes(avail int) paneLayout {
 	filled := func(id paneID) bool { return rowCount(&m.panes[id]) > 0 }
-	need := func(id paneID) int {
-		if filled(id) {
-			return 1 + minDualTableHeight
-		}
-		return 2 // title and empty line
-	}
 	drawn := m.openPanes()
-	total := 0
+	total := m.openPanesNeed(drawn)
 	var full []paneID
 	for _, id := range drawn {
-		total += need(id)
 		if filled(id) {
 			full = append(full, id)
 		}
@@ -542,6 +568,9 @@ func (m *model) paneTitle(id paneID, single bool) string {
 	}
 	if single {
 		title += " · tab: other list"
+	}
+	if m.collapsed(id) {
+		title += " · collapsed, H to show"
 	}
 	// The summary is dropped rather than truncated so the title stays whole;
 	// the title's two-cell prefix and the separator count toward its width.

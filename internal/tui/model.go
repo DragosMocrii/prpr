@@ -118,6 +118,8 @@ type model struct {
 	bots bool
 	// legend is whether the icon legend panel is open; it is saved.
 	legend bool
+	// mergedCollapsed draws the Merged pane as its title alone.
+	mergedCollapsed bool
 	// showDrafts puts draft pull requests in scope; it is saved.
 	showDrafts bool
 	// merged is how many merged pull requests the Merged pane lists; 0 is off.
@@ -271,6 +273,7 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	m.mouse = preferences.Mouse()
 	m.icons = iconsNamed(preferences.Icons())
 	m.legend = preferences.Legend()
+	m.mergedCollapsed = preferences.MergedCollapsed()
 	m.showDrafts = preferences.ShowDrafts()
 	m.rules = preferences.Rules()
 	client.SetNeeds(m.rules.Needs())
@@ -761,6 +764,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.toggleIcons()
 	case key.Matches(msg, k.Legend):
 		m.toggleLegend()
+	case key.Matches(msg, k.CollapseMerged):
+		m.toggleMergedCollapsed()
 	case key.Matches(msg, k.Settings):
 		return m.openSettings()
 	case key.Matches(msg, k.Schedule):
@@ -1056,7 +1061,7 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 	})
 	if accountChanged {
 		focus := paneMine
-		for _, id := range m.drawnPanes() {
+		for _, id := range m.focusPanes() {
 			if len(m.panes[id].visible) > 0 {
 				focus = id
 				break
@@ -1111,7 +1116,7 @@ func (m *model) keepSelection(rebuild func(), follow bool) {
 	if !follow || !selected.ok || m.selectPR(focus, selected.repository, selected.number) {
 		return
 	}
-	for _, to := range m.drawnPanes() {
+	for _, to := range m.focusPanes() {
 		if to != focus && m.selectPR(to, selected.repository, selected.number) {
 			m.setFocus(to)
 			m.selectPR(to, selected.repository, selected.number)
@@ -1390,6 +1395,9 @@ func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 			continue
 		}
 		lines = append(lines, m.paneTitle(id, layout.single))
+		if m.collapsed(id) {
+			continue
+		}
 		if rowCount(&m.panes[id]) == 0 {
 			lines = append(lines, m.emptyPaneLine(id))
 			continue

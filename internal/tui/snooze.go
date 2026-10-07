@@ -504,7 +504,7 @@ func (m *model) undoSnooze() tea.Cmd {
 				continue
 			}
 			pr := &list[i]
-			for _, id := range m.drawnPanes() {
+			for _, id := range m.focusPanes() {
 				if m.selectPR(id, pr.Repository, pr.Number) {
 					m.setFocus(id)
 					m.selectPR(id, pr.Repository, pr.Number)

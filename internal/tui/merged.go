@@ -57,6 +57,14 @@ func formatMerged(n int) string {
 // applyMerged uses and saves how many merged pull requests to list. Like
 // new bots or queues, it fetches again, and the result becomes the change
 // baseline without marking.
+// toggleMergedCollapsed draws the Merged pane as its title alone, or with
+// its table again, and saves it. Focus leaves a pane it collapses.
+func (m *model) toggleMergedCollapsed() {
+	m.mergedCollapsed = !m.mergedCollapsed
+	m.settingSaved(m.preferences.SaveMergedCollapsed(m.mergedCollapsed))
+	m.rebuildPRTable(false)
+}
+
 func (m *model) applyMerged(n int) tea.Cmd {
 	m.merged = n
 	if m.client != nil {

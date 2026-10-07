@@ -174,6 +174,14 @@ func settingRows() []settingRow {
 		{kind: settingChoice, label: "Recently merged", errKey: "merged",
 			value:  func(m *model) string { return formatMerged(m.merged) },
 			change: func(m *model) tea.Cmd { return m.applyMerged(nextMerged(m.merged)) }},
+		{kind: settingToggle, label: "Merged list", shortcut: "H",
+			value: func(m *model) string {
+				if m.mergedCollapsed {
+					return "collapsed"
+				}
+				return "shown"
+			},
+			change: func(m *model) tea.Cmd { m.toggleMergedCollapsed(); return nil }},
 		{kind: settingHeading, label: "Editors"},
 		{kind: settingEditor, label: "Ready-to-merge rules",
 			value: func(m *model) string {

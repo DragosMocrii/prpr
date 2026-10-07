@@ -101,6 +101,7 @@ Press `,` to open Settings, a full-screen list of every app setting with its cur
 | Review bots | the `Name=login[:check]` list; empty for none |
 | Merge queues | Trunk, GitHub |
 | Recently merged | off, 3, 5, 10, 20 |
+| Merged list | shown, collapsed (also `H`) |
 | Ready-to-merge rules | opens the [rules editor](#ready-to-merge-rules) |
 | Active hours | opens the [active-hours editor](#active-hours) |
 
@@ -175,6 +176,7 @@ If startup reports invalid preferences, back up, repair, or remove only the repo
 - `n`: turn notifications on or off, and save the choice; see [Notifications](#notifications).
 - `i`: switch between Unicode and Nerd Font icons, and save the choice; see [Icons](#icons).
 - `L`: show or hide the icon legend under the lists, and save the choice; see [Icons](#icons).
+- `H`: collapse the **Merged** list to its title line, or show it again, and save the choice; see [Merged](#merged).
 - `,`: open [Settings](#settings), which holds every app setting and opens the ready-to-merge rules.
 - `l`: start GitHub CLI login from an error screen.
 - `q` / Ctrl+C: quit.
@@ -234,7 +236,7 @@ Reading Trunk's comment costs more GraphQL quota: with Trunk enabled, each full 
 
 ### Merged
 
-Your most recently merged pull requests are listed in a **Merged** list under the others, the newest merge first, with when each merged and who merged it. When one of yours merges, it moves there from **My PRs** or **Merge queue**, marked `+`, instead of staying behind as a gone row; one closed without merging is still a gone row. **Recently merged** in Settings chooses how many to list: 5 by default, or off. The list appears only while it has rows and room: it takes only the lines the other lists leave once each shows all its rows, so on short terminals, or while only the focused list is shown, it is left out. The list follows the repository filter and search, counts in no attention category or the terminal title, and never notifies. `o`, `e`, `y`, and Enter work on its rows.
+Your most recently merged pull requests are listed in a **Merged** list under the others, the newest merge first, with when each merged and who merged it. When one of yours merges, it moves there from **My PRs** or **Merge queue**, marked `+`, instead of staying behind as a gone row; one closed without merging is still a gone row. **Recently merged** in Settings chooses how many to list: 5 by default, or off. The list appears only while it has rows and room: it takes only the lines the other lists leave once each shows all its rows, so on short terminals, or while only the focused list is shown, it is left out. The list follows the repository filter and search, counts in no attention category or the terminal title, and never notifies. `o`, `e`, `y`, and Enter work on its rows. `H` (or **Merged list** in Settings, or a click on its title in mouse mode) collapses it to one title line with its count and its new or changed rows, such as `Merged (5) · collapsed, H to show · 1 new`; collapsed, it takes that line whenever the other lists keep room for their smallest tables, Tab skips it, and a pull request that merges while selected leaves the selection in its list. The choice is saved.
 
 ### Requesting reviews again
 

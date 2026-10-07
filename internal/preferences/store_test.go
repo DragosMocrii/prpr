@@ -437,6 +437,40 @@ func TestLegendAndDraftsAreSavedWithTheOtherAppSettings(t *testing.T) {
 	}
 }
 
+func TestMergedCollapsedIsSavedWithTheOtherAppSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.MergedCollapsed() {
+		t.Fatal("a new store has the Merged list collapsed")
+	}
+	if err := store.SaveLegend(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveMergedCollapsed(true); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reopened.MergedCollapsed() || !reopened.Legend() {
+		t.Fatalf("after reopening: collapsed %t, legend %t", reopened.MergedCollapsed(), reopened.Legend())
+	}
+	if err := reopened.SaveMergedCollapsed(false); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.MergedCollapsed() || !again.Legend() {
+		t.Fatalf("after expanding: collapsed %t, legend %t", again.MergedCollapsed(), again.Legend())
+	}
+}
+
 func TestSnoozesRoundTripPerAccountAndKeepTheScope(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "preferences.json")
 	store, err := Open(path)

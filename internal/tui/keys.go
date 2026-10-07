@@ -34,6 +34,7 @@ type keyMap struct {
 	Notify          key.Binding
 	Icons           key.Binding
 	Legend          key.Binding
+	CollapseMerged  key.Binding
 	Settings        key.Binding
 	SettingsKeys    settingsKeyMap
 	RulesCancel     key.Binding
@@ -135,6 +136,7 @@ func defaultKeyMap() keyMap {
 		Notify:          key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "notify on")),
 		Icons:           key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "nerd icons")),
 		Legend:          key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "show legend")),
+		CollapseMerged:  key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "collapse merged")),
 		Settings:        key.NewBinding(key.WithKeys(","), key.WithHelp(",", "settings")),
 		SettingsKeys: settingsKeyMap{
 			Up:     key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
@@ -286,6 +288,12 @@ func (m *model) syncKeys() {
 	} else {
 		k.Legend.SetHelp("L", "show legend")
 	}
+	k.CollapseMerged.SetEnabled(listing && rowCount(&m.panes[paneMerged]) > 0)
+	if m.mergedCollapsed {
+		k.CollapseMerged.SetHelp("H", "show merged")
+	} else {
+		k.CollapseMerged.SetHelp("H", "collapse merged")
+	}
 	k.Settings.SetEnabled(listing && m.settings == nil && m.rulesEditor == nil)
 	k.Snooze.SetEnabled(listing && rows && m.snoozeEditor == nil && m.focus != paneMerged)
 	k.Undo.SetEnabled(listing && m.snoozeEditor == nil)
@@ -399,7 +407,7 @@ func (k keyMap) errorHelp() helpKeys {
 func (k keyMap) listHelp() helpKeys {
 	return helpKeys{
 		short: []key.Binding{k.ClearFilters, k.DismissPlead, k.ClearMarks,
-			k.Details, k.Open, k.Search, k.NextPane, k.Categories, k.PickRepository, k.Refresh},
+			k.Details, k.Open, k.Search, k.NextPane, k.Categories, k.PickRepository, k.Refresh, k.CollapseMerged},
 		pinned: []key.Binding{k.Help, k.Quit},
 	}
 }
@@ -412,7 +420,7 @@ func (k keyMap) listGroups() []helpGroup {
 			t.HalfPageUp, t.HalfPageDown, p.PrevPage, p.NextPage, k.NextPane, k.PrevPane}},
 		{"This PR", []key.Binding{k.Details, k.Open, k.Editor, k.CopyURL, k.Snooze, k.Undo, k.Rerequest, k.DismissPlead}},
 		{"Filter", []key.Binding{k.Search, k.Categories, k.QuickFailing, k.QuickReady, k.Drafts, k.ClearFilters}},
-		{"View", []key.Binding{k.Legend, k.Icons, k.Mouse, k.Notify, k.ClearMarks}},
+		{"View", []key.Binding{k.Legend, k.CollapseMerged, k.Icons, k.Mouse, k.Notify, k.ClearMarks}},
 		{"Scope & settings", []key.Binding{k.PickRepository, k.AllRepositories, k.Account, k.Settings,
 			k.Schedule, k.Wake, k.Refresh, k.Quit}},
 	}

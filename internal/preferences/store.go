@@ -173,6 +173,8 @@ type Store struct {
 	legend bool
 	// drafts is whether draft pull requests are shown.
 	drafts bool
+	// mergedCollapsed is whether the Merged list shows its title alone.
+	mergedCollapsed bool
 	// rules are the saved ready-to-merge rules, or the defaults. Saved
 	// rules that cannot be read are kept as rulesRaw, written back
 	// unchanged until rules are saved, with rulesErr saying why.
@@ -192,31 +194,34 @@ type Store struct {
 const appKey = "app"
 
 type appJSON struct {
-	Account     string          `json:"account,omitempty"`
-	Icons       string          `json:"icons,omitempty"`
-	Legend      bool            `json:"legend,omitempty"`
-	Drafts      bool            `json:"drafts,omitempty"`
-	Ready       json.RawMessage `json:"ready,omitempty"`
-	Schedule    json.RawMessage `json:"schedule,omitempty"`
-	Refresh     json.RawMessage `json:"refresh,omitempty"`
-	FullRefresh json.RawMessage `json:"fullRefresh,omitempty"`
-	Bots        json.RawMessage `json:"bots,omitempty"`
-	Queues      json.RawMessage `json:"queues,omitempty"`
-	Editor      json.RawMessage `json:"editor,omitempty"`
-	Merged      json.RawMessage `json:"merged,omitempty"`
-	Notify      bool            `json:"notify,omitempty"`
-	Mouse       bool            `json:"mouse,omitempty"`
-	Title       *bool           `json:"title,omitempty"`
+	Account string `json:"account,omitempty"`
+	Icons   string `json:"icons,omitempty"`
+	Legend  bool   `json:"legend,omitempty"`
+	Drafts  bool   `json:"drafts,omitempty"`
+	// MergedCollapsed is whether the Merged list shows its title alone.
+	MergedCollapsed bool            `json:"mergedCollapsed,omitempty"`
+	Ready           json.RawMessage `json:"ready,omitempty"`
+	Schedule        json.RawMessage `json:"schedule,omitempty"`
+	Refresh         json.RawMessage `json:"refresh,omitempty"`
+	FullRefresh     json.RawMessage `json:"fullRefresh,omitempty"`
+	Bots            json.RawMessage `json:"bots,omitempty"`
+	Queues          json.RawMessage `json:"queues,omitempty"`
+	Editor          json.RawMessage `json:"editor,omitempty"`
+	Merged          json.RawMessage `json:"merged,omitempty"`
+	Notify          bool            `json:"notify,omitempty"`
+	Mouse           bool            `json:"mouse,omitempty"`
+	Title           *bool           `json:"title,omitempty"`
 }
 
 func (a appJSON) empty() bool {
-	return a.Account == "" && a.Icons == "" && !a.Legend && !a.Drafts && len(a.Ready) == 0 && len(a.Schedule) == 0 &&
+	return a.Account == "" && a.Icons == "" && !a.Legend && !a.Drafts && !a.MergedCollapsed && len(a.Ready) == 0 && len(a.Schedule) == 0 &&
 		len(a.Refresh) == 0 && len(a.FullRefresh) == 0 && len(a.Bots) == 0 && len(a.Queues) == 0 && len(a.Editor) == 0 && len(a.Merged) == 0 && !a.Notify && !a.Mouse && a.Title == nil
 }
 
 // app is the app settings as saved.
 func (s *Store) app() appJSON {
-	app := appJSON{Account: s.pinned, Icons: s.icons, Legend: s.legend, Drafts: s.drafts, Ready: s.rulesRaw, Schedule: s.scheduleRaw}
+	app := appJSON{Account: s.pinned, Icons: s.icons, Legend: s.legend, Drafts: s.drafts, MergedCollapsed: s.mergedCollapsed,
+		Ready: s.rulesRaw, Schedule: s.scheduleRaw}
 	s.settings.encode(&app)
 	return app
 }
@@ -261,6 +266,7 @@ func Open(path string) (*Store, error) {
 				return nil, fmt.Errorf("decode preferences %q: %q has an unknown icon set %q", path, appKey, app.Icons)
 			}
 			store.pinned, store.icons, store.legend, store.drafts = app.Account, app.Icons, app.Legend, app.Drafts
+			store.mergedCollapsed = app.MergedCollapsed
 			store.settings = decodeSettings(app, path)
 			if len(app.Schedule) != 0 {
 				store.scheduleRaw = app.Schedule
@@ -518,6 +524,18 @@ func (s *Store) SaveLegend(open bool) error {
 		return err
 	}
 	s.legend = open
+	return nil
+}
+
+// MergedCollapsed reports whether the Merged list was left collapsed.
+func (s *Store) MergedCollapsed() bool { return s.mergedCollapsed }
+
+// SaveMergedCollapsed saves whether the Merged list is collapsed.
+func (s *Store) SaveMergedCollapsed(collapsed bool) error {
+	if err := s.saveApp(func(app *appJSON) { app.MergedCollapsed = collapsed }); err != nil {
+		return err
+	}
+	s.mergedCollapsed = collapsed
 	return nil
 }
 

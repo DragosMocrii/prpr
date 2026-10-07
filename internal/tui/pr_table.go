@@ -20,7 +20,7 @@ import (
 func (m *model) rebuildPRTable(resetSelection bool) {
 	// An emptied queue pane is no longer drawn, nor a Merged pane the
 	// terminal has no room for, so neither can keep the focus.
-	if drawn := m.drawnPanes(); !slices.Contains(drawn, m.focus) {
+	if drawn := m.focusPanes(); !slices.Contains(drawn, m.focus) {
 		m.focus = paneMine
 		for _, id := range drawn {
 			if len(m.panes[id].visible) > 0 {
