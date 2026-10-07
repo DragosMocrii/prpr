@@ -836,7 +836,7 @@ func (m *model) leaveRow(id paneID, row int) {
 		}
 		return
 	}
-	drawn := m.drawnPanes()
+	drawn, shared := m.drawnPanes(), m.shared()
 	m.trackerFor(id, pr).dismiss(pr)
 	if id == paneSnoozed {
 		delete(m.snoozeClosed, key)
@@ -852,7 +852,9 @@ func (m *model) leaveRow(id paneID, row int) {
 	}
 	// A shorter pane can leave room for the Merged pane, which then needs
 	// a layout of its own.
-	if slices.Equal(drawn, m.drawnPanes()) {
+	// So can one with the last row of another repository, whose column
+	// then goes.
+	if slices.Equal(drawn, m.drawnPanes()) && shared == m.shared() {
 		m.redrawRows(id)
 	} else {
 		m.rebuildPRTable(false)
@@ -1362,6 +1364,9 @@ func (m *model) listLines() []string {
 // listLinesWith draws the list with the given screen's help.
 func (m *model) listLinesWith(screen func(keyMap) helpKeys) []string {
 	title := fmt.Sprintf("prpr — %s — %s", m.accountLabel(), m.scopeLabel())
+	if shared := m.sharedLabel(); shared != "" {
+		title += " · " + shared
+	}
 	if filters := m.filterText(); filters != "" {
 		title += " · " + filters
 	}

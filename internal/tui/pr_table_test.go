@@ -69,7 +69,7 @@ func TestNumberHyperlinksRejectUnsafeURLs(t *testing.T) {
 func TestAllTableShowsRepositoryIdentityAndIndependentStatuses(t *testing.T) {
 	m := newTableModel(t, 80, 12, []github.PullRequest{
 		{Number: 1, Repository: "acme/a", Title: "draft", Draft: true, Mergeable: "MERGEABLE", MergeState: "CLEAN"},
-		{Number: 2, Repository: "acme/b", Title: "conflicts", Mergeable: "CONFLICTING"},
+		{Number: 2, Repository: "other/b", Title: "conflicts", Mergeable: "CONFLICTING"},
 		{Number: 3, Repository: "acme/c", Title: "unknown", Mergeable: "new-value"},
 	})
 	columns := m.panes[paneMine].table.Columns()
@@ -252,7 +252,7 @@ func TestStatisticsColumnsDropInPriorityOrderAsWidthShrinks(t *testing.T) {
 	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
 	m := newTableModel(t, 140, 12, []github.PullRequest{
 		{Number: 1, Repository: "acme/a", Title: "stats", WaitingSince: now.Add(-3 * 24 * time.Hour), Checks: "FAILURE", ReviewDecision: "APPROVED", Approvals: 2, Comments: 7, Additions: 1234, Deletions: 30},
-		{Number: 2, Repository: "acme/a", Title: "draft", Draft: true},
+		{Number: 2, Repository: "other/a", Title: "draft", Draft: true},
 	})
 	m.now = func() time.Time { return now }
 	stats := func() []string {
@@ -310,6 +310,8 @@ func TestAgeTextBoundaries(t *testing.T) {
 
 func TestRepositoryAndAuthorColumnsFitTheirLongestValue(t *testing.T) {
 	review := reviewPRs(2)
+	// Rows of one repository would have no Repository column.
+	review[0].Repository = "other/c"
 	review[1].Author = "a-rather-long-login-name"
 	m := newPaneModel(t, 140, 30, nil, review)
 	columns := m.panes[paneReview].table.Columns()
@@ -325,7 +327,7 @@ func TestRepositoryAndAuthorColumnsFitTheirLongestValue(t *testing.T) {
 	if got := columns[columnIndex(columns, "Author")].Width; got != 8 {
 		t.Fatalf("Author width = %d for short logins, want the floor 8", got)
 	}
-	long := reviewPRs(1)
+	long := reviewPRs(2)
 	long[0].Repository = "acme/a-repository-with-a-long-name"
 	m = newPaneModel(t, 140, 30, nil, long)
 	columns = m.panes[paneReview].table.Columns()
@@ -335,7 +337,9 @@ func TestRepositoryAndAuthorColumnsFitTheirLongestValue(t *testing.T) {
 }
 
 func TestReviewRequestedDropsReviewFirst(t *testing.T) {
-	m := newPaneModel(t, 140, 30, nil, reviewPRs(2))
+	review := reviewPRs(2)
+	review[0].Repository = "other/c"
+	m := newPaneModel(t, 140, 30, nil, review)
 	columns := m.panes[paneReview].table.Columns()
 	if columnIndex(columns, "Review") < 0 || columnIndex(columns, "State") >= 0 {
 		t.Fatalf("wide review columns = %+v", columns)

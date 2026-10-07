@@ -74,12 +74,14 @@ func (m *model) redrawRows(id paneID) {
 type tableLayout struct {
 	columns          []table.Column
 	repositoryColumn bool
-	stats            []statColumn
-	detail           bool // the queue pane's Detail column is shown
-	from             bool // the Snoozed pane's From column is shown
-	mergedBy         bool // the Merged pane's Merged by column is shown
-	plead            bool // the mark column is wide enough for the asked-again marker
-	fits             bool
+	// shared is what every row has in common, which the tables leave out.
+	shared   sharedRepositories
+	stats    []statColumn
+	detail   bool // the queue pane's Detail column is shown
+	from     bool // the Snoozed pane's From column is shown
+	mergedBy bool // the Merged pane's Merged by column is shown
+	plead    bool // the mark column is wide enough for the asked-again marker
+	fits     bool
 }
 
 func (m *model) paneLayout(id paneID) tableLayout {
@@ -87,17 +89,19 @@ func (m *model) paneLayout(id paneID) tableLayout {
 	review := id == paneReview
 	// Number, Repository, and Author are as wide as their longest value.
 	maxNumberWidth, maxRepository, maxAuthor, maxMergedBy := 6, 0, 0, 0
+	shared := m.shared()
 	for row := range rowCount(pane) {
 		if pr, _, ok := m.paneRow(id, row); ok {
 			maxNumberWidth = max(maxNumberWidth, ansi.StringWidth(fmt.Sprintf("#%d", pr.Number)))
-			maxRepository = max(maxRepository, ansi.StringWidth(singleLine(pr.Repository)))
+			maxRepository = max(maxRepository, ansi.StringWidth(shared.repositoryText(pr)))
 			maxAuthor = max(maxAuthor, ansi.StringWidth(singleLine(pr.Author)))
 			maxMergedBy = max(maxMergedBy, ansi.StringWidth(singleLine(pr.MergedBy)))
 		}
 	}
 	width := max(1, m.width)
-	var layout tableLayout
-	layout.repositoryColumn = m.selectedRepository == "" && width >= 80
+	layout := tableLayout{shared: shared}
+	// One repository shared by every row is named in the title instead.
+	layout.repositoryColumn = m.selectedRepository == "" && shared.repository == "" && width >= 80
 	repositoryWidth := 0
 	if layout.repositoryColumn {
 		repositoryWidth = min(28, max(12, width/4), max(len("Repository"), maxRepository))
@@ -265,7 +269,8 @@ const (
 func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 	pane := &m.panes[id]
 	review := id == paneReview
-	all := m.selectedRepository == ""
+	shared := layout.shared
+	all := m.selectedRepository == "" && shared.repository == ""
 	now := m.now()
 	ic := m.icons
 	rows := make([]table.Row, 0, rowCount(pane))
@@ -288,7 +293,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		}
 		name := singleLine(pr.Title)
 		if all && !layout.repositoryColumn {
-			name = singleLine(pr.Repository) + " — " + name
+			name = shared.repositoryText(pr) + " — " + name
 		}
 		// A review row back in draft already says so in its status tag.
 		if pr.Draft && pr.ReviewStatus != github.ReviewBackInDraft {
@@ -316,7 +321,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		if id == paneMerged {
 			cells := table.Row{markCell, ageText(pr.MergedAt, now)}
 			if layout.repositoryColumn {
-				cells = append(cells, singleLine(pr.Repository))
+				cells = append(cells, layout.shared.repositoryText(pr))
 			}
 			cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(cellName, name))
 			if layout.mergedBy {
@@ -335,7 +340,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 		if id == paneQueue {
 			cells := table.Row{markCell, changed(cellQueue, queueText(ic, pr.Queue.State))}
 			if layout.repositoryColumn {
-				cells = append(cells, singleLine(pr.Repository))
+				cells = append(cells, layout.shared.repositoryText(pr))
 			}
 			cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(cellName, name))
 			if layout.detail {
@@ -364,7 +369,7 @@ func (m *model) paneRows(id paneID, layout tableLayout) []table.Row {
 			cells = append(cells, changed(lastCell, last))
 		}
 		if layout.repositoryColumn {
-			cells = append(cells, singleLine(pr.Repository))
+			cells = append(cells, layout.shared.repositoryText(pr))
 		}
 		cells = append(cells, prNumberLink(pr.Number, pr.URL), changed(nameCells, name))
 		if review {
@@ -404,7 +409,7 @@ func (m *model) snoozedRow(pr *github.PullRequest, gone bool, layout tableLayout
 	}
 	cells := table.Row{markCell, wakes}
 	if layout.repositoryColumn {
-		cells = append(cells, singleLine(pr.Repository))
+		cells = append(cells, layout.shared.repositoryText(pr))
 	}
 	cells = append(cells, prNumberLink(pr.Number, pr.URL), name)
 	if layout.from {
