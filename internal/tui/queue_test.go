@@ -167,7 +167,7 @@ func TestQueueChangeUnderlinesTheNameInMyPRs(t *testing.T) {
 	snapshot.PullRequests[0].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueRemovedFailed}
 	m.applySnapshot(snapshot)
 	var found bool
-	for _, row := range m.paneRows(paneMine, m.paneLayout(paneMine)) {
+	for _, row := range m.buildRows(paneMine, m.layoutColumns(paneMine)) {
 		for _, cell := range row {
 			if strings.Contains(cell, "queue failed") && strings.Contains(cell, underlined) {
 				found = true
@@ -256,21 +256,21 @@ func TestQueueEmptyingFocusGoesToThePaneWithRows(t *testing.T) {
 func TestQueuePaneDropsDetailBeforeItsNameGetsTooNarrow(t *testing.T) {
 	titles := func(m *model) string {
 		var names []string
-		for _, column := range m.paneLayout(paneQueue).columns {
+		for _, column := range m.layoutColumns(paneQueue).tableColumns(m.icons) {
 			names = append(names, column.Title)
 		}
 		return strings.Join(names, ",")
 	}
 	wide := queueModel(t, 140, 30)
-	if layout := wide.paneLayout(paneQueue); !layout.detail || !strings.Contains(titles(wide), "Detail") {
+	if !strings.Contains(titles(wide), "Detail") {
 		t.Fatalf("width 140 columns %v", titles(wide))
 	}
 	narrow := queueModel(t, 40, 10)
-	layout := narrow.paneLayout(paneQueue)
-	if !layout.fits || layout.detail || strings.Contains(titles(narrow), "Detail") {
-		t.Fatalf("width 40 fits %v detail %v columns %v", layout.fits, layout.detail, titles(narrow))
+	layout := narrow.layoutColumns(paneQueue)
+	if !layout.fits || strings.Contains(titles(narrow), "Detail") {
+		t.Fatalf("width 40 fits %v columns %v", layout.fits, titles(narrow))
 	}
-	for _, row := range narrow.paneRows(paneQueue, layout) {
+	for _, row := range narrow.buildRows(paneQueue, layout) {
 		if len(row) != len(layout.columns) {
 			t.Fatalf("row has %d cells for %d columns", len(row), len(layout.columns))
 		}
@@ -348,7 +348,7 @@ func TestLeavingTheQueueIsMarkedWithoutAnEntry(t *testing.T) {
 		t.Fatalf("mark = %+v, want changed queue cell", mark)
 	}
 	var reversed bool
-	for _, row := range m.paneRows(paneMine, m.paneLayout(paneMine)) {
+	for _, row := range m.buildRows(paneMine, m.layoutColumns(paneMine)) {
 		for _, cell := range row {
 			if strings.Contains(cell, "title") && strings.Contains(cell, underlined) {
 				reversed = true
