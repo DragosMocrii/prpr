@@ -18,6 +18,8 @@ const (
 	MinRefresh = 30 * time.Second
 	// DefaultFullRefresh is how long after a complete fetch the next one is complete.
 	DefaultFullRefresh = 15 * time.Minute
+	// DefaultMerged is how many merged pull requests the Merged pane lists.
+	DefaultMerged = 5
 )
 
 // Editor names, saved as the app key's editor.
@@ -29,6 +31,9 @@ const (
 
 // Editors are the editors e can open a pull request in, the default first.
 var Editors = []string{EditorVSCode, EditorVSCodeInsiders, EditorGitHubDev}
+
+// MergedChoices are the counts the Merged pane can list; 0 turns it off.
+var MergedChoices = []int{0, 3, 5, 10, 20}
 
 // settings are the app settings that were flags: each value, and for
 // refresh, bots, and queues the value as written, kept while it cannot be
@@ -42,6 +47,8 @@ type settings struct {
 	botsRaw        json.RawMessage
 	queues         []github.Queue
 	queuesRaw      json.RawMessage
+	merged         int
+	mergedRaw      json.RawMessage
 	editor         string
 	editorRaw      json.RawMessage
 	notify         bool
@@ -54,7 +61,7 @@ type settings struct {
 func defaultSettings() settings {
 	bots, _ := github.ParseBots(github.DefaultBots)
 	queues, _ := github.ParseQueues(github.DefaultQueues)
-	return settings{refresh: DefaultRefresh, fullRefresh: DefaultFullRefresh, bots: bots, queues: queues, editor: EditorVSCode, title: true, errs: map[string]error{}}
+	return settings{refresh: DefaultRefresh, fullRefresh: DefaultFullRefresh, bots: bots, queues: queues, merged: DefaultMerged, editor: EditorVSCode, title: true, errs: map[string]error{}}
 }
 
 // decodeSettings reads the settings from the app object; a value that
@@ -113,6 +120,18 @@ func decodeSettings(app appJSON, path string) settings {
 			s.queues = queues
 		}
 	}
+	// Merged: must be a JSON number among MergedChoices, or nothing
+	if len(app.Merged) != 0 && string(app.Merged) != "null" {
+		s.mergedRaw = app.Merged
+		var n int
+		if err := json.Unmarshal(app.Merged, &n); err != nil {
+			s.errs["merged"] = fmt.Errorf("recently merged in %q not read, using %d: %w", path, DefaultMerged, err)
+		} else if !slices.Contains(MergedChoices, n) {
+			s.errs["merged"] = fmt.Errorf("recently merged %d in %q not read, using %d: must be one of %v", n, path, DefaultMerged, MergedChoices)
+		} else {
+			s.merged = n
+		}
+	}
 	// Editor: must be a JSON string naming one of Editors, or nothing
 	if len(app.Editor) != 0 && string(app.Editor) != "null" {
 		s.editorRaw = app.Editor
@@ -135,6 +154,7 @@ func (s settings) encode(app *appJSON) {
 	app.FullRefresh = s.fullRefreshRaw
 	app.Bots = s.botsRaw
 	app.Queues = s.queuesRaw
+	app.Merged = s.mergedRaw
 	app.Editor = s.editorRaw
 	app.Notify, app.Mouse = s.notify, s.mouse
 	app.Title = nil
@@ -278,6 +298,24 @@ func (s *Store) SaveQueues(queues []github.Queue) error {
 	})
 }
 
+// Merged is how many merged pull requests the Merged pane lists; 0 is off.
+func (s *Store) Merged() int { return s.settings.merged }
+
+// SaveMerged saves how many merged pull requests to list, one of
+// MergedChoices.
+func (s *Store) SaveMerged(n int) error {
+	if !slices.Contains(MergedChoices, n) {
+		return fmt.Errorf("recently merged must be one of %v", MergedChoices)
+	}
+	return s.saveSettings(func(c *settings) {
+		c.merged, c.mergedRaw = n, nil
+		if n != DefaultMerged {
+			c.mergedRaw, _ = json.Marshal(n)
+		}
+		delete(c.errs, "merged")
+	})
+}
+
 // Editor is the editor e opens a pull request in, one of Editors.
 func (s *Store) Editor() string { return s.settings.editor }
 
@@ -320,13 +358,13 @@ func (s *Store) SaveTitle(on bool) error {
 }
 
 // SettingErr says why the saved value of key ("refresh", "bots", "queues",
-// "editor", or "fullRefresh") was not read; nil when it was.
+// "editor", "fullRefresh", or "merged") was not read; nil when it was.
 func (s *Store) SettingErr(key string) error { return s.settings.errs[key] }
 
 // SettingsErr joins every unreadable setting's error; nil when all were read.
 func (s *Store) SettingsErr() error {
 	var errs []error
-	for _, key := range []string{"refresh", "bots", "queues", "editor", "fullRefresh"} {
+	for _, key := range []string{"refresh", "bots", "queues", "editor", "fullRefresh", "merged"} {
 		if err := s.settings.errs[key]; err != nil {
 			errs = append(errs, err)
 		}

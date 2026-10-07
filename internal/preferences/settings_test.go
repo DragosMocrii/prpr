@@ -253,3 +253,55 @@ func TestSaveQueuesDuplicatesRejected(t *testing.T) {
 		t.Fatal("store.Queues() changed after failed save")
 	}
 }
+
+func TestMergedSettingDefaultsSavesAndFallsBack(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Merged() != DefaultMerged || DefaultMerged != 5 {
+		t.Fatalf("default %d", store.Merged())
+	}
+	if err := store.SaveMerged(7); err == nil {
+		t.Fatal("saved a value that is not a choice")
+	}
+	if err := store.SaveMerged(0); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil || reopened.Merged() != 0 {
+		t.Fatalf("reopened %d, %v", reopened.Merged(), err)
+	}
+	// The default is not written.
+	if err := reopened.SaveMerged(DefaultMerged); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); strings.Contains(string(data), `"merged"`) {
+		t.Fatalf("default written: %s", data)
+	}
+	for _, bad := range []string{`"5"`, `7`, `-1`, `[5]`} {
+		if err := os.WriteFile(path, []byte(`{"app":{"merged":`+bad+`}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		store, err := Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if store.Merged() != DefaultMerged || store.SettingErr("merged") == nil || store.SettingsErr() == nil {
+			t.Fatalf("%s: merged %d, err %v", bad, store.Merged(), store.SettingErr("merged"))
+		}
+		// Another save keeps it as written (error still set, still falls back to default).
+		if err := store.SaveMouse(true); err != nil {
+			t.Fatal(err)
+		}
+		// Re-open to verify the error persists and default is used
+		reopened, err := Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reopened.Merged() != DefaultMerged || reopened.SettingErr("merged") == nil {
+			t.Fatalf("%s: after save reopened to %d with err %v", bad, reopened.Merged(), reopened.SettingErr("merged"))
+		}
+	}
+}
