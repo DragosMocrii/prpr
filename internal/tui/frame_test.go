@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -67,5 +68,49 @@ func TestSetFocusRefusesACollapsedPane(t *testing.T) {
 	m.setFocus(paneMerged)
 	if m.focus == paneMerged || slices.Contains(m.framePlan().focusable(m), paneMerged) {
 		t.Fatal("a collapsed pane took the focus")
+	}
+}
+
+func TestDismissingAGoneRowLaysOutTheTablesTheFramePlans(t *testing.T) {
+	// A gone row's dismissal shortens My PRs, which gives Merged a line
+	// without changing which panes are drawn.
+	m := mergedLayoutModel(t, 140, 26, manyPRs(8), nil, mergedPRs(15))
+	updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: manyPRs(7), Merged: mergedPRs(15)}})
+	if len(m.panes[paneMine].gone) != 1 {
+		t.Fatalf("gone %v", m.panes[paneMine].gone)
+	}
+	before := m.framePlan()
+	press(m, tea.Key{Code: 'G', Text: "G"})
+	rest(m)
+	press(m, tea.Key{Code: 'k', Text: "k"})
+	if len(m.panes[paneMine].gone) != 0 {
+		t.Fatalf("gone row not dismissed: %v", m.panes[paneMine].gone)
+	}
+	plan := m.framePlan()
+	if plan.tables == before.tables {
+		t.Fatalf("fixture: the dismissal left the plan's tables at %v", plan.tables)
+	}
+	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+	for _, p := range plan.screen {
+		if !strings.Contains(lines[p.top], paneSpecs[p.id].name) {
+			t.Errorf("line %d = %q, want %s's title", p.top, lines[p.top], paneSpecs[p.id].name)
+		}
+		pane := &m.panes[p.id]
+		if rowCount(pane) == 0 {
+			continue
+		}
+		if built := tableHeaderLen + pane.table.Height(); built != plan.tables[p.id] {
+			t.Errorf("%s table built %d lines, planned %d", paneSpecs[p.id].name, built, plan.tables[p.id])
+		}
+		for line := p.top + 1 + tableHeaderLen; line <= p.top+p.body; line++ {
+			hit, ok := m.hitTest(line)
+			if !ok || hit.pane != p.id || hit.row < 0 {
+				continue
+			}
+			pr, _, _ := m.paneRow(p.id, hit.row)
+			if want := fmt.Sprintf("#%d", pr.Number); !strings.Contains(lines[line], want) {
+				t.Errorf("line %d = %q, hit row %d is %s", line, lines[line], hit.row, want)
+			}
+		}
 	}
 }

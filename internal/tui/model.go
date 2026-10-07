@@ -845,7 +845,7 @@ func (m *model) leaveRow(id paneID, row int) {
 		}
 		return
 	}
-	drawn := m.framePlan().drawn
+	before := m.framePlan()
 	m.trackerFor(id, pr).dismiss(pr)
 	if id == paneSnoozed {
 		delete(m.snoozeClosed, key)
@@ -859,11 +859,11 @@ func (m *model) leaveRow(id paneID, row int) {
 	if row < target {
 		target--
 	}
-	// A shorter pane can leave room for the Merged pane, which then needs
-	// a layout of its own.
+	// A shorter pane can leave room for the Merged pane, or give it or a
+	// short pane a line, which then needs a layout of its own.
 	// So can one with the last row of another repository, whose column
 	// then goes.
-	if slices.Equal(drawn, m.framePlan().drawn) && m.sharedRows == m.shared() {
+	if after := m.framePlan(); after.tables == before.tables && slices.Equal(before.drawn, after.drawn) && m.sharedRows == m.shared() {
 		m.redrawRows(id)
 	} else {
 		m.rebuildPRTable(false)
