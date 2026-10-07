@@ -35,6 +35,11 @@ type fakeAPI struct {
 	nodeIDs     [][]string
 	requiredIDs [][]string
 	now         time.Time
+	// merged answers the merged query; failMerged makes it fail, and
+	// mergedQueries counts it.
+	merged        []map[string]any
+	failMerged    bool
+	mergedQueries int
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
@@ -83,6 +88,16 @@ func (f *fakeAPI) call(_ context.Context, _ string, args ...string) ([]byte, err
 		} else if name, value, ok := strings.Cut(arg, "="); ok && strings.HasPrefix(name, "id") {
 			ids = append(ids, value)
 		}
+	}
+	if strings.Contains(query, "states: [MERGED]") {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.mergedQueries++
+		if f.failMerged {
+			return nil, errors.New("GitHub merged pull request query failed: boom")
+		}
+		return json.Marshal(map[string]any{"data": map[string]any{"viewer": map[string]any{"login": f.login,
+			"pullRequests": map[string]any{"nodes": f.merged}}}})
 	}
 	kind := "signature"
 	switch {

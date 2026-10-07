@@ -74,6 +74,9 @@ type PullRequest struct {
 	// Queue is a merge queue's word on an authored pull request, read only
 	// in a full fetch with queues enabled; nil when no queue holds it.
 	Queue *QueueEntry
+	// MergedAt and MergedBy are read only for the merged list.
+	MergedAt time.Time
+	MergedBy string
 }
 
 type Snapshot struct {
@@ -82,6 +85,9 @@ type Snapshot struct {
 	// ReviewRequests lists pending direct review requests, then pull requests
 	// the viewer reviewed after such a request (see [ReviewStatus]).
 	ReviewRequests []PullRequest
+	// Merged lists the viewer's most recently merged pull requests, newest
+	// merge first; nil when the merged list is off and for previews.
+	Merged []PullRequest
 	// Preview marks a fast first look from [Client.Preview]: merge state, waiting
 	// time, checks, reviews, and bots are unknown and left empty.
 	Preview bool
@@ -103,6 +109,8 @@ type Client struct {
 	needs Needs
 	// queues are the merge queues fetches read.
 	queues []Queue
+	// merged is how many merged pull requests fetches list; 0 is none.
+	merged int
 	// api answers gh commands in place of gh, for tests; nil runs gh.
 	api func(ctx context.Context, message string, args ...string) ([]byte, error)
 	// clock is the time fetches use, for tests; nil is time.Now.
@@ -444,10 +452,23 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	// Settings, cache, and generation are read together, so a setter that
 	// drops the cache later makes this fetch's write stale.
 	c.mu.Lock()
-	bots, needs, queues := c.bots, c.needs, c.queues
+	bots, needs, queues, mergedLimit := c.bots, c.needs, c.queues, c.merged
 	cache, generation := c.cache, c.cacheGeneration
 	complete := cache == nil || (c.fullEvery > 0 && now.Sub(cache.lastComplete) >= c.fullEvery)
 	c.mu.Unlock()
+	type mergedResult struct {
+		prs []PullRequest
+		err error
+	}
+	mergedDone := make(chan mergedResult, 1)
+	go func() {
+		if mergedLimit == 0 {
+			mergedDone <- mergedResult{}
+			return
+		}
+		prs, err := c.fetchMerged(ctx, mergedLimit)
+		mergedDone <- mergedResult{prs, err}
+	}()
 	var l lists
 	var err error
 	lastComplete := now
@@ -459,6 +480,10 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 		if !became {
 			lastComplete = cache.lastComplete
 		}
+	}
+	merged := <-mergedDone
+	if err == nil {
+		err = merged.err
 	}
 	c.mu.Lock()
 	if c.cacheGeneration == generation {
@@ -472,7 +497,9 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return l.snapshot(), nil
+	snapshot := l.snapshot()
+	snapshot.Merged = merged.prs
+	return snapshot, nil
 }
 
 // fetchComplete runs every list's full query, then the required checks
