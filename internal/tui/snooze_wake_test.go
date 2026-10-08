@@ -337,3 +337,23 @@ func TestAccountsKeepTheirOwnSnoozes(t *testing.T) {
 		t.Fatal("bob sees alice's snoozes")
 	}
 }
+
+func TestAnUrgentNudgeWakeFlashIsLasting(t *testing.T) {
+	m, mine, review := snoozedModel(t, snoozeNow.Add(24*time.Hour), preferences.SnoozeReview, 7)
+	m.setTitle = true
+	// The pending request is already seen, so only the nudge can wake it.
+	key := prKey{"acme/web", 7}
+	held, _ := m.snoozeSignals(listReview, &review[0])
+	m.snoozes[key] = preferences.Snooze{Repository: "acme/web", Number: 7, List: preferences.SnoozeReview,
+		Until: snoozeNow.Add(24 * time.Hour), Seen: held}
+	delete(m.woke, key)
+	nudged := append([]github.PullRequest(nil), review...)
+	nudged[0].Nudge = &github.Nudge{Urgency: github.NudgeUrgent, At: snoozeNow}
+	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: mine, ReviewRequests: nudged}})
+	if m.woke[prKey{"acme/web", 7}] != "nudged" {
+		t.Fatalf("woke = %v", m.woke)
+	}
+	if m.flashText == "" || !m.flashUntil.IsZero() {
+		t.Fatalf("urgent wake flash: text %q until %v, want lasting", m.flashText, m.flashUntil)
+	}
+}

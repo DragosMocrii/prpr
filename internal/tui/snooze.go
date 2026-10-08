@@ -569,10 +569,11 @@ func (m *model) markWoke(key prKey, reason string) {
 }
 
 // wakeAlert adds the alert of a pull request that woke, when alerting and
-// the pull request is listed in the scope.
-func (m *model) wakeAlert(alerts []prAlert, alert bool, pr *github.PullRequest, kind string) []prAlert {
+// the pull request is listed in the scope. urgent marks a wake by an urgent
+// nudge, whose flash lasts.
+func (m *model) wakeAlert(alerts []prAlert, alert bool, pr *github.PullRequest, kind string, urgent bool) []prAlert {
 	if alert && pr != nil && m.inScope(pr) {
-		alerts = append(alerts, prAlert{pr: pr, kinds: []string{kind}})
+		alerts = append(alerts, prAlert{pr: pr, kinds: []string{kind}, urgent: urgent})
 	}
 	return alerts
 }
@@ -628,7 +629,7 @@ func (m *model) expire(alert bool) ([]prAlert, bool) {
 	woke := false
 	for _, row := range m.listedSnoozes() {
 		if !m.snoozes[row.key].Until.After(now) {
-			alerts = m.wakeAlert(alerts, alert, row.pr, "snooze ended")
+			alerts = m.wakeAlert(alerts, alert, row.pr, "snooze ended", false)
 		}
 	}
 	for key, s := range m.snoozes {
@@ -667,7 +668,8 @@ func (m *model) reviewSnoozes(alert bool) []prAlert {
 		if reason != "" {
 			delete(m.snoozes, row.key)
 			m.markWoke(row.key, reason)
-			alerts = m.wakeAlert(alerts, alert, row.pr, "woke: "+reason)
+			urgent := reason == "nudged" && row.pr.Nudge != nil && row.pr.Nudge.Urgency == github.NudgeUrgent
+			alerts = m.wakeAlert(alerts, alert, row.pr, "woke: "+reason, urgent)
 			changed = true
 			continue
 		}

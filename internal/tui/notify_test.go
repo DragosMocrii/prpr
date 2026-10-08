@@ -301,6 +301,15 @@ func TestAnUrgentNudgeFlashesUntilFocus(t *testing.T) {
 	}
 }
 
+func TestALaterFlashKeepsAnUrgentFlashLasting(t *testing.T) {
+	m := titleModel(t)
+	m.startFlash("urgent", true)
+	m.startFlash("normal", false)
+	if m.flashText != "normal" || !m.flashUntil.IsZero() {
+		t.Fatalf("flash %q until %v, want a lasting replacement", m.flashText, m.flashUntil)
+	}
+}
+
 func TestANormalNudgeFlashesForFlashDuration(t *testing.T) {
 	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	m := titleModel(t)

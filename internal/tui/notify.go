@@ -111,22 +111,24 @@ func (m *model) alerts() []prAlert {
 		// urgent (a new nudge, a later one, or a raised urgency).
 		// A draft, shown or hidden, needs no one, and arrives when it leaves
 		// draft.
+		// Both nudges are read through the dismissals, as quiet reads them.
 		var oldNudge *github.Nudge
 		if listed {
-			oldNudge = old.Nudge
+			oldNudge = m.nudge(old)
 		}
-		nudged := nudgeAlert(oldNudge, m.nudge(pr), listed)
+		nudge := m.nudge(pr)
+		nudged := nudgeAlert(oldNudge, nudge, listed)
 		if m.quiet(pr) || pr.Draft || !m.inScope(pr) ||
 			(listed && !m.quiet(old) && !old.Draft && m.inScope(old) && !nudged) {
 			continue
 		}
 		kind := "review requested"
-		if n := m.nudge(pr); nudged {
-			kind = "nudged (" + nudgeWord(n) + ")"
+		if nudged {
+			kind = "nudged (" + nudgeWord(nudge) + ")"
 		} else if text := reviewStatusText(pr.ReviewStatus); text != "" {
 			kind = text
 		}
-		found = append(found, prAlert{pr: pr, kinds: []string{kind}, urgent: nudged && m.nudge(pr).Urgency == github.NudgeUrgent})
+		found = append(found, prAlert{pr: pr, kinds: []string{kind}, urgent: nudged && nudge.Urgency == github.NudgeUrgent})
 	}
 	return found
 }

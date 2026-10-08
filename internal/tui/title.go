@@ -112,11 +112,12 @@ func (m *model) needYouCount() int {
 // startFlash flashes the title with an alert's text, unless titles are off
 // or the terminal reports that it has focus. A new flash replaces the one
 // shown. A lasting flash, for an urgent nudge, runs until focus, a key, or
-// a click.
+// a click; a later flash replacing it lasts too.
 func (m *model) startFlash(text string, lasting bool) tea.Cmd {
 	if !m.setTitle || m.terminalFocus == focusIn || !m.notificationsAllowed() {
 		return nil
 	}
+	lasting = lasting || (m.flashText != "" && m.flashUntil.IsZero())
 	m.flashGeneration++
 	m.flashText, m.flashOn, m.flashUntil = text, true, m.now().Add(flashDuration)
 	if lasting {
