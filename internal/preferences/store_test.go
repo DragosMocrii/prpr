@@ -484,7 +484,7 @@ func TestSnoozesRoundTripPerAccountAndKeepTheScope(t *testing.T) {
 	requested := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	snoozes := []Snooze{
 		{Repository: "acme/api", Number: 12, List: SnoozeMine, Until: until, Seen: []string{"failing"}},
-		{Repository: "acme/web", Number: 7, List: SnoozeReview, Until: until, Activity: true, Requested: requested},
+		{Repository: "acme/web", Number: 7, List: SnoozeReview, Until: until, Activity: true, Nudged: requested},
 	}
 	if err := store.SaveSnoozes("Alice", snoozes); err != nil {
 		t.Fatal(err)
@@ -495,7 +495,7 @@ func TestSnoozesRoundTripPerAccountAndKeepTheScope(t *testing.T) {
 	}
 	got := reopened.Snoozes("alice")
 	if len(got) != 2 || got[0].Number != 12 || !got[0].Until.Equal(until) || !slices.Equal(got[0].Seen, []string{"failing"}) ||
-		got[1].List != SnoozeReview || !got[1].Activity || !got[1].Requested.Equal(requested) {
+		got[1].List != SnoozeReview || !got[1].Activity || !got[1].Nudged.Equal(requested) {
 		t.Fatalf("snoozes = %+v", got)
 	}
 	if scope, found := reopened.Lookup("alice"); !found || scope.Repository != "acme/api" {
@@ -715,7 +715,7 @@ func TestDismissalsRoundTripAndKeepTheScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	requested := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	if err := store.SaveDismissals("Alice", []Dismissal{{Repository: "acme/web", Number: 7, Requested: requested}}); err != nil {
+	if err := store.SaveDismissals("Alice", []Dismissal{{Repository: "acme/web", Number: 7, Nudged: requested}}); err != nil {
 		t.Fatal(err)
 	}
 	reopened, err := Open(path)
@@ -723,7 +723,7 @@ func TestDismissalsRoundTripAndKeepTheScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := reopened.Dismissals("alice")
-	if len(got) != 1 || got[0].Repository != "acme/web" || got[0].Number != 7 || !got[0].Requested.Equal(requested) {
+	if len(got) != 1 || got[0].Repository != "acme/web" || got[0].Number != 7 || !got[0].Nudged.Equal(requested) {
 		t.Fatalf("dismissals = %+v", got)
 	}
 	if scope, found := reopened.Lookup("alice"); !found || scope.Repository != "acme/api" {
@@ -743,7 +743,7 @@ func TestDismissalsRoundTripAndKeepTheScope(t *testing.T) {
 
 func TestUnreadableDismissalsAreSkipped(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "preferences.json")
-	data := `{"github.com/alice":{"repository":"acme/api","dismissed":[{"repository":"nope","number":1,"requested":"2026-10-01T12:00:00Z"},{"repository":"acme/web","number":7,"requested":"2026-10-01T12:00:00Z"},{"repository":"acme/web","number":0,"requested":"2026-10-01T12:00:00Z"}]}}`
+	data := `{"github.com/alice":{"repository":"acme/api","dismissed":[{"repository":"nope","number":1,"nudged":"2026-10-01T12:00:00Z"},{"repository":"acme/web","number":7,"nudged":"2026-10-01T12:00:00Z"},{"repository":"acme/web","number":0,"nudged":"2026-10-01T12:00:00Z"}]}}`
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -754,7 +754,7 @@ func TestUnreadableDismissalsAreSkipped(t *testing.T) {
 	if got := store.Dismissals("alice"); len(got) != 1 || got[0].Number != 7 {
 		t.Fatalf("dismissals = %+v, want only the readable one", got)
 	}
-	if err := store.SaveDismissals("alice", []Dismissal{{Repository: "acme/api", Number: 0, Requested: time.Now()}}); err == nil {
+	if err := store.SaveDismissals("alice", []Dismissal{{Repository: "acme/api", Number: 0, Nudged: time.Now()}}); err == nil {
 		t.Fatal("SaveDismissals accepted an invalid number")
 	}
 }
@@ -801,5 +801,24 @@ func TestOpenRejectsInvalidOwnerScopes(t *testing.T) {
 		if _, err := Open(path); err == nil {
 			t.Errorf("Open(%s) succeeded, want an error", contents)
 		}
+	}
+}
+
+func TestOldAskedAgainValuesAreIgnored(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	old := `{"github.com/alice":{"repository":"acme/api","dismissed":[{"repository":"acme/web","number":7,"requested":"2026-10-01T09:00:00Z"}],
+		"snoozed":[{"repository":"acme/web","number":8,"list":"review","until":"2030-01-01T00:00:00Z","requested":"2026-10-01T09:00:00Z"}]}}`
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := store.Dismissals("alice"); len(d) != 1 || !d[0].Nudged.IsZero() {
+		t.Fatalf("dismissals = %+v, want one with no nudge time", d)
+	}
+	if s := store.Snoozes("alice"); len(s) != 1 || !s[0].Nudged.IsZero() {
+		t.Fatalf("snoozes = %+v, want one with no nudge time", s)
 	}
 }

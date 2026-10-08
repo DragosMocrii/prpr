@@ -58,7 +58,7 @@ type Snooze struct {
 	Until      time.Time // always set; an activity snooze stores now+7d
 	Activity   bool      // drawn "activity"
 	Seen       []string  // wake signals held at the last full fetch
-	Requested  time.Time // review rows: request time recorded while pending; zero otherwise
+	Nudged     time.Time // review rows: the normal or urgent nudge's time when last recorded; zero otherwise
 }
 
 // snoozeJSON is a saved snooze.
@@ -69,7 +69,7 @@ type snoozeJSON struct {
 	Until      time.Time `json:"until"`
 	Activity   bool      `json:"activity,omitempty"`
 	Seen       []string  `json:"seen,omitempty"`
-	Requested  time.Time `json:"requested,omitzero"`
+	Nudged     time.Time `json:"nudged,omitzero"`
 }
 
 // validSnooze reports why a snooze cannot be saved, or nil.
@@ -92,19 +92,18 @@ func validSnooze(s Snooze) error {
 	return nil
 }
 
-// Dismissal records that the viewer dismissed the request-again marker of
-// a review request; a later request shows it again.
+// Dismissal records that the viewer dismissed a nudge; any other nudge shows.
 type Dismissal struct {
 	Repository string
 	Number     int
-	Requested  time.Time // the request's time when it was dismissed
+	Nudged     time.Time // the dismissed nudge's time
 }
 
 // dismissalJSON is a saved dismissal.
 type dismissalJSON struct {
 	Repository string    `json:"repository"`
 	Number     int       `json:"number"`
-	Requested  time.Time `json:"requested"`
+	Nudged     time.Time `json:"nudged"`
 }
 
 // validDismissal reports why a dismissal cannot be saved, or nil.

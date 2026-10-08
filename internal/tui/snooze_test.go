@@ -160,7 +160,7 @@ func TestReviewSignals(t *testing.T) {
 	first := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	pending := reviewPR(github.ReviewRequested, first)
 	held, _ := m.snoozeSignals(listReview, pending)
-	snooze := preferences.Snooze{List: preferences.SnoozeReview, Seen: held, Requested: requestedAt(listReview, pending)}
+	snooze := preferences.Snooze{List: preferences.SnoozeReview, Seen: held, Nudged: requestedAt(listReview, pending)}
 	again := reviewPR(github.ReviewRequested, first.Add(time.Hour))
 	h, k := m.snoozeSignals(listReview, again)
 	if reason, _, requested := snoozeWake(snooze, h, k, again); reason != "review requested again" || !requested.Equal(first.Add(time.Hour)) {
@@ -185,7 +185,7 @@ func TestReviewingASnoozedRowDoesNotWakeIt(t *testing.T) {
 	first := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	pending := reviewPR(github.ReviewRequested, first)
 	held, _ := m.snoozeSignals(listReview, pending)
-	snooze := preferences.Snooze{List: preferences.SnoozeReview, Seen: held, Requested: requestedAt(listReview, pending)}
+	snooze := preferences.Snooze{List: preferences.SnoozeReview, Seen: held, Nudged: requestedAt(listReview, pending)}
 	for _, status := range []github.ReviewStatus{github.ReviewWaitingOnAuthor, github.ReviewApproved} {
 		reviewed := reviewPR(status, first.Add(2*time.Hour))
 		h, k := m.snoozeSignals(listReview, reviewed)
@@ -197,7 +197,7 @@ func TestReviewingASnoozedRowDoesNotWakeIt(t *testing.T) {
 	waiting := reviewPR(github.ReviewWaitingOnAuthor, first.Add(2*time.Hour))
 	h, k := m.snoozeSignals(listReview, waiting)
 	_, seen, requested := snoozeWake(snooze, h, k, waiting)
-	snooze.Seen, snooze.Requested = seen, requested
+	snooze.Seen, snooze.Nudged = seen, requested
 	again := reviewPR(github.ReviewRequested, first.Add(3*time.Hour))
 	h, k = m.snoozeSignals(listReview, again)
 	if reason, _, _ := snoozeWake(snooze, h, k, again); reason != "review requested again" {

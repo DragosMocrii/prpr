@@ -217,7 +217,7 @@ func snoozeWake(s preferences.Snooze, held, known []string, pr *github.PullReque
 	seen = append(seen, held...)
 	slices.Sort(seen)
 	seen = slices.Compact(seen)
-	requested := s.Requested
+	requested := s.Nudged
 	list := listAuthored
 	if s.List == preferences.SnoozeReview {
 		list = listReview
@@ -226,7 +226,7 @@ func snoozeWake(s preferences.Snooze, held, known []string, pr *github.PullReque
 		requested = at
 	}
 	// A pending request asked again moves its request time later.
-	if !s.Requested.IsZero() && requested.After(s.Requested) {
+	if !s.Nudged.IsZero() && requested.After(s.Nudged) {
 		return "review requested again", seen, requested
 	}
 	for _, reason := range wakeReasons {
@@ -422,7 +422,7 @@ func (m *model) snooze(key prKey, list listID, until time.Time, activity bool) t
 		slices.Sort(held)
 	}
 	entry := preferences.Snooze{Repository: pr.Repository, Number: pr.Number, List: listName(list),
-		Until: until, Activity: activity, Seen: held, Requested: requestedAt(list, pr)}
+		Until: until, Activity: activity, Seen: held, Nudged: requestedAt(list, pr)}
 	focus, row := m.focus, m.focused().table.Cursor()
 	m.keepSelection(func() {
 		if m.snoozes == nil {
@@ -671,8 +671,8 @@ func (m *model) reviewSnoozes(alert bool) []prAlert {
 			changed = true
 			continue
 		}
-		if !slices.Equal(seen, s.Seen) || !requested.Equal(s.Requested) {
-			s.Seen, s.Requested = seen, requested
+		if !slices.Equal(seen, s.Seen) || !requested.Equal(s.Nudged) {
+			s.Seen, s.Nudged = seen, requested
 			m.snoozes[row.key] = s
 			changed = true
 		}

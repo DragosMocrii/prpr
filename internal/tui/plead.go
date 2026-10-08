@@ -107,7 +107,7 @@ func (m *model) selectedPleading() bool {
 func (m *model) loadDismissals(login string) {
 	m.dismissed = make(map[prKey]time.Time)
 	for _, d := range m.preferences.Dismissals(login) {
-		m.dismissed[keyOf(&github.PullRequest{Repository: d.Repository, Number: d.Number})] = d.Requested
+		m.dismissed[keyOf(&github.PullRequest{Repository: d.Repository, Number: d.Number})] = d.Nudged
 	}
 }
 
@@ -135,7 +135,7 @@ func (m *model) pruneDismissals() {
 func (m *model) saveDismissals() {
 	dismissals := make([]preferences.Dismissal, 0, len(m.dismissed))
 	for key, at := range m.dismissed {
-		dismissals = append(dismissals, preferences.Dismissal{Repository: key.repository, Number: key.number, Requested: at})
+		dismissals = append(dismissals, preferences.Dismissal{Repository: key.repository, Number: key.number, Nudged: at})
 	}
 	slices.SortFunc(dismissals, func(a, b preferences.Dismissal) int {
 		return cmp.Or(cmp.Compare(a.Repository, b.Repository), cmp.Compare(a.Number, b.Number))
