@@ -2,7 +2,7 @@
 
 `prpr` is a terminal app for monitoring open pull requests authored by a GitHub CLI account: gh's active account, or one you pin in prpr (see [GitHub accounts](#github-accounts)). It hides drafts until you press `D` and pulls across repositories visible to that account, and lists open pull requests that request a review from you directly in a second pane; requests to your teams, such as code-owner teams, are left out.
 
-![prpr listing pull requests and showing one's details, marking a new, a changed, and a merged pull request after a refresh, blinking 🙏 on a review request that asks again, opening the grouped keys, and choosing a reviewer who covers two code-owner teams](docs/demo.gif)
+![prpr listing pull requests and showing one's details, marking a new, a changed, and a merged pull request after a refresh, blinking 🚨 on a review request whose author nudged urgently, opening the grouped keys, and choosing whom to nudge so one reviewer covers two code-owner teams](docs/demo.gif)
 
 ## Requirements
 
