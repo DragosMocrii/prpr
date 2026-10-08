@@ -167,7 +167,8 @@ func TestLegendDrawsWhatTheTablesDraw(t *testing.T) {
 		}
 		if nerd {
 			drawn = append(drawn, ic.draftTag(), ic.pin, ic.bell, ic.header("CI"),
-				reviewStatusTag(ic, github.ReviewNewCommits), reviewStatusTag(ic, github.ReviewWaitingOnAuthor))
+				reviewStatusTag(ic, github.ReviewNewCommits, false), reviewStatusTag(ic, github.ReviewWaitingOnAuthor, true),
+				reviewStatusTag(ic, github.ReviewNudged, false))
 		}
 		legend := strings.Join(m.legendLines(), "\n")
 		for _, symbol := range drawn {

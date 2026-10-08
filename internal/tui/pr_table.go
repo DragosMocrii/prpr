@@ -119,7 +119,7 @@ const (
 // reviewStatusTag names where a reviewed pull request stands in a word or
 // two, or an icon in the Nerd set, colored when it needs the viewer again;
 // it is empty for a pending review request.
-func reviewStatusTag(ic *iconSet, status github.ReviewStatus) string {
+func reviewStatusTag(ic *iconSet, status github.ReviewStatus, waiting bool) string {
 	text, icon := "", ""
 	switch status {
 	case github.ReviewNewCommits:
@@ -144,7 +144,7 @@ func reviewStatusTag(ic *iconSet, status github.ReviewStatus) string {
 	if ic.nerd {
 		text = icon
 	}
-	if status.Waiting() {
+	if waiting {
 		return text
 	}
 	return coloredIcon(text, "3")

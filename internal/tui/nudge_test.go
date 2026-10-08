@@ -6,7 +6,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/DragosMocrii/prpr/internal/github"
 )
@@ -21,10 +20,6 @@ func nudgedRequests(urgency github.NudgeUrgency, at time.Time) []github.PullRequ
 	prs[1].Nudge = &github.Nudge{Urgency: urgency, At: at, Note: "ship"}
 	prs[2].ReviewStatus = github.ReviewWaitingOnAuthor
 	return prs
-}
-
-func reviewCell(m *model, row, column int) string {
-	return ansi.Strip(m.panes[paneReview].table.Rows()[row][column])
 }
 
 func reviewNumbers(m *model) []int {
@@ -103,6 +98,9 @@ func TestDismissingANudgeUndoesEverythingItDidUntilAnotherNudge(t *testing.T) {
 	m.selectPR(paneReview, m.snapshot.ReviewRequests[1].Repository, m.snapshot.ReviewRequests[1].Number)
 	press(m, tea.Key{Code: 'X', Text: "X"})
 	nudged := &m.snapshot.ReviewRequests[1]
+	if pr, ok := m.paneSelectedPR(paneReview); !ok || pr.Number != nudged.Number {
+		t.Fatalf("selection left the dismissed row: %+v", pr)
+	}
 	if m.nudge(nudged) != nil || !m.waiting(nudged) || strings.Contains(m.View().Content, "🚨") {
 		t.Fatal("a dismissed nudge still shows or still lifts its row")
 	}
@@ -154,5 +152,29 @@ func TestPreviewRowsNeverShowNudges(t *testing.T) {
 	}
 	if strings.Contains(m.View().Content, "🚨") || m.nudgeShown() {
 		t.Fatal("a preview showed a nudge")
+	}
+}
+
+func TestADismissedNudgeOnlyRowWaits(t *testing.T) {
+	prs := reviewPRs(3)
+	prs[0].ReviewStatus = github.ReviewNudged
+	prs[0].Nudge = &github.Nudge{Urgency: github.NudgeNormal, At: nudgedAt}
+	prs[1].ReviewStatus = github.ReviewNewCommits
+	prs[2].ReviewStatus = github.ReviewWaitingOnAuthor
+	m := newPaneModel(t, 140, 30, nil, prs)
+	if counts := categoryCounts(m); counts[5] != 2 {
+		t.Fatalf("awaiting your review = %d before dismissing", counts[5])
+	}
+	m.setFocus(paneReview)
+	m.selectPR(paneReview, prs[0].Repository, prs[0].Number)
+	press(m, tea.Key{Code: 'X', Text: "X"})
+	if got := reviewNumbers(m); len(got) != 3 || got[0] != prs[1].Number || got[1] != prs[0].Number {
+		t.Fatalf("order = %v, want the dismissed row after the row that needs the viewer", got)
+	}
+	if !strings.Contains(reviewRow(m, 1), waitingOn) {
+		t.Fatal("the dismissed nudge-only row is not dimmed")
+	}
+	if counts := categoryCounts(m); counts[5] != 1 {
+		t.Fatalf("awaiting your review = %d after dismissing", counts[5])
 	}
 }

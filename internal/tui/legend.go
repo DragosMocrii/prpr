@@ -86,8 +86,8 @@ func (m *model) legendSections() []legendSection {
 	if ic.nerd {
 		var reviewed []string
 		for _, status := range []github.ReviewStatus{github.ReviewNewCommits, github.ReviewAuthorReplied, github.ReviewDismissed,
-			github.ReviewNewActivity, github.ReviewWaitingOnAuthor, github.ReviewApproved, github.ReviewBackInDraft} {
-			reviewed = append(reviewed, item(reviewStatusTag(ic, status), reviewStatusText(status)))
+			github.ReviewNewActivity, github.ReviewNudged, github.ReviewWaitingOnAuthor, github.ReviewApproved, github.ReviewBackInDraft} {
+			reviewed = append(reviewed, item(reviewStatusTag(ic, status, status.Waiting()), reviewStatusText(status)))
 		}
 		sections = append(sections, legendSection{"Reviewed", reviewed})
 	}

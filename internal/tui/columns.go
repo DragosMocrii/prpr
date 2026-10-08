@@ -294,7 +294,7 @@ func (m *model) nameText(spec *paneSpec, r *rowContext) string {
 		name = ic.draftTag() + nameTagSeparator(ic) + name
 	}
 	if spec.statusTag {
-		if status := reviewStatusTag(ic, pr.ReviewStatus); status != "" && ic.nerd {
+		if status := reviewStatusTag(ic, pr.ReviewStatus, m.waiting(pr)); status != "" && ic.nerd {
 			name = status + " " + name
 		} else if status != "" {
 			name = status + " · " + name

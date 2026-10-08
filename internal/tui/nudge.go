@@ -46,9 +46,10 @@ func (m *model) nudge(pr *github.PullRequest) *github.Nudge {
 }
 
 // waiting reports whether a review row waits on someone other than the
-// viewer: a nudge in effect makes it need the viewer.
+// viewer: a nudge in effect makes it need the viewer, and a row listed only
+// for its nudge waits once that nudge is dismissed.
 func (m *model) waiting(pr *github.PullRequest) bool {
-	return pr.ReviewStatus.Waiting() && m.nudge(pr) == nil
+	return (pr.ReviewStatus.Waiting() || pr.ReviewStatus == github.ReviewNudged) && m.nudge(pr) == nil
 }
 
 // reviewRank orders Review requested: urgent nudges, pending requests,
@@ -160,7 +161,7 @@ func (m *model) dismissNudge() {
 	}
 	m.dismissed[keyOf(pr)] = n.At
 	m.saveDismissals()
-	m.rebuildVisiblePRs()
+	m.keepSelection(m.rebuildVisiblePRs, false)
 }
 
 // selectedNudged reports whether the focused row shows a nudge.
