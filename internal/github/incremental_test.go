@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"slices"
 	"strconv"
@@ -456,5 +457,60 @@ func TestSignaturePassFailureFailsTheFetchAndTheNextIsComplete(t *testing.T) {
 	f.failSignature = false
 	if _, kind := fetch(t, f, c); kind != "complete" {
 		t.Fatalf("after a failure: %s", kind)
+	}
+}
+
+func TestMentionsJoinOnlyWhenNudgedAndOnce(t *testing.T) {
+	f := newFakeAPI(t)
+	f.login = "octocat"
+	requested := prNode("PR_1", 1)
+	// Nudged too, so it is in both searches and must be listed once.
+	requested["activity"] = map[string]any{"nodes": []any{json.RawMessage(nudgeComment("bob", "2026-10-02T09:00:00Z", "low", "octocat"))}}
+	nudged := prNode("PR_2", 2)
+	nudged["requestEvents"] = map[string]any{"nodes": []any{}}
+	nudged["activity"] = map[string]any{"nodes": []any{json.RawMessage(nudgeComment("bob", "2026-10-02T10:00:00Z", "urgent", "octocat"))}}
+	plain := prNode("PR_3", 3)
+	plain["requestEvents"] = map[string]any{"nodes": []any{}}
+	f.requests = []map[string]any{requested}
+	f.mentions = []map[string]any{requested, nudged, plain}
+	snapshot, err := f.client().Fetch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var numbers []int
+	for _, pr := range snapshot.ReviewRequests {
+		numbers = append(numbers, pr.Number)
+	}
+	if !slices.Equal(numbers, []int{1, 2}) {
+		t.Fatalf("review rows = %v, want the request then the nudged mention", numbers)
+	}
+	if n := snapshot.ReviewRequests[1]; n.ReviewStatus != ReviewNudged || n.Nudge == nil || n.Nudge.Urgency != NudgeUrgent {
+		t.Fatalf("mention row = %+v", n)
+	}
+}
+
+func TestIncrementalFetchEndsANudgeTheViewerAnswered(t *testing.T) {
+	f := newFakeAPI(t)
+	f.login = "octocat"
+	pr := prNode("PR_1", 1)
+	pr["activity"] = map[string]any{"nodes": []any{json.RawMessage(nudgeComment("bob", "2026-10-02T10:00:00Z", "normal", "octocat"))}}
+	f.requests = []map[string]any{pr}
+	client := f.client()
+	if s, err := client.Fetch(context.Background()); err != nil || s.ReviewRequests[0].Nudge == nil {
+		t.Fatalf("first fetch: %v %+v", err, s.ReviewRequests)
+	}
+	pr["updatedAt"] = "2026-10-03T10:00:00Z"
+	pr["activity"] = map[string]any{"nodes": []any{
+		json.RawMessage(nudgeComment("bob", "2026-10-02T10:00:00Z", "normal", "octocat")),
+		json.RawMessage(comment("octocat", "2026-10-03T10:00:00Z"))}}
+	s, err := client.Fetch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.ReviewRequests[0].Nudge != nil {
+		t.Fatalf("the answered nudge is still active: %+v", s.ReviewRequests[0].Nudge)
+	}
+	if !slices.Contains(f.kinds, "signature") {
+		t.Fatalf("second fetch was not incremental: %v", f.kinds)
 	}
 }

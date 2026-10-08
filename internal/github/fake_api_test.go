@@ -19,6 +19,7 @@ type fakeAPI struct {
 	t                            *testing.T
 	mu                           sync.Mutex
 	authored, requests, reviewed []map[string]any
+	mentions                     []map[string]any
 	// gone makes detail queries answer null for these IDs.
 	gone map[string]bool
 	// failNodes makes detail queries fail.
@@ -161,6 +162,9 @@ func (f *fakeAPI) call(ctx context.Context, _ string, args ...string) ([]byte, e
 	case strings.HasPrefix(query, "query($endCursor: String) {\n  viewer {"):
 		f.kinds = append(f.kinds, kind)
 		data = page("pullRequests", f.authored, f.login)
+	case strings.Contains(query, "mentions:@me"):
+		// One page, not paginated: a single response object.
+		return json.Marshal(map[string]any{"data": map[string]any{"search": map[string]any{"nodes": f.mentions}}})
 	case strings.Contains(query, "reviewed-by:@me"):
 		data = page("search", f.reviewed, "")
 	default:
@@ -174,7 +178,7 @@ func (f *fakeAPI) find(id string) any {
 	if f.gone[id] {
 		return nil
 	}
-	for _, list := range [][]map[string]any{f.authored, f.requests, f.reviewed} {
+	for _, list := range [][]map[string]any{f.authored, f.requests, f.reviewed, f.mentions} {
 		for _, node := range list {
 			if node["id"] == id {
 				return node

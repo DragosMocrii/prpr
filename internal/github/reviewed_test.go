@@ -2,8 +2,10 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -217,5 +219,37 @@ func TestRequestsAreNoLongerMarkedAskedAgain(t *testing.T) {
 	got := mergeReviews(requests, reviewed, nil)
 	if len(got) != 2 || got[0].Number != 1 || got[0].ReviewStatus != ReviewRequested || got[1].Number != 2 {
 		t.Fatalf("merged = %+v", got)
+	}
+}
+
+func TestMentionsQueryIsOnePage(t *testing.T) {
+	q := mentionsQuery(false, day(9))
+	if strings.Contains(q, "endCursor") || strings.Contains(q, "pageInfo") || !strings.Contains(q, "mentions:@me -author:@me") ||
+		!strings.Contains(q, "first: "+strconv.Itoa(mentionsLimit)) || !strings.Contains(q, "createdAt body") {
+		t.Fatalf("mentions query:\n%s", q)
+	}
+}
+
+func TestMentionedPullRequests(t *testing.T) {
+	nudged := nudgeComment("bob", at(5), "normal", "octocat")
+	cases := []struct {
+		name     string
+		activity string
+		keep     bool
+		status   ReviewStatus
+	}{
+		{"nudged, never reviewed", nudged, true, ReviewNudged},
+		{"nudged after a team review", review("octocat", "APPROVED", at(4), "h2") + "," + nudged, true, ReviewApproved},
+		{"not nudged", comment("bob", at(5)), false, 0},
+	}
+	for _, c := range cases {
+		var node pullRequestNode
+		if err := json.Unmarshal([]byte(reviewedNode(3, false, `{"createdAt":"2026-06-01T00:00:00Z","requestedReviewer":{"login":"team-only"}}`, c.activity)), &node); err != nil {
+			t.Fatal(err)
+		}
+		got := mentionedPullRequest(&node, "octocat", nil)
+		if got.keep != c.keep || (c.keep && got.pr.ReviewStatus != c.status) {
+			t.Errorf("%s: keep %v status %v, want %v %v", c.name, got.keep, got.pr.ReviewStatus, c.keep, c.status)
+		}
 	}
 }

@@ -525,7 +525,7 @@ func (c *Client) Fetch(ctx context.Context) (Snapshot, error) {
 // when the rules need them.
 func (c *Client) fetchComplete(ctx context.Context, bots []Bot, needs Needs, queues []Queue, now time.Time) (lists, error) {
 	hasBots := len(bots) > 0
-	l, err := c.fetchLists(ctx, pullRequestsQuery(hasBots, needs, queues), reviewRequestsQuery(hasBots), reviewedQuery(hasBots, now), bots)
+	l, err := c.fetchLists(ctx, pullRequestsQuery(hasBots, needs, queues), reviewRequestsQuery(hasBots), reviewedQuery(hasBots, now), mentionsQuery(hasBots, now), bots)
 	if err != nil || !needs.RequiredChecks {
 		return l, err
 	}
@@ -540,7 +540,7 @@ func (c *Client) fetchComplete(ctx context.Context, bots []Bot, needs Needs, que
 // authentication check, which Fetch reports, and reviewed pull requests,
 // which need the fields Preview leaves out to be placed.
 func (c *Client) Preview(ctx context.Context) (Snapshot, error) {
-	l, err := c.fetchLists(ctx, previewPullRequestsQuery(), previewReviewRequestsQuery(), "", nil)
+	l, err := c.fetchLists(ctx, previewPullRequestsQuery(), previewReviewRequestsQuery(), "", "", nil)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -554,24 +554,27 @@ func (c *Client) Preview(ctx context.Context) (Snapshot, error) {
 	return snapshot, nil
 }
 
-// lists are the three fetched lists before mergeReviews joins them.
+// lists are the fetched lists before mergeReviews joins them.
 type lists struct {
 	login              string
 	authored, requests []PullRequest
-	reviewed           []listed
+	reviewed, mentions []listed
 }
 
 // snapshot joins the lists as Fetch returns them.
 func (l lists) snapshot() Snapshot {
-	var kept []PullRequest
-	for _, r := range l.reviewed {
-		if r.keep {
-			kept = append(kept, r.pr)
+	keptOf := func(list []listed) []PullRequest {
+		var kept []PullRequest
+		for _, r := range list {
+			if r.keep {
+				kept = append(kept, r.pr)
+			}
 		}
+		return kept
 	}
 	requests := l.requests
-	if len(kept) > 0 {
-		requests = mergeReviews(l.requests, kept, nil)
+	if kept, mentioned := keptOf(l.reviewed), keptOf(l.mentions); len(kept) > 0 || len(mentioned) > 0 {
+		requests = mergeReviews(l.requests, kept, mentioned)
 	}
 	return Snapshot{Login: l.login, PullRequests: l.authored, ReviewRequests: requests}
 }
@@ -581,20 +584,25 @@ type listOutput struct {
 	err  error
 }
 
-// graphqlLists runs the authored, review request, and reviewed list queries
-// at once, skipping an empty one.
-func (c *Client) graphqlLists(ctx context.Context, authored, requests, reviewed string) [3]listOutput {
-	messages := [3]string{"GitHub pull request query failed", "GitHub review request query failed", "GitHub reviewed pull request query failed"}
-	var outputs [3]listOutput
+// graphqlLists runs the authored, review request, reviewed, and mentions list
+// queries at once, skipping an empty one.
+func (c *Client) graphqlLists(ctx context.Context, authored, requests, reviewed, mentions string) [4]listOutput {
+	messages := [4]string{"GitHub pull request query failed", "GitHub review request query failed", "GitHub reviewed pull request query failed", "GitHub mentioned pull request query failed"}
+	var outputs [4]listOutput
 	var wg sync.WaitGroup
-	for i, query := range [3]string{authored, requests, reviewed} {
+	for i, query := range [4]string{authored, requests, reviewed, mentions} {
 		if query == "" {
 			continue
 		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			data, err := c.output(ctx, messages[i], "api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query="+query)
+			args := []string{"api", "graphql", "--hostname", "github.com", "--paginate", "--slurp", "-f", "query=" + query}
+			if i == 3 {
+				// The mentions search reads one page only.
+				args = []string{"api", "graphql", "--hostname", "github.com", "-f", "query=" + query}
+			}
+			data, err := c.output(ctx, messages[i], args...)
 			outputs[i] = listOutput{data, err}
 		}()
 	}
@@ -602,10 +610,10 @@ func (c *Client) graphqlLists(ctx context.Context, authored, requests, reviewed 
 	return outputs
 }
 
-// fetchLists fetches and decodes the lists, the reviewed one unless its
-// query is empty. Every query must succeed.
-func (c *Client) fetchLists(ctx context.Context, authored, requests, reviewed string, bots []Bot) (lists, error) {
-	out := c.graphqlLists(ctx, authored, requests, reviewed)
+// fetchLists fetches and decodes the lists, the reviewed and mentions ones
+// unless their queries are empty. Every query must succeed.
+func (c *Client) fetchLists(ctx context.Context, authored, requests, reviewed, mentions string, bots []Bot) (lists, error) {
+	out := c.graphqlLists(ctx, authored, requests, reviewed, mentions)
 	if out[0].err != nil {
 		return lists{}, out[0].err
 	}
@@ -627,6 +635,15 @@ func (c *Client) fetchLists(ctx context.Context, authored, requests, reviewed st
 		return lists{}, out[2].err
 	}
 	if l.reviewed, err = decodeReviewedNodes(out[2].data, l.login, bots); err != nil {
+		return lists{}, err
+	}
+	if mentions == "" {
+		return l, nil
+	}
+	if out[3].err != nil {
+		return lists{}, out[3].err
+	}
+	if l.mentions, err = decodeMentionedNodes(out[3].data, l.login, bots); err != nil {
 		return lists{}, err
 	}
 	return l, nil

@@ -254,3 +254,69 @@ func decodeReviewedPages(data []byte, login string, bots []Bot) ([]PullRequest, 
 	}
 	return kept, nil
 }
+
+// mentionsLimit is how many pull requests the mentions search reads: one
+// page, never more. It is the only search that drops most of its rows, so
+// its cost is bounded rather than complete.
+const mentionsLimit = pageSize
+
+// mentionsSearch finds open pull requests of others that mention the viewer,
+// updated within reviewedWindow: where the author may have nudged them
+// without requesting their review directly.
+func mentionsSearch(now time.Time) string {
+	return "is:pr is:open mentions:@me -author:@me archived:false updated:>=" +
+		now.Add(-reviewedWindow).UTC().Format("2006-01-02") + " sort:updated-desc"
+}
+
+// singlePageSearchQuery lists the first results of a pull request search,
+// with no cursor, so gh reads one page.
+func singlePageSearchQuery(search string, first int, fields string) string {
+	return `query {
+  search(type: ISSUE, first: ` + strconv.Itoa(first) + `, query: "` + search + `") {
+    nodes {
+      ... on PullRequest {` + fields + `
+      }
+    }
+  }
+}`
+}
+
+func mentionsQuery(bots bool, now time.Time) string {
+	return singlePageSearchQuery(mentionsSearch(now), mentionsLimit, reviewFields(bots, activityField))
+}
+
+// mentionedPullRequest converts a mentions search node. It stays only when
+// the author's nudge of the viewer is active; it is placed by the viewer's
+// reviews when they reviewed, else as nudged.
+func mentionedPullRequest(node *pullRequestNode, login string, bots []Bot) listed {
+	pr := node.pullRequest("", bots)
+	pr.Nudge = node.nudge(login)
+	if pr.Nudge == nil {
+		return listed{pr: pr}
+	}
+	var head time.Time
+	if commits := node.Commits.Nodes; len(commits) > 0 && commits[0] != nil {
+		head = commits[0].Commit.CommittedDate
+	}
+	status, since := node.placeReviewed(login, head)
+	if status == ReviewNewActivity {
+		status, since = ReviewNudged, pr.Nudge.At
+	}
+	pr.ReviewStatus, pr.WaitingSince = status, since
+	return listed{pr: pr, keep: true}
+}
+
+// decodeMentionedNodes decodes the mentions search's single page, kept or not.
+func decodeMentionedNodes(data []byte, login string, bots []Bot) ([]listed, error) {
+	var all []listed
+	_, err := decodeSearchPages(onePage(data), "mentioned pull request", func(node *pullRequestNode) (PullRequest, bool) {
+		all = append(all, mentionedPullRequest(node, login, bots))
+		return PullRequest{}, false
+	})
+	return all, err
+}
+
+// onePage wraps a response gh read without --slurp as a list of one page.
+func onePage(data []byte) []byte {
+	return append(append([]byte{'['}, data...), ']')
+}

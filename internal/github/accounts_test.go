@@ -38,11 +38,12 @@ case "$*" in
   "auth status --hostname github.com --json hosts") echo '{"hosts":{"github.com":[{"state":"success","active":true,"host":"github.com","login":"bob","tokenSource":"keyring"},{"state":"error","error":"HTTP 401","active":false,"host":"github.com","login":"alice","tokenSource":"keyring"}]}}' ;;
   "auth status"*) ;;
   "api graphql"*rateLimit*) %s; echo '{"data":{"rateLimit":{"limit":5000,"remaining":4999,"resetAt":"2026-10-02T10:00:00Z"}}}' ;;
+  "api graphql"*mentions:@me*) %s; echo '{"data":{"search":{"nodes":[]}}}' ;;
   "api graphql"*search*) %s; echo '[{"data":{"search":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}]' ;;
   "api graphql"*) %s; echo '[{"data":{"viewer":{"login":"alice","pullRequests":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]' ;;
   "api"*) %s; echo '[[]]' ;;
 esac
-`, log, fakeToken, fail, fail, fail, fail)
+`, log, fakeToken, fail, fail, fail, fail, fail)
 	path := filepath.Join(dir, "gh")
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)

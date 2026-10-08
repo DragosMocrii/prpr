@@ -168,9 +168,9 @@ func (c *Client) details(ctx context.Context, ids []string, fields string) ([]*p
 // requests by node ID, as converted before mergeReviews, the viewer's login
 // they were read as, and when the last complete fetch ran.
 type fetchCache struct {
-	login                        string
-	authored, requests, reviewed map[string]listed
-	lastComplete                 time.Time
+	login                                  string
+	authored, requests, reviewed, mentions map[string]listed
+	lastComplete                           time.Time
 }
 
 func byID(prs []listed) map[string]listed {
@@ -190,7 +190,7 @@ func allKept(prs []PullRequest) []listed {
 }
 
 func newFetchCache(l lists, lastComplete time.Time) *fetchCache {
-	return &fetchCache{authored: byID(allKept(l.authored)), requests: byID(allKept(l.requests)), reviewed: byID(l.reviewed), login: l.login, lastComplete: lastComplete}
+	return &fetchCache{authored: byID(allKept(l.authored)), requests: byID(allKept(l.requests)), reviewed: byID(l.reviewed), mentions: byID(l.mentions), login: l.login, lastComplete: lastComplete}
 }
 
 // dropCache makes the next fetch complete. The caller holds c.mu.
@@ -250,7 +250,8 @@ func stale(list []entry, cache map[string]listed) []string {
 // cache. Every query must succeed. When the signatures name another viewer
 // than the cache's, it runs a complete fetch instead and reports true.
 func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots []Bot, needs Needs, queues []Queue, now time.Time) (l lists, complete bool, err error) {
-	out := c.graphqlLists(ctx, authoredSignatureQuery(queues), searchSignatureQuery(reviewSearch), searchSignatureQuery(reviewedSearch(now)))
+	out := c.graphqlLists(ctx, authoredSignatureQuery(queues), searchSignatureQuery(reviewSearch), searchSignatureQuery(reviewedSearch(now)),
+		singlePageSearchQuery(mentionsSearch(now), mentionsLimit, signatureFields(nil)))
 	if out[0].err != nil {
 		return lists{}, false, out[0].err
 	}
@@ -277,6 +278,14 @@ func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots [
 		return lists{}, false, err
 	}
 
+	if out[3].err != nil {
+		return lists{}, false, out[3].err
+	}
+	mentions, err := decodeSearchSignatures(onePage(out[3].data), "mentioned pull request")
+	if err != nil {
+		return lists{}, false, err
+	}
+
 	// The lists' details are independent, so they are read at once.
 	hasBots := len(bots) > 0
 	type read struct {
@@ -296,8 +305,9 @@ func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots [
 	a := start(authored, cache.authored, authoredFields(hasBots, needs, queues))
 	r := start(requests, cache.requests, reviewFields(hasBots, activityField))
 	d := start(reviewed, cache.reviewed, reviewFields(hasBots, activityField))
-	ra, rr, rd := <-a, <-r, <-d
-	for _, res := range []read{ra, rr, rd} {
+	mn := start(mentions, cache.mentions, reviewFields(hasBots, activityField))
+	ra, rr, rd, rm := <-a, <-r, <-d, <-mn
+	for _, res := range []read{ra, rr, rd, rm} {
 		if res.err != nil {
 			return lists{}, false, res.err
 		}
@@ -321,6 +331,11 @@ func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots [
 		freshReviewed[i] = reviewedPullRequest(node, login, bots)
 	}
 
+	freshMentions := make([]listed, len(rm.nodes))
+	for i, node := range rm.nodes {
+		freshMentions[i] = mentionedPullRequest(node, login, bots)
+	}
+
 	l = lists{login: login}
 	for _, x := range assemble(authored, cache.authored, byID(allKept(freshAuthored))) {
 		l.authored = append(l.authored, x.pr)
@@ -329,6 +344,7 @@ func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots [
 		l.requests = append(l.requests, x.pr)
 	}
 	l.reviewed = assemble(reviewed, cache.reviewed, byID(freshReviewed))
+	l.mentions = assemble(mentions, cache.mentions, byID(freshMentions))
 	return l, false, nil
 }
 
