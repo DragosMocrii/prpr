@@ -319,3 +319,45 @@ func TestANormalNudgeFlashesForFlashDuration(t *testing.T) {
 		t.Fatalf("normal flash: text %q until %v, want flashDuration", m.flashText, m.flashUntil)
 	}
 }
+
+func TestADismissedNudgeStaysSilent(t *testing.T) {
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	m := notifyModel(t, "")
+	mention := changePR(10, "acme/b")
+	mention.ReviewStatus, mention.Nudge = github.ReviewNudged, &github.Nudge{Urgency: github.NudgeUrgent, At: at}
+	fetch(m, nil, []github.PullRequest{mention})
+	m.setFocus(paneReview)
+	m.selectPR(paneReview, mention.Repository, mention.Number)
+	press(m, tea.Key{Code: 'X', Text: "X"})
+	for i := range 2 {
+		if got := fetch(m, nil, []github.PullRequest{mention}); got != nil {
+			t.Fatalf("fetch %d after dismissing notified: %q", i+1, got)
+		}
+	}
+	if m.flashText != "" || m.nudge(&m.snapshot.ReviewRequests[0]) != nil {
+		t.Fatalf("the dismissal did not hold: flash %q", m.flashText)
+	}
+}
+
+func TestANudgeNoteNeverReachesTheNotificationTitleOrStatusLine(t *testing.T) {
+	const note = "secret-note-text"
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	m := notifyModel(t, "")
+	m.setTitle = true
+	fetch(m, nil, []github.PullRequest{nudgedReview(0, at)})
+	nudged := nudgedReview(github.NudgeUrgent, at)
+	nudged.Nudge.Note = note
+	got := fetch(m, nil, []github.PullRequest{nudged})
+	if len(got) != 1 {
+		t.Fatalf("notifications = %q, want one", got)
+	}
+	m.setFocus(paneReview)
+	m.selectPR(paneReview, nudged.Repository, nudged.Number)
+	view := m.View()
+	for name, text := range map[string]string{"notification": got[0], "notice": m.notice, "flash": m.flashText,
+		"title": view.WindowTitle, "list": view.Content} {
+		if strings.Contains(text, note) {
+			t.Fatalf("the note reached the %s: %q", name, text)
+		}
+	}
+}

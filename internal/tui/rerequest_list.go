@@ -50,10 +50,10 @@ func newRerequestEditor(key prKey, title string, list github.ReviewerList, dark 
 		index[login] = i
 		e.reviewed[login] = reviewer.ReviewedAt
 		// Requested people who have not reviewed start chosen, as do
-		// reviews before the latest commits, but not an approver: an
-		// approval rarely needs a nudge. Team members who did not review
-		// are picked by hand.
-		if reviewer.Stale && !reviewer.Pending && reviewer.State != "APPROVED" || reviewer.Pending && reviewer.State == "" {
+		// reviews before the latest commits, requested again or not, but
+		// not an approver: an approval rarely needs a nudge. Team members
+		// who did not review are picked by hand.
+		if reviewer.Stale && reviewer.State != "APPROVED" || reviewer.Pending && reviewer.State == "" {
 			e.chosen[login] = true
 		}
 		if reviewer.State != "" || reviewer.Pending {

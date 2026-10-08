@@ -95,6 +95,25 @@ func TestNudgeSendsTheChosenUrgencyAndNote(t *testing.T) {
 	}
 }
 
+func TestNudgeStartsWithPendingAndStaleReviewersChosen(t *testing.T) {
+	e := newRerequestEditor(prKey{}, "", reviewers(
+		github.Reviewer{Login: "alice", State: "APPROVED", Stale: true, Pending: true},
+		github.Reviewer{Login: "bob", State: "CHANGES_REQUESTED", Stale: true, Pending: true},
+		github.Reviewer{Login: "carol", Pending: true},
+		github.Reviewer{Login: "dave", State: "COMMENTED"},
+		github.Reviewer{Login: "erin", State: "COMMENTED", Stale: true},
+	), true)
+	var chosen []string
+	for _, person := range e.people {
+		if e.chosen[strings.ToLower(person.Login)] {
+			chosen = append(chosen, person.Login)
+		}
+	}
+	if !slices.Equal(chosen, []string{"bob", "carol", "erin"}) {
+		t.Fatalf("chosen = %v, want requested people without a review and stale non-approvals", chosen)
+	}
+}
+
 func TestNudgeUrgencyCyclesThroughEveryLevel(t *testing.T) {
 	m, _ := openNudge(t, reviewers(github.Reviewer{Login: "bob", State: "COMMENTED", Stale: true}))
 	var seen []github.NudgeUrgency
