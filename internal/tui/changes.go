@@ -144,12 +144,26 @@ func reviewedByViewer(old, pr *github.PullRequest) bool {
 		(pr.ReviewStatus == github.ReviewWaitingOnAuthor || pr.ReviewStatus == github.ReviewApproved)
 }
 
+// sameNudge reports whether two nudges are the same: both none, or the
+// same urgency at the same time.
+func sameNudge(a, b *github.Nudge) bool {
+	return (a == nil) == (b == nil) && (a == nil || a.Urgency == b.Urgency && a.At.Equal(b.At))
+}
+
+// nudgeWord names a nudge's urgency, or "" for none.
+func nudgeWord(n *github.Nudge) string {
+	if n == nil {
+		return ""
+	}
+	return n.Urgency.String()
+}
+
 // cellChanges compares the columns a pull request shows. Age is left out: it
 // moves with the clock.
 func cellChanges(old, pr *github.PullRequest) changedCells {
 	var cells changedCells
 	// The review status is shown before the name.
-	if old.Title != pr.Title || old.ReviewStatus != pr.ReviewStatus {
+	if old.Title != pr.Title || old.ReviewStatus != pr.ReviewStatus || !sameNudge(old.Nudge, pr.Nudge) {
 		cells |= cellName
 	}
 	if old.Draft != pr.Draft {
@@ -285,7 +299,7 @@ func (m *model) changeLines(id paneID, pr *github.PullRequest) []changeLine {
 	}
 	was := mark.was
 	// Someone else's pull request needs the viewer only through its review
-	// status; its failures and conflicts are for its author.
+	// status and nudges; its failures and conflicts are for its author.
 	review := id == paneReview || (id == paneSnoozed && m.snoozeList(pr) == listReview)
 	for _, cell = range changeCells {
 		if mark.cells&cell == 0 {
@@ -301,10 +315,26 @@ func (m *model) changeLines(id paneID, pr *github.PullRequest) []changeLine {
 				}
 				add("Status", reviewWord(was.ReviewStatus), reviewWord(pr.ReviewStatus), dir)
 			}
+			if !sameNudge(was.Nudge, pr.Nudge) {
+				// Gaining a nudge, a later normal or urgent one, or a raised
+				// urgency needs the viewer.
+				dir := dirNeutral
+				if nudgeAlert(was.Nudge, pr.Nudge, true) || pr.Nudge != nil && pr.Nudge.Urgency == github.NudgeLow && was.Nudge == nil {
+					dir = dirBad
+				}
+				before, after := nudgeWord(was.Nudge), nudgeWord(pr.Nudge)
+				if before == "" {
+					before = "none"
+				}
+				if after == "" {
+					after = "none"
+				}
+				add("Nudge", before, after, dir)
+			}
 			switch {
 			case was.Title != pr.Title:
 				add("Name", "", "renamed", dirNeutral)
-			case was.ReviewStatus == pr.ReviewStatus:
+			case was.ReviewStatus == pr.ReviewStatus && sameNudge(was.Nudge, pr.Nudge):
 				add("Name", "", "changed, then back", dirNeutral)
 			}
 		case cellAuthor:
@@ -369,7 +399,7 @@ func (m *model) changeLines(id paneID, pr *github.PullRequest) []changeLine {
 	}
 	if review {
 		for i := range lines {
-			if lines[i].label != "Status" && lines[i].dir == dirBad {
+			if lines[i].label != "Status" && lines[i].label != "Nudge" && lines[i].dir == dirBad {
 				lines[i].dir = dirNeutral
 			}
 		}

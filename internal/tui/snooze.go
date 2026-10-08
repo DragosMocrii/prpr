@@ -157,7 +157,7 @@ var wakeReasons = []struct{ signal, text string }{
 	{signalQueueCanceled, "queue canceled"},
 	{signalReady, "ready to merge"},
 	{signalApproved, "approved"},
-	{signalRequested, "review requested again"},
+	{signalRequested, "review requested"},
 	{signalNeedsYou, "needs your review"},
 }
 
@@ -195,18 +195,18 @@ func (m *model) snoozeSignals(list listID, pr *github.PullRequest) (held, known 
 	return held, known
 }
 
-// requestedAt is the request time a review row records while a direct
-// request is pending; zero otherwise.
-func requestedAt(list listID, pr *github.PullRequest) time.Time {
-	if list == listReview && pr.ReviewStatus == github.ReviewRequested {
-		return pr.WaitingSince
+// nudgedAt is the time of a review row's normal or urgent nudge, which a
+// snooze records; zero otherwise. Low nudges never wake.
+func nudgedAt(list listID, pr *github.PullRequest) time.Time {
+	if list == listReview && pr.Nudge != nil && pr.Nudge.Urgency >= github.NudgeNormal {
+		return pr.Nudge.At
 	}
 	return time.Time{}
 }
 
 // snoozeWake compares a snoozed pull request's signals with what its snooze
 // saw. It returns why it wakes, or "", and what to record: current values
-// where known, the recorded ones elsewhere, and the request time.
+// where known, the recorded ones elsewhere, and the nudge time.
 func snoozeWake(s preferences.Snooze, held, known []string, pr *github.PullRequest) (string, []string, time.Time) {
 	var seen []string
 	for _, signal := range s.Seen {
@@ -217,24 +217,24 @@ func snoozeWake(s preferences.Snooze, held, known []string, pr *github.PullReque
 	seen = append(seen, held...)
 	slices.Sort(seen)
 	seen = slices.Compact(seen)
-	requested := s.Nudged
+	nudged := s.Nudged
 	list := listAuthored
 	if s.List == preferences.SnoozeReview {
 		list = listReview
 	}
-	if at := requestedAt(list, pr); !at.IsZero() {
-		requested = at
+	if at := nudgedAt(list, pr); !at.IsZero() {
+		nudged = at
 	}
-	// A pending request asked again moves its request time later.
-	if !s.Nudged.IsZero() && requested.After(s.Nudged) {
-		return "review requested again", seen, requested
+	// A normal or urgent nudge newer than the one recorded wakes.
+	if nudged.After(s.Nudged) {
+		return "nudged", seen, nudged
 	}
 	for _, reason := range wakeReasons {
 		if slices.Contains(held, reason.signal) && !slices.Contains(s.Seen, reason.signal) {
-			return reason.text, seen, requested
+			return reason.text, seen, nudged
 		}
 	}
-	return "", seen, requested
+	return "", seen, nudged
 }
 
 // snoozed reports whether a pull request is snoozed, or was snoozed when
@@ -422,7 +422,7 @@ func (m *model) snooze(key prKey, list listID, until time.Time, activity bool) t
 		slices.Sort(held)
 	}
 	entry := preferences.Snooze{Repository: pr.Repository, Number: pr.Number, List: listName(list),
-		Until: until, Activity: activity, Seen: held, Nudged: requestedAt(list, pr)}
+		Until: until, Activity: activity, Seen: held, Nudged: nudgedAt(list, pr)}
 	focus, row := m.focus, m.focused().table.Cursor()
 	m.keepSelection(func() {
 		if m.snoozes == nil {
@@ -572,7 +572,7 @@ func (m *model) markWoke(key prKey, reason string) {
 // the pull request is listed in the scope.
 func (m *model) wakeAlert(alerts []prAlert, alert bool, pr *github.PullRequest, kind string) []prAlert {
 	if alert && pr != nil && m.inScope(pr) {
-		alerts = append(alerts, prAlert{pr, []string{kind}})
+		alerts = append(alerts, prAlert{pr: pr, kinds: []string{kind}})
 	}
 	return alerts
 }
@@ -663,7 +663,7 @@ func (m *model) reviewSnoozes(alert bool) []prAlert {
 		listed[row.key] = true
 		s := m.snoozes[row.key]
 		held, known := m.snoozeSignals(row.list, row.pr)
-		reason, seen, requested := snoozeWake(s, held, known, row.pr)
+		reason, seen, nudged := snoozeWake(s, held, known, row.pr)
 		if reason != "" {
 			delete(m.snoozes, row.key)
 			m.markWoke(row.key, reason)
@@ -671,8 +671,8 @@ func (m *model) reviewSnoozes(alert bool) []prAlert {
 			changed = true
 			continue
 		}
-		if !slices.Equal(seen, s.Seen) || !requested.Equal(s.Nudged) {
-			s.Seen, s.Nudged = seen, requested
+		if !slices.Equal(seen, s.Seen) || !nudged.Equal(s.Nudged) {
+			s.Seen, s.Nudged = seen, nudged
 			m.snoozes[row.key] = s
 			changed = true
 		}
@@ -770,7 +770,7 @@ func (m *model) handleSnoozeTick(msg snoozeTickMsg) tea.Cmd {
 	}
 	cmds := []tea.Cmd{m.notifyAlerts(alerts)}
 	if len(alerts) > 0 {
-		cmds = append(cmds, m.startFlash(alertText(alerts)))
+		cmds = append(cmds, m.startFlash(alertText(alerts), anyUrgent(alerts)))
 	}
 	return tea.Batch(append(cmds, m.scheduleSnoozeTick())...)
 }

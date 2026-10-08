@@ -120,8 +120,8 @@ func TestFlashEndsAfterItsDurationAndANewOneReplacesIt(t *testing.T) {
 	m := titleModel(t)
 	now := changeTime
 	m.now = func() time.Time { return now }
-	m.startFlash("one")
-	m.startFlash("two")
+	m.startFlash("one", false)
+	m.startFlash("two", false)
 	if _, cmd := m.Update(flashTickMsg{generation: m.flashGeneration - 1}); cmd != nil || m.flashText != "two" {
 		t.Fatal("the replaced flash's tick ran")
 	}

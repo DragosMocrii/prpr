@@ -164,6 +164,13 @@ func (m *model) detailRows(pr *github.PullRequest, gone bool) []detailRowText {
 	}
 	if review {
 		add("Author", singleLine(pr.Author))
+		if n := m.nudge(pr); n != nil && !gone {
+			text := n.Urgency.String() + ", " + ageText(n.At, now) + " ago"
+			if n.Note != "" {
+				text += ": " + singleLine(n.Note)
+			}
+			add("Nudged", text)
+		}
 	}
 	merge := mergeDetail(pr.Draft, pr.Mergeable, pr.MergeState, pr.ReviewDecision, pr.Checks)
 	if preview && pr.Mergeable != "CONFLICTING" {
@@ -487,6 +494,8 @@ func (m *model) requestStatus(pr *github.PullRequest) string {
 	switch {
 	case nudge != nil:
 		return "Nudged by the author (" + nudge.Urgency.String() + ")"
+	case pr.ReviewStatus == github.ReviewNudged:
+		return "Nudged, not requested"
 	case pr.ReviewStatus == github.ReviewRequested:
 		return "Your review requested"
 	case pr.ReviewStatus == github.ReviewNewCommits:

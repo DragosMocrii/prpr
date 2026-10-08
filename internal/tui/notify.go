@@ -24,6 +24,8 @@ const notifyTitleWidth = 80
 type prAlert struct {
 	pr    *github.PullRequest
 	kinds []string
+	// urgent marks an urgent nudge, whose title flash lasts until focus.
+	urgent bool
 }
 
 func checksFailing(state string) bool {
@@ -32,8 +34,8 @@ func checksFailing(state string) bool {
 
 // alerts compares a full fetch with the change baseline of each pane, before
 // the baseline is replaced. Only authored pull requests listed in both
-// fetches alert; a review row alerts when it arrives or stops waiting on
-// others, but never when it starts waiting. A pull request a merge queue
+// fetches alert; a review row alerts when it arrives, stops waiting on
+// others, or is nudged at normal or urgent, but never when it starts waiting. A pull request a merge queue
 // removed for failed tests alerts once; queued ones never alert, except that
 // a submitted one still alerts on failing CI and changes requested, which
 // keep it from entering the queue. readiness is each
@@ -68,7 +70,7 @@ func (m *model) alerts() []prAlert {
 		}
 		if pr.Queue != nil && pr.Queue.State == github.QueueRemovedFailed &&
 			(old.Queue == nil || old.Queue.State != github.QueueRemovedFailed) {
-			found = append(found, prAlert{pr, []string{"removed from the merge queue: tests failed"}})
+			found = append(found, prAlert{pr: pr, kinds: []string{"removed from the merge queue: tests failed"}})
 			continue
 		}
 		// A queued pull request waits on the queue, not on its author, except
@@ -88,7 +90,7 @@ func (m *model) alerts() []prAlert {
 			kinds = append(kinds, "changes requested")
 		}
 		if len(kinds) > 0 {
-			found = append(found, prAlert{pr, kinds})
+			found = append(found, prAlert{pr: pr, kinds: kinds})
 		}
 	}
 	m.readiness = readiness
@@ -104,39 +106,51 @@ func (m *model) alerts() []prAlert {
 			continue
 		}
 		old, listed := reviews[keyOf(pr)]
-		// A review row alerts when it starts needing the viewer: it arrives, or
-		// it stops waiting on others. A request made again alerts, whatever
-		// the row needed before.
+		// A review row alerts when it starts needing the viewer: it arrives,
+		// it stops waiting on others, or the author nudges at normal or
+		// urgent (a new nudge, a later one, or a raised urgency).
 		// A draft, shown or hidden, needs no one, and arrives when it leaves
 		// draft.
-		again := listed && requestedAgain(old, pr)
-		if pr.ReviewStatus.Waiting() || pr.Draft || !m.inScope(pr) ||
-			(listed && !old.ReviewStatus.Waiting() && !old.Draft && m.inScope(old) && !again) {
+		var oldNudge *github.Nudge
+		if listed {
+			oldNudge = old.Nudge
+		}
+		nudged := nudgeAlert(oldNudge, m.nudge(pr), listed)
+		if m.quiet(pr) || pr.Draft || !m.inScope(pr) ||
+			(listed && !m.quiet(old) && !old.Draft && m.inScope(old) && !nudged) {
 			continue
 		}
 		kind := "review requested"
-		if again {
-			kind = "review requested again"
+		if n := m.nudge(pr); nudged {
+			kind = "nudged (" + nudgeWord(n) + ")"
 		} else if text := reviewStatusText(pr.ReviewStatus); text != "" {
 			kind = text
 		}
-		found = append(found, prAlert{pr, []string{kind}})
+		found = append(found, prAlert{pr: pr, kinds: []string{kind}, urgent: nudged && m.nudge(pr).Urgency == github.NudgeUrgent})
 	}
 	return found
 }
 
-// requestedAgain reports that the viewer's review was requested again: a
-// reviewed row became a pending request, or a pending request's time, the
-// latest direct request of the viewer, moved later. A reviewed row's time
-// means something else, so it is not compared.
-func requestedAgain(old, pr *github.PullRequest) bool {
-	if pr.ReviewStatus != github.ReviewRequested {
+// quiet reports whether a review row stays silent for alerts: it waits on
+// others, or was found only through a nudge, unless a normal or urgent
+// nudge is in effect. A low nudge never alerts.
+func (m *model) quiet(pr *github.PullRequest) bool {
+	if n := m.nudge(pr); n != nil && n.Urgency >= github.NudgeNormal {
 		return false
 	}
-	if old.ReviewStatus != github.ReviewRequested {
+	return pr.ReviewStatus.Waiting() || pr.ReviewStatus == github.ReviewNudged
+}
+
+// nudgeAlert reports whether a review row's nudge alerts: a normal or
+// urgent one that is new, later, or more urgent than the last fetch's.
+func nudgeAlert(old, pr *github.Nudge, listed bool) bool {
+	switch {
+	case pr == nil || pr.Urgency < github.NudgeNormal:
+		return false
+	case !listed || old == nil:
 		return true
 	}
-	return !old.WaitingSince.IsZero() && pr.WaitingSince.After(old.WaitingSince)
+	return pr.At.After(old.At) || pr.Urgency > old.Urgency
 }
 
 // resetReadiness records the authored pull requests' known merge readiness

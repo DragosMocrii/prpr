@@ -221,32 +221,92 @@ func TestDesktopNotifierReplacesOSC9AndFallsBackWhenItFails(t *testing.T) {
 	}
 }
 
-func TestARenewedReviewRequestAlertsAgain(t *testing.T) {
+func nudgedReview(u github.NudgeUrgency, at time.Time) github.PullRequest {
+	pr := changePR(9, "acme/b")
+	pr.ReviewStatus = github.ReviewApproved
+	if u != 0 {
+		pr.Nudge = &github.Nudge{Urgency: u, At: at}
+	}
+	return pr
+}
+
+func TestNudgesAlertByUrgency(t *testing.T) {
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	m := notifyModel(t, "")
-	review := changePR(9, "acme/b")
-	review.WaitingSince = time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
-	fetch(m, nil, []github.PullRequest{review})
-	if got := fetch(m, nil, []github.PullRequest{review}); got != nil {
-		t.Fatalf("an unchanged request notified: %q", got)
+	fetch(m, nil, []github.PullRequest{nudgedReview(0, at)})
+	if got := fetch(m, nil, []github.PullRequest{nudgedReview(github.NudgeLow, at)}); got != nil {
+		t.Fatalf("a low nudge notified: %q", got)
 	}
-	review.WaitingSince = review.WaitingSince.Add(time.Hour)
-	got := fetch(m, nil, []github.PullRequest{review})
-	if len(got) != 1 || !strings.Contains(got[0], "acme/b#9 review requested again") {
-		t.Fatalf("notifications = %q, want the request made again", got)
+	got := fetch(m, nil, []github.PullRequest{nudgedReview(github.NudgeNormal, at)})
+	if len(got) != 1 || !strings.Contains(got[0], "acme/b#9") {
+		t.Fatalf("raising a nudge to normal = %q, want one notification", got)
 	}
-	if got := fetch(m, nil, []github.PullRequest{review}); got != nil {
-		t.Fatalf("the renewed request notified twice: %q", got)
+	if got := fetch(m, nil, []github.PullRequest{nudgedReview(github.NudgeNormal, at)}); got != nil {
+		t.Fatalf("the same nudge notified twice: %q", got)
+	}
+	if got := fetch(m, nil, []github.PullRequest{nudgedReview(github.NudgeNormal, at.Add(time.Hour))}); len(got) != 1 {
+		t.Fatalf("a later nudge = %q, want a notification", got)
+	}
+	if got := fetch(m, nil, []github.PullRequest{nudgedReview(github.NudgeUrgent, at.Add(time.Hour))}); len(got) != 1 {
+		t.Fatalf("a raised urgency = %q, want a notification", got)
 	}
 }
 
-func TestAReviewRequestedAgainAfterReviewingAlerts(t *testing.T) {
+func TestALowNudgeNeverAlertsEvenOnArrival(t *testing.T) {
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	m := notifyModel(t, "")
-	review := changePR(9, "acme/b")
-	review.ReviewStatus = github.ReviewNewCommits
-	fetch(m, nil, []github.PullRequest{review})
-	review.ReviewStatus = github.ReviewRequested
-	got := fetch(m, nil, []github.PullRequest{review})
-	if len(got) != 1 || !strings.Contains(got[0], "acme/b#9 review requested again") {
-		t.Fatalf("notifications = %q, want the request made again", got)
+	fetch(m, nil, nil)
+	mention := changePR(10, "acme/b")
+	mention.ReviewStatus, mention.Nudge = github.ReviewNudged, &github.Nudge{Urgency: github.NudgeLow, At: at}
+	if got := fetch(m, nil, []github.PullRequest{mention}); got != nil {
+		t.Fatalf("a mentions-only row with a low nudge notified: %q", got)
+	}
+	mention.Nudge = &github.Nudge{Urgency: github.NudgeNormal, At: at.Add(time.Hour)}
+	if got := fetch(m, nil, []github.PullRequest{mention}); len(got) != 1 {
+		t.Fatalf("raising it to normal = %q, want a notification", got)
+	}
+}
+
+func TestNudgesNeverAlertOnFirstFetchOrDrafts(t *testing.T) {
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	m := notifyModel(t, "")
+	if got := fetch(m, nil, []github.PullRequest{nudgedReview(github.NudgeUrgent, at)}); got != nil {
+		t.Fatalf("a first fetch notified: %q", got)
+	}
+	draft := nudgedReview(github.NudgeUrgent, at.Add(time.Hour))
+	draft.Draft = true
+	if got := fetch(m, nil, []github.PullRequest{draft}); got != nil {
+		t.Fatalf("a draft notified: %q", got)
+	}
+}
+
+func TestAnUrgentNudgeFlashesUntilFocus(t *testing.T) {
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	m := titleModel(t)
+	fetch(m, nil, []github.PullRequest{nudgedReview(0, at)})
+	fetch(m, nil, []github.PullRequest{nudgedReview(github.NudgeUrgent, at)})
+	if m.flashText == "" || !m.flashUntil.IsZero() {
+		t.Fatalf("urgent flash: text %q until %v, want lasting", m.flashText, m.flashUntil)
+	}
+	// A lasting flash outlives flashDuration.
+	clock := time.Now().Add(2 * flashDuration)
+	m.now = func() time.Time { return clock }
+	m.handleFlashTick(flashTickMsg{m.flashGeneration})
+	if m.flashText == "" {
+		t.Fatal("the urgent flash stopped after flashDuration")
+	}
+	m.handleFocus(focusIn)
+	if m.flashText != "" {
+		t.Fatal("focus did not stop the flash")
+	}
+}
+
+func TestANormalNudgeFlashesForFlashDuration(t *testing.T) {
+	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	m := titleModel(t)
+	fetch(m, nil, []github.PullRequest{nudgedReview(0, at)})
+	fetch(m, nil, []github.PullRequest{nudgedReview(github.NudgeNormal, at)})
+	if m.flashText == "" || m.flashUntil.IsZero() {
+		t.Fatalf("normal flash: text %q until %v, want flashDuration", m.flashText, m.flashUntil)
 	}
 }

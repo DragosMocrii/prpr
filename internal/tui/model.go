@@ -179,7 +179,8 @@ type model struct {
 	// settingsNotice is what Settings says about its last change.
 	settingsNotice string
 	// setTitle sets the terminal title. flashText is an alert the title
-	// flashes until flashUntil, the terminal gains focus, or a key or click;
+	// flashes until flashUntil (zero for a lasting flash), the terminal gains
+	// focus, or a key or click;
 	// ticks from an older flashGeneration are dropped.
 	setTitle        bool
 	terminalFocus   terminalFocus
@@ -1085,7 +1086,7 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 	if len(alerts) == 0 {
 		return tick
 	}
-	return tea.Batch(m.notifyAlerts(alerts), m.startFlash(alertText(alerts)), tick)
+	return tea.Batch(m.notifyAlerts(alerts), m.startFlash(alertText(alerts), anyUrgent(alerts)), tick)
 }
 
 // keepingSelection runs rebuild, keeping each pane's selection and following

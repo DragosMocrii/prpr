@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"slices"
 	"strconv"
 	"time"
 
@@ -110,14 +111,23 @@ func (m *model) needYouCount() int {
 
 // startFlash flashes the title with an alert's text, unless titles are off
 // or the terminal reports that it has focus. A new flash replaces the one
-// shown.
-func (m *model) startFlash(text string) tea.Cmd {
+// shown. A lasting flash, for an urgent nudge, runs until focus, a key, or
+// a click.
+func (m *model) startFlash(text string, lasting bool) tea.Cmd {
 	if !m.setTitle || m.terminalFocus == focusIn || !m.notificationsAllowed() {
 		return nil
 	}
 	m.flashGeneration++
 	m.flashText, m.flashOn, m.flashUntil = text, true, m.now().Add(flashDuration)
+	if lasting {
+		m.flashUntil = time.Time{}
+	}
 	return m.flashTick()
+}
+
+// anyUrgent reports whether an alert is an urgent nudge.
+func anyUrgent(alerts []prAlert) bool {
+	return slices.ContainsFunc(alerts, func(a prAlert) bool { return a.urgent })
 }
 
 func (m *model) flashTick() tea.Cmd {
@@ -129,7 +139,7 @@ func (m *model) handleFlashTick(msg flashTickMsg) tea.Cmd {
 	if msg.generation != m.flashGeneration || m.flashText == "" {
 		return nil
 	}
-	if !m.now().Before(m.flashUntil) {
+	if !m.flashUntil.IsZero() && !m.now().Before(m.flashUntil) {
 		m.stopFlash()
 		return nil
 	}

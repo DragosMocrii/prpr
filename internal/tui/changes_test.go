@@ -291,3 +291,14 @@ func TestReviewingARowClearsItsMark(t *testing.T) {
 		t.Fatalf("back in draft mark %+v", m.changes[listReview].mark(&draft))
 	}
 }
+
+func TestGainingANudgeMarksTheRowAsNeedingTheViewer(t *testing.T) {
+	pr := reviewedPR(9, github.ReviewApproved)
+	m := newPaneModel(t, 140, 30, nil, []github.PullRequest{pr})
+	pr.Nudge = &github.Nudge{Urgency: github.NudgeNormal, At: time.Now()}
+	updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: []github.PullRequest{pr}}})
+	lines := m.changeLines(paneReview, &m.snapshot.ReviewRequests[0])
+	if len(lines) == 0 || rowDirection(lines) != dirBad {
+		t.Fatalf("change lines = %+v, want a bad-direction nudge", lines)
+	}
+}

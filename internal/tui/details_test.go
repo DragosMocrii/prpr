@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -244,5 +245,20 @@ func TestRowStatusDropsFactsToFitAndYieldsToNotices(t *testing.T) {
 	m.notice = "Copied"
 	if got := line(); strings.Contains(got, "Has conflicts") {
 		t.Fatalf("a notice shares the line with the status: %q", got)
+	}
+}
+
+func TestDetailsNameTheNudge(t *testing.T) {
+	reviews := reviewPRs(1)
+	reviews[0].Nudge = &github.Nudge{Urgency: github.NudgeUrgent, At: time.Now().Add(-2 * time.Hour), Note: "release today"}
+	m := newPaneModel(t, 140, 40, nil, reviews)
+	m.setFocus(paneReview)
+	enter(m)
+	text := detailsText(m)
+	if !strings.Contains(text, "Nudged") || !strings.Contains(text, "urgent") || !strings.Contains(text, "release today") {
+		t.Fatalf("details:\n%s", text)
+	}
+	if strings.Contains(statusText(m), "release today") {
+		t.Fatal("the note reached the status line")
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/DragosMocrii/prpr/internal/github"
 )
 
-var nudgedAt = time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+var nudgeTime = time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 
 // nudgedRequests are three review rows: a pending request, a waiting row
 // nudged at urgency, and a plain waiting row.
@@ -38,7 +38,7 @@ func TestNudgeMarkerWidensTheMarkColumnAndShowsItsUrgency(t *testing.T) {
 		t.Fatalf("mark column without nudges = %d", w)
 	}
 	for _, u := range []github.NudgeUrgency{github.NudgeLow, github.NudgeNormal, github.NudgeUrgent} {
-		m := newPaneModel(t, 140, 30, nil, nudgedRequests(u, nudgedAt))
+		m := newPaneModel(t, 140, 30, nil, nudgedRequests(u, nudgeTime))
 		if w := m.panes[paneReview].table.Columns()[0].Width; w != nudgeWidth {
 			t.Fatalf("%v: mark column = %d, want %d", u, w, nudgeWidth)
 		}
@@ -49,8 +49,8 @@ func TestNudgeMarkerWidensTheMarkColumnAndShowsItsUrgency(t *testing.T) {
 }
 
 func TestLowNudgesDoNotBlinkOthersDo(t *testing.T) {
-	low := newPaneModel(t, 140, 30, nil, nudgedRequests(github.NudgeLow, nudgedAt))
-	normal := newPaneModel(t, 140, 30, nil, nudgedRequests(github.NudgeNormal, nudgedAt))
+	low := newPaneModel(t, 140, 30, nil, nudgedRequests(github.NudgeLow, nudgeTime))
+	normal := newPaneModel(t, 140, 30, nil, nudgedRequests(github.NudgeNormal, nudgeTime))
 	for _, m := range []*model{low, normal} {
 		m.Update(nudgeTickMsg{generation: m.nudgeGeneration})
 	}
@@ -67,14 +67,14 @@ func TestLowNudgesDoNotBlinkOthersDo(t *testing.T) {
 }
 
 func TestUrgentNudgesLeadAndNudgedRowsLeadTheirGroup(t *testing.T) {
-	prs := nudgedRequests(github.NudgeUrgent, nudgedAt)
+	prs := nudgedRequests(github.NudgeUrgent, nudgeTime)
 	m := newPaneModel(t, 140, 30, nil, prs)
 	if got := reviewNumbers(m); got[0] != prs[1].Number {
 		t.Fatalf("order = %v, want the urgent row first", got)
 	}
 	// Two pending requests: the second, nudged low, leads its group.
 	requests := reviewPRs(2)
-	requests[1].Nudge = &github.Nudge{Urgency: github.NudgeLow, At: nudgedAt}
+	requests[1].Nudge = &github.Nudge{Urgency: github.NudgeLow, At: nudgeTime}
 	m = newPaneModel(t, 140, 30, nil, requests)
 	if got := reviewNumbers(m); got[0] != requests[1].Number || got[1] != requests[0].Number {
 		t.Fatalf("order = %v, want the nudged request first", got)
@@ -82,7 +82,7 @@ func TestUrgentNudgesLeadAndNudgedRowsLeadTheirGroup(t *testing.T) {
 }
 
 func TestANudgedWaitingRowNeedsTheViewer(t *testing.T) {
-	m := newPaneModel(t, 140, 30, nil, nudgedRequests(github.NudgeNormal, nudgedAt))
+	m := newPaneModel(t, 140, 30, nil, nudgedRequests(github.NudgeNormal, nudgeTime))
 	nudged := &m.snapshot.ReviewRequests[1]
 	if m.waiting(nudged) {
 		t.Fatal("a nudged approved row still counts as waiting")
@@ -93,7 +93,7 @@ func TestANudgedWaitingRowNeedsTheViewer(t *testing.T) {
 }
 
 func TestDismissingANudgeUndoesEverythingItDidUntilAnotherNudge(t *testing.T) {
-	m := newPaneModel(t, 140, 30, nil, nudgedRequests(github.NudgeUrgent, nudgedAt))
+	m := newPaneModel(t, 140, 30, nil, nudgedRequests(github.NudgeUrgent, nudgeTime))
 	m.setFocus(paneReview)
 	m.selectPR(paneReview, m.snapshot.ReviewRequests[1].Repository, m.snapshot.ReviewRequests[1].Number)
 	press(m, tea.Key{Code: 'X', Text: "X"})
@@ -111,26 +111,26 @@ func TestDismissingANudgeUndoesEverythingItDidUntilAnotherNudge(t *testing.T) {
 		t.Fatalf("order = %v, a dismissed urgent row still leads", got)
 	}
 	saved := m.preferences.Dismissals("alice")
-	if len(saved) != 1 || !saved[0].Nudged.Equal(nudgedAt) {
+	if len(saved) != 1 || !saved[0].Nudged.Equal(nudgeTime) {
 		t.Fatalf("saved = %+v", saved)
 	}
 	// The same nudge stays dismissed; a different one shows, earlier or later.
-	updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: nudgedRequests(github.NudgeUrgent, nudgedAt)}})
+	updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: nudgedRequests(github.NudgeUrgent, nudgeTime)}})
 	if strings.Contains(m.View().Content, "🚨") {
 		t.Fatal("the dismissed nudge came back")
 	}
-	updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: nudgedRequests(github.NudgeUrgent, nudgedAt.Add(-time.Hour))}})
+	updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: nudgedRequests(github.NudgeUrgent, nudgeTime.Add(-time.Hour))}})
 	if !strings.Contains(m.View().Content, "🚨") {
 		t.Fatal("a different nudge stayed hidden")
 	}
 }
 
 func TestDismissalsOfEndedNudgesArePruned(t *testing.T) {
-	m := newPaneModel(t, 140, 30, nil, nudgedRequests(github.NudgeNormal, nudgedAt))
+	m := newPaneModel(t, 140, 30, nil, nudgedRequests(github.NudgeNormal, nudgeTime))
 	m.setFocus(paneReview)
 	m.selectPR(paneReview, m.snapshot.ReviewRequests[1].Repository, m.snapshot.ReviewRequests[1].Number)
 	press(m, tea.Key{Code: 'X', Text: "X"})
-	ended := nudgedRequests(github.NudgeNormal, nudgedAt)
+	ended := nudgedRequests(github.NudgeNormal, nudgeTime)
 	ended[1].Nudge = nil
 	updateFetch(m, fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", ReviewRequests: ended}})
 	if saved := m.preferences.Dismissals("alice"); len(saved) != 0 {
@@ -146,7 +146,7 @@ func TestPreviewRowsNeverShowNudges(t *testing.T) {
 	m := testModel(store, 140, 30)
 	m.Init()
 	m.Update(previewMsg{generation: m.refreshGeneration, account: m.accountGeneration,
-		snapshot: github.Snapshot{Login: "alice", Preview: true, ReviewRequests: nudgedRequests(github.NudgeUrgent, nudgedAt)}})
+		snapshot: github.Snapshot{Login: "alice", Preview: true, ReviewRequests: nudgedRequests(github.NudgeUrgent, nudgeTime)}})
 	if !m.snapshot.Preview || len(m.panes[paneReview].visible) != 3 {
 		t.Fatalf("preview not shown: preview %t rows %d", m.snapshot.Preview, len(m.panes[paneReview].visible))
 	}
@@ -158,7 +158,7 @@ func TestPreviewRowsNeverShowNudges(t *testing.T) {
 func TestADismissedNudgeOnlyRowWaits(t *testing.T) {
 	prs := reviewPRs(3)
 	prs[0].ReviewStatus = github.ReviewNudged
-	prs[0].Nudge = &github.Nudge{Urgency: github.NudgeNormal, At: nudgedAt}
+	prs[0].Nudge = &github.Nudge{Urgency: github.NudgeNormal, At: nudgeTime}
 	prs[1].ReviewStatus = github.ReviewNewCommits
 	prs[2].ReviewStatus = github.ReviewWaitingOnAuthor
 	m := newPaneModel(t, 140, 30, nil, prs)
