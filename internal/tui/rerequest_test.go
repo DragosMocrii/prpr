@@ -25,7 +25,6 @@ type requests struct {
 	repository string
 	number     int
 	logins     []string
-	renewed    []string
 	calls      int
 }
 
@@ -35,8 +34,8 @@ func stubReviewers(m *model, reviewers []github.Reviewer, listErr, requestErr er
 	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) {
 		return github.ReviewerList{Reviewers: reviewers}, listErr
 	}
-	m.requestReviews = func(_ context.Context, repository string, number int, logins, renewed []string) error {
-		sent.repository, sent.number, sent.logins, sent.renewed = repository, number, logins, renewed
+	m.nudgeReviewers = func(_ context.Context, repository string, number int, _ github.NudgeUrgency, logins []string, _ string) error {
+		sent.repository, sent.number, sent.logins = repository, number, logins
 		sent.calls++
 		return requestErr
 	}
@@ -71,9 +70,6 @@ func TestRerequestAsksTheChosenReviewersAgain(t *testing.T) {
 	}
 	if slices.Sort(sent.logins); !slices.Equal(sent.logins, []string{"alice", "bob"}) {
 		t.Fatalf("logins = %v", sent.logins)
-	}
-	if len(sent.renewed) != 0 {
-		t.Fatalf("renewed %v", sent.renewed)
 	}
 	if !strings.Contains(statusText(m), "alice") || !strings.Contains(statusText(m), "#2") {
 		t.Fatalf("status %q", statusText(m))
@@ -209,8 +205,8 @@ func TestRerequestRenewsAChosenPendingRequest(t *testing.T) {
 	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	pressMsg(m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if slices.Sort(sent.logins); !slices.Equal(sent.logins, []string{"bob", "carol"}) || !slices.Equal(sent.renewed, []string{"carol"}) {
-		t.Fatalf("requested %v, renewed %v", sent.logins, sent.renewed)
+	if slices.Sort(sent.logins); !slices.Equal(sent.logins, []string{"bob", "carol"}) {
+		t.Fatalf("requested %v", sent.logins)
 	}
 }
 
@@ -267,8 +263,8 @@ func TestRerequestSkipsAnyoneWhoReviewedSinceTheFormOpened(t *testing.T) {
 	if calls != 2 {
 		t.Fatalf("reviewers read %d times, want again when sending", calls)
 	}
-	if !slices.Equal(sent.logins, []string{"dave"}) || !slices.Equal(sent.renewed, []string{"dave"}) {
-		t.Fatalf("requested %v, renewed %v", sent.logins, sent.renewed)
+	if !slices.Equal(sent.logins, []string{"dave"}) {
+		t.Fatalf("requested %v", sent.logins)
 	}
 	for _, skipped := range []string{"bob", "carol", "erin"} {
 		if !strings.Contains(m.notice, skipped) {
@@ -353,8 +349,8 @@ func TestRerequestGroupsTeamMembersAndShowsWhichTeamsAreCovered(t *testing.T) {
 		t.Fatalf("narrow form lacks the team line:\n%s", view)
 	}
 	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !slices.Equal(sent.logins, []string{"bob", "priya"}) || len(sent.renewed) != 0 {
-		t.Fatalf("requested %v, renewed %v", sent.logins, sent.renewed)
+	if !slices.Equal(sent.logins, []string{"bob", "priya"}) {
+		t.Fatalf("requested %v", sent.logins)
 	}
 }
 

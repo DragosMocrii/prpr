@@ -20,8 +20,7 @@ type Reviewer struct {
 	State string
 	// Stale reports that the latest review is not of the head commit.
 	Stale bool
-	// Pending reports that the review is requested now. Requesting it again
-	// changes nothing on GitHub, so the request is renewed instead.
+	// Pending reports that the review is requested now.
 	Pending bool
 	// ReviewedAt is when the reviewer's latest review was submitted; zero
 	// for no review.
@@ -49,6 +48,9 @@ type ReviewerList struct {
 	// AnswersUnknown reports that GitHub would not show which teams some
 	// reviews answered.
 	AnswersUnknown bool
+	// Nudged is the author's latest nudge naming each person, by lowercase
+	// login.
+	Nudged map[string]Nudge
 }
 
 // TeamRequest is a pending review request of a team.
@@ -73,6 +75,7 @@ const reviewersQuery = `query($owner: String!, $name: String!, $number: Int!) {
     pullRequest(number: $number) {
       author { login }
       headRefOid
+      comments(last: 50) { nodes { author { login } createdAt body } }
       latestReviews(first: 100) {
         nodes { ...reviewerReview }
       }
@@ -179,7 +182,16 @@ func decodeReviewers(data []byte) (ReviewerList, error) {
 					Author *struct {
 						Login string `json:"login"`
 					} `json:"author"`
-					HeadRefOid    string `json:"headRefOid"`
+					HeadRefOid string `json:"headRefOid"`
+					Comments   struct {
+						Nodes []*struct {
+							Author *struct {
+								Login string `json:"login"`
+							} `json:"author"`
+							CreatedAt time.Time `json:"createdAt"`
+							Body      string    `json:"body"`
+						} `json:"nodes"`
+					} `json:"comments"`
 					LatestReviews struct {
 						Nodes []*reviewerReview `json:"nodes"`
 					} `json:"latestReviews"`
@@ -328,69 +340,46 @@ func decodeReviewers(data []byte) (ReviewerList, error) {
 		}
 		list.Teams = append(list.Teams, request)
 	}
+	// The author's past nudges, latest per person, so the form can say who
+	// was nudged and when.
+	for _, comment := range pr.Comments.Nodes {
+		if comment == nil || comment.Author == nil || pr.Author == nil || !strings.EqualFold(comment.Author.Login, pr.Author.Login) {
+			continue
+		}
+		urgency, to, note, ok := parseNudge(comment.Body)
+		if !ok {
+			continue
+		}
+		if list.Nudged == nil {
+			list.Nudged = make(map[string]Nudge)
+		}
+		for _, login := range to {
+			key := strings.ToLower(login)
+			if last, seen := list.Nudged[key]; !seen || !comment.CreatedAt.Before(last.At) {
+				list.Nudged[key] = Nudge{Urgency: urgency, At: comment.CreatedAt, Note: note}
+			}
+		}
+	}
 	list.Reviewers = reviewers
 	return list, nil
 }
 
-// RequestReviews requests a review of a pull request from each login again,
-// which notifies them as a first request does. GitHub ignores a request of a
-// review that is requested already, so the requests of pending, a subset of
-// logins, are removed first and then made again with the others. When
-// making them fails, the removed requests are made once more, so a failure
-// leaves them as they were when it can. These are prpr's only changes to
-// GitHub, and they run as the pinned account like every request.
-func (c *Client) RequestReviews(ctx context.Context, repository string, number int, logins, pending []string) error {
-	add, err := requestReviewsArgs("POST", repository, number, logins)
-	if err != nil {
-		return err
-	}
-	if len(pending) == 0 {
-		_, err = c.output(ctx, "Could not request reviews", add...)
-		return err
-	}
-	for _, login := range pending {
-		if !slices.ContainsFunc(logins, func(l string) bool { return strings.EqualFold(l, login) }) {
-			return fmt.Errorf("%s is renewed but not requested", login)
-		}
-	}
-	remove, err := requestReviewsArgs("DELETE", repository, number, pending)
-	if err != nil {
-		return err
-	}
-	restore, _ := requestReviewsArgs("POST", repository, number, pending)
-	if _, err := c.output(ctx, "Could not renew review requests", remove...); err != nil {
-		return err
-	}
-	// What became of the removed requests leads the error, ahead of gh's
-	// message, so a narrow status line still shows it.
-	if _, err := c.output(ctx, "GitHub refused", add...); err != nil {
-		who := strings.Join(pending, ", ")
-		if _, again := c.output(ctx, "", restore...); again != nil {
-			return fmt.Errorf("Could not request reviews, and the requests of %s are removed: %w", who, err)
-		}
-		return fmt.Errorf("Could not request reviews; the requests of %s are as they were: %w", who, err)
-	}
-	return nil
-}
-
-// requestReviewsArgs adds (POST) or removes (DELETE) review requests.
-func requestReviewsArgs(method, repository string, number int, logins []string) ([]string, error) {
+// Nudge posts a comment on a pull request that mentions each login and asks
+// for their review with urgency; their prpr reads its marker. It is prpr's
+// only change to GitHub, and it runs as the pinned account like every
+// request. The body is a raw field, so gh never reads a file from it.
+func (c *Client) Nudge(ctx context.Context, repository string, number int, urgency NudgeUrgency, logins []string, note string) error {
 	owner, name, err := pullRequestTarget(repository, number)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if len(logins) == 0 {
-		return nil, errors.New("no reviewers chosen")
+	body, err := FormatNudge(urgency, logins, note)
+	if err != nil {
+		return err
 	}
-	args := []string{"api", "--hostname", "github.com", "--method", method,
-		fmt.Sprintf("repos/%s/%s/pulls/%d/requested_reviewers", owner, name, number)}
-	for _, login := range logins {
-		if !ValidLogin(login) {
-			return nil, fmt.Errorf("%q is not a GitHub login", login)
-		}
-		args = append(args, "-f", "reviewers[]="+login)
-	}
-	return args, nil
+	_, err = c.output(ctx, "Could not post the nudge", "api", "--hostname", "github.com", "--method", "POST",
+		fmt.Sprintf("repos/%s/%s/issues/%d/comments", owner, name, number), "-f", "body="+body)
+	return err
 }
 
 func pullRequestTarget(repository string, number int) (owner, name string, err error) {

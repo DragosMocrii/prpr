@@ -57,10 +57,10 @@ type model struct {
 	snoozeEditor *snoozeEditor
 	lastSnooze   *prKey
 	// rerequest is the form that requests reviews again, nil when closed.
-	// listReviewers and requestReviews are the client's in the app.
+	// listReviewers and nudgeReviewers are the client's in the app.
 	rerequest      *rerequestEditor
 	listReviewers  func(context.Context, string, int) (github.ReviewerList, error)
-	requestReviews func(context.Context, string, int, []string, []string) error
+	nudgeReviewers func(context.Context, string, int, github.NudgeUrgency, []string, string) error
 	// reviewerLookups are the details' reviewers of authored pull requests,
 	// read for reviewerAccount, the accountGeneration they belong to.
 	reviewerLookups map[prKey]*reviewerLookup
@@ -273,7 +273,7 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 	client.SetFullRefresh(m.fullRefresh)
 	client.SetMerged(m.merged)
 	m.listReviewers = client.Reviewers
-	m.requestReviews = client.RequestReviews
+	m.nudgeReviewers = client.Nudge
 	m.notify = preferences.Notify()
 	m.mouse = preferences.Mouse()
 	m.icons = iconsNamed(preferences.Icons())

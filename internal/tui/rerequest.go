@@ -207,8 +207,7 @@ func (m *model) recheckReviewers(e *rerequestEditor) tea.Cmd {
 
 // handleReviewersRechecked sends the chosen requests that still hold. A
 // reviewer who reviewed since the form opened, whatever the verdict, is not
-// asked: the review answers the request. Nor is one no longer offered. A request is
-// renewed only when it is pending now.
+// asked: the review answers the request. Nor is one no longer offered.
 func (m *model) handleReviewersRechecked(msg reviewersRecheckedMsg) tea.Cmd {
 	if msg.account != m.accountGeneration {
 		return nil
@@ -226,7 +225,7 @@ func (m *model) handleReviewersRechecked(msg reviewersRecheckedMsg) tea.Cmd {
 	for _, reviewer := range msg.reviewers.Reviewers {
 		now[strings.ToLower(reviewer.Login)] = reviewer
 	}
-	var logins, renewed, skipped []string
+	var logins, skipped []string
 	for _, login := range msg.chosen {
 		reviewer, offered := now[strings.ToLower(login)]
 		if !offered || reviewer.ReviewedAt.After(msg.reviewed[strings.ToLower(login)]) {
@@ -234,19 +233,16 @@ func (m *model) handleReviewersRechecked(msg reviewersRecheckedMsg) tea.Cmd {
 			continue
 		}
 		logins = append(logins, login)
-		if reviewer.Pending {
-			renewed = append(renewed, login)
-		}
 	}
 	if len(logins) == 0 {
 		m.setNotice(singleLine(fmt.Sprintf("Nothing sent on #%d: %s reviewed it since", pr.Number, strings.Join(skipped, ", "))))
 		return nil
 	}
-	ctx, request, repository, number, account := m.ctx, m.requestReviews, pr.Repository, pr.Number, m.accountGeneration
+	ctx, request, repository, number, account := m.ctx, m.nudgeReviewers, pr.Repository, pr.Number, m.accountGeneration
 	key := msg.key
 	return func() tea.Msg {
 		return reviewsRequestedMsg{account: account, key: key, logins: logins, skipped: skipped,
-			err: request(ctx, repository, number, logins, renewed)}
+			err: request(ctx, repository, number, github.NudgeNormal, logins, "")}
 	}
 }
 

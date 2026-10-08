@@ -2,11 +2,13 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -73,50 +75,10 @@ func TestReviewersQueryIsNotTakenForAListQuery(t *testing.T) {
 	}
 }
 
-func TestRequestReviewsArgsPostEachLoginAsAField(t *testing.T) {
-	got, err := requestReviewsArgs("POST", "acme/app", 12, []string{"alice", "bob-2"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"api", "--hostname", "github.com", "--method", "POST", "repos/acme/app/pulls/12/requested_reviewers",
-		"-f", "reviewers[]=alice", "-f", "reviewers[]=bob-2"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("args = %q, want %q", got, want)
-	}
-	for name, call := range map[string]func() ([]string, error){
-		"no logins":      func() ([]string, error) { return requestReviewsArgs("POST", "acme/app", 12, nil) },
-		"flag login":     func() ([]string, error) { return requestReviewsArgs("POST", "acme/app", 12, []string{"-x"}) },
-		"path login":     func() ([]string, error) { return requestReviewsArgs("POST", "acme/app", 12, []string{"a/b"}) },
-		"bad repository": func() ([]string, error) { return requestReviewsArgs("POST", "acme/../x", 12, []string{"alice"}) },
-		"bad number":     func() ([]string, error) { return requestReviewsArgs("POST", "acme/app", 0, []string{"alice"}) },
-		"long login": func() ([]string, error) {
-			return requestReviewsArgs("POST", "acme/app", 1, []string{strings.Repeat("a", 40)})
-		},
-		"empty repository": func() ([]string, error) { return requestReviewsArgs("POST", "", 1, []string{"alice"}) },
-	} {
-		if _, err := call(); err == nil {
-			t.Errorf("%s: accepted", name)
-		}
-	}
-}
-
-func TestRequestReviewsRunsAsThePinnedAccount(t *testing.T) {
-	client, log := fakeGH(t, false)
-	client.UseAccount("alice")
-	if err := client.RequestReviews(context.Background(), "acme/app", 12, []string{"bob"}, nil); err != nil {
-		t.Fatal(err)
-	}
-	got := calls(t, log)
-	last := got[len(got)-1]
-	if !strings.HasPrefix(last, "token="+fakeToken+" args=api --hostname github.com") {
-		t.Fatalf("request = %q, want an API call as the pinned account", last)
-	}
-}
-
-func TestRequestReviewsErrorsNeverContainTheToken(t *testing.T) {
+func TestNudgeErrorsNeverContainTheToken(t *testing.T) {
 	client, _ := fakeGH(t, true)
 	client.UseAccount("alice")
-	err := client.RequestReviews(context.Background(), "acme/app", 12, []string{"bob"}, []string{"bob"})
+	err := client.Nudge(context.Background(), "acme/app", 12, NudgeNormal, []string{"bob"}, "")
 	if err == nil || strings.Contains(err.Error(), fakeToken) || !strings.Contains(err.Error(), "[redacted]") {
 		t.Fatalf("err = %v", err)
 	}
@@ -146,46 +108,6 @@ echo '{}'
 		t.Fatal(err)
 	}
 	return &Client{path: path}, log
-}
-
-func TestRequestReviewsRenewsPendingRequests(t *testing.T) {
-	const target = "api --hostname github.com --method %s repos/acme/app/pulls/12/requested_reviewers"
-	client, log := requestGH(t, "no-match")
-	if err := client.RequestReviews(context.Background(), "acme/app", 12, []string{"bob", "carol"}, []string{"carol"}); err != nil {
-		t.Fatal(err)
-	}
-	want := []string{
-		fmt.Sprintf(target, "DELETE") + " -f reviewers[]=carol",
-		fmt.Sprintf(target, "POST") + " -f reviewers[]=bob -f reviewers[]=carol",
-	}
-	if got := calls(t, log); !reflect.DeepEqual(got, want) {
-		t.Fatalf("calls = %q, want %q", got, want)
-	}
-
-	// A failed request makes the removed ones again.
-	client, log = requestGH(t, `*"--method POST"*bob*`)
-	err := client.RequestReviews(context.Background(), "acme/app", 12, []string{"bob", "carol"}, []string{"carol"})
-	if err == nil || !strings.Contains(err.Error(), "HTTP 422") || !strings.Contains(err.Error(), "as they were") {
-		t.Fatalf("err = %v", err)
-	}
-	if got := calls(t, log); len(got) != 3 || got[2] != fmt.Sprintf(target, "POST")+" -f reviewers[]=carol" {
-		t.Fatalf("calls = %q, want the removed request made again", got)
-	}
-
-	client, _ = requestGH(t, `*"--method POST"*`)
-	err = client.RequestReviews(context.Background(), "acme/app", 12, []string{"carol"}, []string{"carol"})
-	if err == nil || !strings.Contains(err.Error(), "are removed") {
-		t.Fatalf("err = %v", err)
-	}
-
-	// Renewing a request that is not made again would only remove it.
-	client, log = requestGH(t, "no-match")
-	if err := client.RequestReviews(context.Background(), "acme/app", 12, []string{"bob"}, []string{"carol"}); err == nil {
-		t.Fatal("renewed a request it does not make again")
-	}
-	if _, err := os.Stat(log); err == nil {
-		t.Fatalf("called gh: %q", calls(t, log))
-	}
 }
 
 func TestDecodeReviewersKeepsTheApprovalOfAReviewerAskedAgain(t *testing.T) {
@@ -342,5 +264,62 @@ func TestDecodeReviewersNotesANulledAnsweredTeam(t *testing.T) {
 	}
 	if !list.AnswersUnknown || !reflect.DeepEqual(list.Reviewers[0].OnBehalfOf, []string{"acme/web"}) {
 		t.Fatalf("list = %+v", list)
+	}
+}
+
+func TestNudgePostsOneComment(t *testing.T) {
+	var got []string
+	c := &Client{path: "gh", api: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		got = args
+		return []byte(`{}`), nil
+	}}
+	if err := c.Nudge(context.Background(), "acme/api", 7, NudgeNormal, []string{"alice"}, "please"); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "--method POST repos/acme/api/issues/7/comments") {
+		t.Fatalf("args = %q", got)
+	}
+	if slices.Contains(got, "-F") {
+		t.Fatalf("the body went through -F, which reads files: %q", got)
+	}
+	i := slices.Index(got, "-f")
+	if i < 0 || !strings.HasPrefix(got[i+1], "body=@alice ") || !strings.Contains(got[i+1], "urgency=normal to=alice") {
+		t.Fatalf("body arg = %q", got)
+	}
+}
+
+func TestNudgeRefusesBadTargetsWithoutCallingGh(t *testing.T) {
+	calls := 0
+	c := &Client{path: "gh", api: func(context.Context, string, ...string) ([]byte, error) { calls++; return nil, nil }}
+	for _, tc := range []struct {
+		repo   string
+		number int
+		logins []string
+	}{{"acme", 7, []string{"alice"}}, {"acme/api", 0, []string{"alice"}}, {"acme/api", 7, []string{"bad login"}}, {"acme/api", 7, nil}} {
+		if err := c.Nudge(context.Background(), tc.repo, tc.number, NudgeLow, tc.logins, ""); err == nil {
+			t.Errorf("%+v: no error", tc)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("gh ran %d times for refused nudges", calls)
+	}
+}
+
+func TestReviewersReadThePastNudges(t *testing.T) {
+	body, _ := FormatNudge(NudgeUrgent, []string{"alice", "carol"}, "")
+	quoted, _ := json.Marshal(body)
+	data := `{"data":{"repository":{"pullRequest":{"author":{"login":"bob"},"headRefOid":"h",
+		"latestReviews":{"nodes":[]},"latestOpinionatedReviews":{"nodes":[]},"reviewRequests":{"nodes":[
+		{"asCodeOwner":false,"requestedReviewer":{"__typename":"User","login":"alice"}}]},
+		"comments":{"nodes":[{"author":{"login":"bob"},"createdAt":"2026-10-01T10:00:00Z","body":` + string(quoted) + `},
+		{"author":{"login":"mallory"},"createdAt":"2026-10-02T10:00:00Z","body":` + string(quoted) + `}]}}}}}`
+	list, err := decodeReviewers([]byte(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, ok := list.Nudged["alice"]
+	if !ok || n.Urgency != NudgeUrgent || !n.At.Equal(time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)) {
+		t.Fatalf("alice's last nudge = %+v %v; only the author's comment counts", n, ok)
 	}
 }
