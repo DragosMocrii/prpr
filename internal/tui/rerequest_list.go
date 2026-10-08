@@ -41,21 +41,19 @@ const rerequestPanelMin = 100
 // person in several teams is under each one.
 func newRerequestEditor(key prKey, title string, list github.ReviewerList, dark bool) *rerequestEditor {
 	e := &rerequestEditor{key: key, title: title, people: list.Reviewers, teams: list.Teams,
-		unreadable: list.UnreadableTeams, chosen: make(map[string]bool), reviewed: make(map[string]time.Time)}
+		unreadable: list.UnreadableTeams, chosen: make(map[string]bool), reviewed: make(map[string]time.Time),
+		nudged: list.Nudged, urgency: github.NudgeNormal}
 	index := make(map[string]int, len(e.people))
 	reviewers := rerequestGroup{title: "Reviewed or requested", team: -1}
 	for i, reviewer := range e.people {
 		login := strings.ToLower(reviewer.Login)
 		index[login] = i
 		e.reviewed[login] = reviewer.ReviewedAt
-		if reviewer.State == "APPROVED" {
-			e.approvers = true
-		}
-		// A pending request is asked again only on purpose: renewing it
-		// takes it away for a moment. Nor is an approver: an approval
-		// rarely needs a nudge. Team members who did not review are picked
-		// by hand.
-		if reviewer.Stale && !reviewer.Pending && reviewer.State != "APPROVED" {
+		// Requested people who have not reviewed start chosen, as do
+		// reviews before the latest commits, but not an approver: an
+		// approval rarely needs a nudge. Team members who did not review
+		// are picked by hand.
+		if reviewer.Stale && !reviewer.Pending && reviewer.State != "APPROVED" || reviewer.Pending && reviewer.State == "" {
 			e.chosen[login] = true
 		}
 		if reviewer.State != "" || reviewer.Pending {
@@ -91,11 +89,16 @@ func newRerequestEditor(key prKey, title string, list github.ReviewerList, dark 
 			e.groups = append(e.groups, group)
 		}
 	}
-	e.filter = textinput.New()
-	e.filter.Prompt = "Filter: "
 	styles := textinput.DefaultStyles(dark)
 	styles.Cursor.Blink = false
+	e.filter = textinput.New()
+	e.filter.Prompt = "Filter: "
 	e.filter.SetStyles(styles)
+	e.note = textinput.New()
+	e.note.Prompt = ""
+	e.note.Placeholder = "optional note"
+	e.note.CharLimit = 200
+	e.note.SetStyles(styles)
 	e.cursor = e.step(e.rows(), -1, 1)
 	return e
 }
@@ -184,6 +187,17 @@ func (e *rerequestEditor) update(msg tea.KeyPressMsg, k reviewerKeyMap, height i
 		}
 		return false, false, cmd
 	}
+	if e.noting {
+		switch {
+		case key.Matches(msg, k.KeepFilter), key.Matches(msg, k.ClearFilter):
+			// Either leaves the note as typed; Esc leaves the input only.
+			e.noting = false
+			e.note.Blur()
+		default:
+			e.note, cmd = e.note.Update(msg)
+		}
+		return false, false, cmd
+	}
 	rows := e.rows()
 	switch {
 	case key.Matches(msg, k.Cancel):
@@ -197,6 +211,12 @@ func (e *rerequestEditor) update(msg tea.KeyPressMsg, k reviewerKeyMap, height i
 	case key.Matches(msg, k.Filter):
 		e.filtering = true
 		return false, false, e.filter.Focus()
+	case key.Matches(msg, k.Urgency):
+		e.urgency = e.urgency%github.NudgeUrgent + 1
+		return false, false, nil
+	case key.Matches(msg, k.Note):
+		e.noting = true
+		return false, false, e.note.Focus()
 	case len(rows) == 0:
 	case key.Matches(msg, k.Up):
 		e.cursor = e.step(rows, e.cursor, -1)
@@ -296,16 +316,13 @@ var (
 func (m *model) rerequestHeader() []string {
 	e := m.rerequest
 	lines := []string{
-		m.titleLine("prpr — "+m.accountLabel()+" — request reviews", ""),
+		m.titleLine("prpr — "+m.accountLabel()+" — nudge reviewers", ""),
 		"",
 		rerequestBold.Render(singleLine(e.title)),
 	}
-	notes := []string{"Space chooses people, Enter requests their reviews; GitHub notifies each one."}
+	notes := []string{"Space chooses people, Enter posts a comment that mentions them; GitHub notifies each one."}
 	if len(e.teams) > 0 {
 		notes = append(notes, "Any member's approval answers a team's request.")
-	}
-	if e.approvers {
-		notes = append(notes, "Approvers asked again show as awaiting review; approvals still count.")
 	}
 	if e.unreadable > 0 {
 		notes = append(notes, unreadableTeams(e.unreadable)+".")
@@ -320,6 +337,18 @@ func (m *model) rerequestHeader() []string {
 		}
 		lines = append(lines, strings.Join(marks, " · "))
 	}
+	lines = append(lines, "", "Urgency: "+rerequestBold.Render(e.urgency.String())+rerequestFaint.Render(" (u)"))
+	note := rerequestFaint.Render("none (n)")
+	switch {
+	case e.noting:
+		// The note scrolls within the room the line leaves; the help line
+		// says how to leave it.
+		e.note.SetWidth(max(m.width-len("Note: ")-1, 10))
+		note = e.note.View()
+	case e.note.Value() != "":
+		note = singleLine(e.note.Value()) + rerequestFaint.Render(" (n)")
+	}
+	lines = append(lines, ansi.Truncate("Note: "+note, m.width, "…"))
 	return append(lines, "")
 }
 
@@ -334,8 +363,11 @@ func (m *model) rerequestFooter() []string {
 		status = rerequestFaint.Render(plural(len(e.chosenLogins()), "reviewer") + " chosen")
 	}
 	help := m.shortHelp(m.keys.rerequestHelp())
-	if e.filtering {
+	switch {
+	case e.filtering:
 		help = m.shortHelp(m.keys.rerequestFilterHelp())
+	case e.noting:
+		help = m.shortHelp(m.keys.rerequestNoteHelp())
 	}
 	return []string{"", status, help}
 }
@@ -378,9 +410,10 @@ func (m *model) rerequestLines() []string {
 	for _, person := range e.people {
 		loginWidth = max(loginWidth, ansi.StringWidth(person.Login))
 	}
+	now := m.now()
 	var list []string
 	for i := e.offset; i < len(rows) && len(list) < height; i++ {
-		list = append(list, ansi.Truncate(e.rowLine(rows[i], i == e.cursor, loginWidth), listWidth, "…"))
+		list = append(list, ansi.Truncate(e.rowLine(rows[i], i == e.cursor, loginWidth, now), listWidth, "…"))
 	}
 	if len(rows) == 0 {
 		list = append(list, rerequestFaint.Render("  No one matches the filter."))
@@ -405,8 +438,9 @@ func (m *model) rerequestLines() []string {
 	return append(lines, footer...)
 }
 
-// rowLine draws a heading or a person.
-func (e *rerequestEditor) rowLine(row rerequestRow, selected bool, loginWidth int) string {
+// rowLine draws a heading or a person, with when the author last nudged
+// them.
+func (e *rerequestEditor) rowLine(row rerequestRow, selected bool, loginWidth int, now time.Time) string {
 	group := e.groups[row.group]
 	if row.person < 0 {
 		title := group.title
@@ -437,6 +471,9 @@ func (e *rerequestEditor) rowLine(row rerequestRow, selected bool, loginWidth in
 	line := marker + box + " " + login
 	if detail := reviewerDetail(person); detail != "" {
 		line += "  " + detail
+	}
+	if nudge, ok := e.nudged[strings.ToLower(person.Login)]; ok {
+		line += "  " + rerequestFaint.Render(fmt.Sprintf("nudged %s ago (%s)", ageText(nudge.At, now), nudge.Urgency))
 	}
 	var others []string
 	for _, team := range person.Teams {

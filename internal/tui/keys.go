@@ -70,9 +70,11 @@ type reviewerKeyMap struct {
 	NextGroup key.Binding
 	PrevGroup key.Binding
 	Filter    key.Binding
+	Urgency   key.Binding
+	Note      key.Binding
 	Send      key.Binding
 	Cancel    key.Binding
-	// KeepFilter and ClearFilter end typing a filter.
+	// KeepFilter and ClearFilter end typing a filter or the note.
 	KeepFilter  key.Binding
 	ClearFilter key.Binding
 	Quit        key.Binding
@@ -154,7 +156,7 @@ func defaultKeyMap() keyMap {
 		ScheduleCancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel without saving")),
 		Snooze:         key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "snooze")),
 		Undo:           key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "undo snooze")),
-		Rerequest:      key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "request reviews again")),
+		Rerequest:      key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "nudge reviewers")),
 		DismissNudge:   key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "dismiss nudge")),
 		Account:        key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "account")),
 		Retry:          key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
@@ -202,7 +204,9 @@ func defaultKeyMap() keyMap {
 			NextGroup:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next group")),
 			PrevGroup:   key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous group")),
 			Filter:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
-			Send:        key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "request reviews")),
+			Urgency:     key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "urgency")),
+			Note:        key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "note")),
+			Send:        key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "nudge")),
 			Cancel:      key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 			KeepFilter:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "keep filter")),
 			ClearFilter: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
@@ -445,11 +449,17 @@ func (k keyMap) snoozeHelp() helpKeys {
 }
 func (k keyMap) rerequestHelp() helpKeys {
 	r := k.Reviewers
-	return helpKeys{short: []key.Binding{r.Toggle, r.Send, r.NextGroup, r.Filter}, pinned: []key.Binding{r.Cancel, r.Quit}}
+	return helpKeys{short: []key.Binding{r.Toggle, r.Send, r.Urgency, r.Note, r.NextGroup, r.Filter}, pinned: []key.Binding{r.Cancel, r.Quit}}
 }
 func (k keyMap) rerequestFilterHelp() helpKeys {
 	r := k.Reviewers
 	return helpKeys{short: []key.Binding{r.KeepFilter}, pinned: []key.Binding{r.ClearFilter, r.Quit}}
+}
+func (k keyMap) rerequestNoteHelp() helpKeys {
+	r := k.Reviewers
+	keep := key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "keep note"))
+	done := key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "done"))
+	return helpKeys{short: []key.Binding{keep}, pinned: []key.Binding{done, r.Quit}}
 }
 func (k keyMap) scheduleHelp() helpKeys {
 	return helpKeys{pinned: []key.Binding{k.ScheduleCancel, k.ForceQuit}}

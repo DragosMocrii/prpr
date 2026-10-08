@@ -3,11 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -85,29 +81,6 @@ func TestNudgeErrorsNeverContainTheToken(t *testing.T) {
 	if _, err := client.Reviewers(context.Background(), "acme/app", 12); err == nil || strings.Contains(err.Error(), fakeToken) {
 		t.Fatalf("reviewers err = %v", err)
 	}
-}
-
-// requestGH writes a gh stand-in that logs each call and fails the review
-// requests that match fail, a shell pattern.
-func requestGH(t *testing.T, fail string) (*Client, string) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("the fake gh is a shell script")
-	}
-	dir := t.TempDir()
-	log := filepath.Join(dir, "calls")
-	script := fmt.Sprintf(`#!/bin/sh
-printf '%%s\n' "$*" >> %q
-case "$*" in
-  %s) echo "HTTP 422" >&2; exit 1 ;;
-esac
-echo '{}'
-`, log, fail)
-	path := filepath.Join(dir, "gh")
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return &Client{path: path}, log
 }
 
 func TestDecodeReviewersKeepsTheApprovalOfAReviewerAskedAgain(t *testing.T) {

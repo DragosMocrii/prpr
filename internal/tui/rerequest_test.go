@@ -20,35 +20,141 @@ func rerequestView(m *model) string {
 	return ansi.Strip(strings.Join(m.rerequestLines(), "\n"))
 }
 
-// requests records the reviews a model requests.
-type requests struct {
+// nudges records the nudges a model posts.
+type nudges struct {
 	repository string
 	number     int
+	urgency    github.NudgeUrgency
 	logins     []string
+	note       string
 	calls      int
 }
 
-// stubReviewers makes the model list reviewers and record requests.
-func stubReviewers(m *model, reviewers []github.Reviewer, listErr, requestErr error) *requests {
-	sent := &requests{}
-	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) {
-		return github.ReviewerList{Reviewers: reviewers}, listErr
-	}
-	m.nudgeReviewers = func(_ context.Context, repository string, number int, _ github.NudgeUrgency, logins []string, _ string) error {
-		sent.repository, sent.number, sent.logins = repository, number, logins
+// stubReviewers makes the model list reviewers and record nudges.
+func stubReviewers(m *model, list github.ReviewerList, listErr, sendErr error) *nudges {
+	sent := &nudges{}
+	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) { return list, listErr }
+	m.nudgeReviewers = func(_ context.Context, repository string, number int, urgency github.NudgeUrgency, logins []string, note string) error {
+		sent.repository, sent.number, sent.urgency, sent.logins, sent.note = repository, number, urgency, logins, note
 		sent.calls++
-		return requestErr
+		return sendErr
 	}
 	return sent
 }
 
-func TestRerequestAsksTheChosenReviewersAgain(t *testing.T) {
+// reviewers lists people with no teams.
+func reviewers(people ...github.Reviewer) github.ReviewerList {
+	return github.ReviewerList{Reviewers: people}
+}
+
+// openNudge opens the form on acme/api#2 with list.
+func openNudge(t *testing.T, list github.ReviewerList) (*model, *nudges) {
+	t.Helper()
 	mine, review := snoozePRs()
 	m := newPaneModel(t, 140, 40, mine, review)
-	sent := stubReviewers(m, []github.Reviewer{
-		{Login: "alice", State: "APPROVED"},
-		{Login: "bob", State: "CHANGES_REQUESTED", Stale: true},
-	}, nil, nil)
+	sent := stubReviewers(m, list, nil, nil)
+	m.setFocus(paneMine)
+	m.selectPR(paneMine, "acme/api", 2)
+	pressMsg(m, letter("R"))
+	if m.rerequest == nil {
+		t.Fatalf("R did not open the form; notice %q", m.notice)
+	}
+	return m, sent
+}
+
+func TestNudgeSendsTheChosenUrgencyAndNote(t *testing.T) {
+	m, sent := openNudge(t, reviewers(
+		github.Reviewer{Login: "alice", State: "APPROVED"},
+		github.Reviewer{Login: "bob", State: "CHANGES_REQUESTED", Stale: true},
+	))
+	if m.rerequest.urgency != github.NudgeNormal {
+		t.Fatalf("default urgency = %v", m.rerequest.urgency)
+	}
+	pressMsg(m, letter("u")) // normal → urgent
+	pressMsg(m, letter("n"))
+	for _, r := range "today please" {
+		pressMsg(m, letter(string(r)))
+	}
+	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // keeps the note
+	if m.rerequest == nil || m.rerequest.noting {
+		t.Fatal("Enter in the note closed the form or kept typing")
+	}
+	if view := rerequestView(m); !strings.Contains(view, "urgent") || !strings.Contains(view, "today please") {
+		t.Fatalf("form does not show the urgency and note:\n%s", view)
+	}
+	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter}) // sends
+	if m.rerequest != nil {
+		t.Fatal("form still open after Enter")
+	}
+	if sent.calls != 1 || sent.repository != "acme/api" || sent.number != 2 || sent.urgency != github.NudgeUrgent ||
+		sent.note != "today please" || !slices.Equal(sent.logins, []string{"bob"}) {
+		t.Fatalf("sent = %+v, want bob nudged urgently with the note (approvers never start chosen)", sent)
+	}
+	if !strings.Contains(m.notice, "bob") || !strings.Contains(m.notice, "#2") || !strings.Contains(m.notice, "urgent") {
+		t.Fatalf("notice = %q", m.notice)
+	}
+}
+
+func TestNudgeUrgencyCyclesThroughEveryLevel(t *testing.T) {
+	m, _ := openNudge(t, reviewers(github.Reviewer{Login: "bob", State: "COMMENTED", Stale: true}))
+	var seen []github.NudgeUrgency
+	for range 3 {
+		pressMsg(m, letter("u"))
+		seen = append(seen, m.rerequest.urgency)
+	}
+	if !slices.Equal(seen, []github.NudgeUrgency{github.NudgeUrgent, github.NudgeLow, github.NudgeNormal}) {
+		t.Fatalf("u cycles %v", seen)
+	}
+}
+
+func TestEscInTheNoteLeavesOnlyTheNote(t *testing.T) {
+	m, sent := openNudge(t, reviewers(github.Reviewer{Login: "bob", Stale: true, State: "COMMENTED"}))
+	pressMsg(m, letter("n"))
+	pressMsg(m, letter("x"))
+	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.rerequest == nil || m.rerequest.noting {
+		t.Fatal("Esc in the note closed the form")
+	}
+	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.rerequest != nil || sent.calls != 0 {
+		t.Fatal("Esc did not cancel the form")
+	}
+}
+
+func TestTheFormShowsWhoWasNudgedAlready(t *testing.T) {
+	m, _ := openNudge(t, github.ReviewerList{
+		Reviewers: []github.Reviewer{{Login: "bob", State: "COMMENTED"}, {Login: "carol", State: "COMMENTED"}},
+		Nudged:    map[string]github.Nudge{"bob": {Urgency: github.NudgeUrgent, At: time.Now().Add(-2 * time.Hour)}},
+	})
+	view := rerequestView(m)
+	var bob, carol string
+	for line := range strings.SplitSeq(view, "\n") {
+		switch {
+		case strings.Contains(line, "bob"):
+			bob = line
+		case strings.Contains(line, "carol"):
+			carol = line
+		}
+	}
+	if !strings.Contains(bob, "nudged") || !strings.Contains(bob, "urgent") || strings.Contains(carol, "nudged") {
+		t.Fatalf("form:\n%s", view)
+	}
+}
+
+func TestNoApproverWarningAnyMore(t *testing.T) {
+	m, _ := openNudge(t, reviewers(github.Reviewer{Login: "alice", State: "APPROVED"}))
+	if strings.Contains(strings.ToLower(rerequestView(m)), "awaiting review") {
+		t.Fatalf("the form still warns about approvers:\n%s", rerequestView(m))
+	}
+}
+
+func TestNudgeAnApproverByHand(t *testing.T) {
+	mine, review := snoozePRs()
+	m := newPaneModel(t, 140, 40, mine, review)
+	sent := stubReviewers(m, reviewers(
+		github.Reviewer{Login: "alice", State: "APPROVED"},
+		github.Reviewer{Login: "bob", State: "CHANGES_REQUESTED", Stale: true},
+	), nil, nil)
 	m.setFocus(paneMine)
 	m.selectPR(paneMine, "acme/api", 2)
 	pressMsg(m, letter("R"))
@@ -65,8 +171,8 @@ func TestRerequestAsksTheChosenReviewersAgain(t *testing.T) {
 	if m.rerequest != nil {
 		t.Fatal("form still open after Enter")
 	}
-	if sent.calls != 1 || sent.repository != "acme/api" || sent.number != 2 {
-		t.Fatalf("requested %+v", sent)
+	if sent.calls != 1 || sent.urgency != github.NudgeNormal || sent.note != "" {
+		t.Fatalf("sent %+v", sent)
 	}
 	if slices.Sort(sent.logins); !slices.Equal(sent.logins, []string{"alice", "bob"}) {
 		t.Fatalf("logins = %v", sent.logins)
@@ -76,52 +182,52 @@ func TestRerequestAsksTheChosenReviewersAgain(t *testing.T) {
 	}
 }
 
-func TestRerequestNeedsAChoiceAndEscCancels(t *testing.T) {
+func TestNudgeNeedsAChoiceAndEscCancels(t *testing.T) {
 	mine, review := snoozePRs()
 	m := newPaneModel(t, 140, 40, mine, review)
-	sent := stubReviewers(m, []github.Reviewer{{Login: "alice", State: "APPROVED"}}, nil, nil)
+	sent := stubReviewers(m, reviewers(github.Reviewer{Login: "alice", State: "APPROVED"}), nil, nil)
 	m.setFocus(paneMine)
 	pressMsg(m, letter("R"))
 	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.rerequest == nil || sent.calls != 0 {
-		t.Fatal("Enter with no one chosen requested or closed the form")
+		t.Fatal("Enter with no one chosen nudged or closed the form")
 	}
 	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.rerequest != nil || sent.calls != 0 {
-		t.Fatal("Esc requested or kept the form")
+		t.Fatal("Esc nudged or kept the form")
 	}
 }
 
-func TestRerequestReportsFailuresAndEmptyLists(t *testing.T) {
+func TestNudgeReportsFailuresAndEmptyLists(t *testing.T) {
 	mine, review := snoozePRs()
 	m := newPaneModel(t, 140, 40, mine, review)
 	m.setFocus(paneMine)
-	stubReviewers(m, nil, nil, nil)
+	stubReviewers(m, github.ReviewerList{}, nil, nil)
 	pressMsg(m, letter("R"))
-	if m.rerequest != nil || !strings.Contains(statusText(m), "No one to ask again") {
+	if m.rerequest != nil || !strings.Contains(statusText(m), "No one to nudge") {
 		t.Fatalf("no reviewers: form %v, status %q", m.rerequest, statusText(m))
 	}
-	stubReviewers(m, nil, errors.New("GitHub reviewer query failed: HTTP 502\nbad"), nil)
+	stubReviewers(m, github.ReviewerList{}, errors.New("GitHub reviewer query failed: HTTP 502\nbad"), nil)
 	pressMsg(m, letter("R"))
 	if m.rerequest != nil || !strings.Contains(statusText(m), "HTTP 502 bad") {
 		t.Fatalf("lookup failure: status %q", statusText(m))
 	}
-	stubReviewers(m, []github.Reviewer{{Login: "bob", Stale: true}}, nil, errors.New("Could not request reviews: HTTP 422"))
+	stubReviewers(m, reviewers(github.Reviewer{Login: "bob", Stale: true}), nil, errors.New("Could not nudge: HTTP 422"))
 	pressMsg(m, letter("R"))
 	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !strings.Contains(statusText(m), "HTTP 422") {
-		t.Fatalf("request failure: status %q", statusText(m))
+		t.Fatalf("nudge failure: status %q", statusText(m))
 	}
 }
 
-func TestRerequestOnlyOnListedAuthoredRows(t *testing.T) {
+func TestNudgeOnlyOnListedAuthoredRows(t *testing.T) {
 	mine, review := snoozePRs()
 	store := testPreferences(t)
 	if err := store.Save("alice", ""); err != nil {
 		t.Fatal(err)
 	}
 	m := testModel(store, 140, 40)
-	sent := stubReviewers(m, []github.Reviewer{{Login: "bob", Stale: true}}, nil, nil)
+	sent := stubReviewers(m, reviewers(github.Reviewer{Login: "bob", Stale: true}), nil, nil)
 	m.loading = true
 	m.Update(previewMsg{snapshot: github.Snapshot{Login: "alice", Preview: true, PullRequests: mine, ReviewRequests: review}})
 	pressMsg(m, letter("R"))
@@ -142,14 +248,14 @@ func TestRerequestOnlyOnListedAuthoredRows(t *testing.T) {
 		t.Fatal("a review request opened the form")
 	}
 	if sent.calls != 0 {
-		t.Fatalf("requested %+v", sent)
+		t.Fatalf("nudged %+v", sent)
 	}
 }
 
 func TestStaleReviewerResultsAreDropped(t *testing.T) {
 	mine, review := snoozePRs()
 	m := newPaneModel(t, 140, 40, mine, review)
-	stubReviewers(m, []github.Reviewer{{Login: "bob", Stale: true}}, nil, nil)
+	stubReviewers(m, reviewers(github.Reviewer{Login: "bob", Stale: true}), nil, nil)
 	m.setFocus(paneMine)
 	lookup := m.handleKey(letter("R"))
 	listed := lookup().(reviewersListedMsg)
@@ -167,15 +273,15 @@ func TestStaleReviewerResultsAreDropped(t *testing.T) {
 	}
 
 	m.Update(reviewsRequestedMsg{account: m.accountGeneration + 1, key: keyOf(&mine[0]), logins: []string{"bob"}})
-	if strings.Contains(m.notice, "Requested") {
+	if strings.Contains(m.notice, "Nudged") {
 		t.Fatalf("a result for another account set %q", m.notice)
 	}
 }
 
-func TestRerequestDropsAPullRequestThatLeftTheList(t *testing.T) {
+func TestNudgeDropsAPullRequestThatLeftTheList(t *testing.T) {
 	mine, review := snoozePRs()
 	m := newPaneModel(t, 140, 40, mine, review)
-	sent := stubReviewers(m, []github.Reviewer{{Login: "bob", Stale: true}}, nil, nil)
+	sent := stubReviewers(m, reviewers(github.Reviewer{Login: "bob", Stale: true}), nil, nil)
 	m.setFocus(paneMine)
 	m.selectPR(paneMine, "acme/api", 1)
 	pressMsg(m, letter("R"))
@@ -185,49 +291,40 @@ func TestRerequestDropsAPullRequestThatLeftTheList(t *testing.T) {
 	m.Update(fetchFinishedMsg{snapshot: github.Snapshot{Login: "alice", PullRequests: mine[1:], ReviewRequests: review}})
 	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if sent.calls != 0 || !strings.Contains(m.notice, "no longer listed") {
-		t.Fatalf("requested %+v; notice %q", sent, m.notice)
+		t.Fatalf("nudged %+v; notice %q", sent, m.notice)
 	}
 }
 
-func TestRerequestRenewsAChosenPendingRequest(t *testing.T) {
-	mine, review := snoozePRs()
-	m := newPaneModel(t, 140, 40, mine, review)
-	sent := stubReviewers(m, []github.Reviewer{
-		{Login: "bob", State: "COMMENTED", Stale: true},
-		{Login: "carol", Pending: true},
-	}, nil, nil)
-	m.setFocus(paneMine)
-	pressMsg(m, letter("R"))
-	if m.rerequest == nil || !strings.Contains(rerequestView(m), "carol") {
+func TestNudgeChoosesRequestedPeopleWhoHaveNotReviewed(t *testing.T) {
+	m, sent := openNudge(t, reviewers(
+		github.Reviewer{Login: "bob", State: "COMMENTED", Stale: true},
+		github.Reviewer{Login: "carol", Pending: true},
+		github.Reviewer{Login: "dave", State: "COMMENTED"},
+	))
+	if !strings.Contains(rerequestView(m), "carol") {
 		t.Fatal("a pending reviewer is not offered")
 	}
-	// The pending request starts unchosen; the cursor is on bob, the chosen one.
-	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyDown})
-	pressMsg(m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if slices.Sort(sent.logins); !slices.Equal(sent.logins, []string{"bob", "carol"}) {
-		t.Fatalf("requested %v", sent.logins)
+		t.Fatalf("nudged %v", sent.logins)
 	}
 }
 
-func TestRerequestNeverChoosesAnApproverItself(t *testing.T) {
+func TestNudgeNeverChoosesAnApproverItself(t *testing.T) {
 	mine, review := snoozePRs()
 	m := newPaneModel(t, 140, 40, mine, review)
-	stubReviewers(m, []github.Reviewer{{Login: "alice", State: "APPROVED", Stale: true}}, nil, nil)
+	stubReviewers(m, reviewers(github.Reviewer{Login: "alice", State: "APPROVED", Stale: true}), nil, nil)
 	m.setFocus(paneMine)
 	pressMsg(m, letter("R"))
 	if m.rerequest == nil || len(m.rerequest.chosenLogins()) != 0 {
 		t.Fatalf("an approver of older commits starts chosen: %+v", m.rerequest)
 	}
-	if !strings.Contains(rerequestView(m), "awaiting review") {
-		t.Fatalf("form does not warn about the approval:\n%s", rerequestView(m))
-	}
 }
 
-func TestRerequestSkipsAnyoneWhoReviewedSinceTheFormOpened(t *testing.T) {
+func TestNudgeSkipsAnyoneWhoReviewedSinceTheFormOpened(t *testing.T) {
 	mine, review := snoozePRs()
 	m := newPaneModel(t, 140, 40, mine, review)
-	sent := stubReviewers(m, nil, nil, nil)
+	sent := stubReviewers(m, github.ReviewerList{}, nil, nil)
 	before := time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
 	after := before.Add(time.Minute)
 	lists := [][]github.Reviewer{
@@ -254,17 +351,13 @@ func TestRerequestSkipsAnyoneWhoReviewedSinceTheFormOpened(t *testing.T) {
 	}
 	m.setFocus(paneMine)
 	pressMsg(m, letter("R"))
-	// bob, carol, and dave start chosen; choose erin too.
-	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyDown})
-	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyDown})
-	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyDown})
-	pressMsg(m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	// bob, carol, dave, and erin start chosen.
 	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if calls != 2 {
 		t.Fatalf("reviewers read %d times, want again when sending", calls)
 	}
 	if !slices.Equal(sent.logins, []string{"dave"}) {
-		t.Fatalf("requested %v", sent.logins)
+		t.Fatalf("nudged %v", sent.logins)
 	}
 	for _, skipped := range []string{"bob", "carol", "erin"} {
 		if !strings.Contains(m.notice, skipped) {
@@ -282,10 +375,10 @@ func TestRerequestSkipsAnyoneWhoReviewedSinceTheFormOpened(t *testing.T) {
 	}
 }
 
-func TestRerequestSendsNothingWhenTheRecheckFails(t *testing.T) {
+func TestNudgeSendsNothingWhenTheRecheckFails(t *testing.T) {
 	mine, review := snoozePRs()
 	m := newPaneModel(t, 140, 40, mine, review)
-	sent := stubReviewers(m, []github.Reviewer{{Login: "bob", State: "COMMENTED", Stale: true}}, nil, nil)
+	sent := stubReviewers(m, reviewers(github.Reviewer{Login: "bob", State: "COMMENTED", Stale: true}), nil, nil)
 	m.setFocus(paneMine)
 	pressMsg(m, letter("R"))
 	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) {
@@ -297,7 +390,7 @@ func TestRerequestSendsNothingWhenTheRecheckFails(t *testing.T) {
 	}
 }
 
-func TestRerequestGroupsTeamMembersAndShowsWhichTeamsAreCovered(t *testing.T) {
+func TestNudgeGroupsTeamMembersAndShowsWhichTeamsAreCovered(t *testing.T) {
 	mine, review := snoozePRs()
 	m := newPaneModel(t, 140, 40, mine, review)
 	list := github.ReviewerList{
@@ -311,7 +404,7 @@ func TestRerequestGroupsTeamMembersAndShowsWhichTeamsAreCovered(t *testing.T) {
 			{Name: "acme/docs", CodeOwner: true, Members: 2, Logins: []string{"lee", "priya"}},
 		},
 	}
-	sent := stubReviewers(m, nil, nil, nil)
+	sent := stubReviewers(m, github.ReviewerList{}, nil, nil)
 	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) { return list, nil }
 	m.setFocus(paneMine)
 	m.selectPR(paneMine, "acme/api", 2)
@@ -350,11 +443,11 @@ func TestRerequestGroupsTeamMembersAndShowsWhichTeamsAreCovered(t *testing.T) {
 	}
 	pressMsg(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !slices.Equal(sent.logins, []string{"bob", "priya"}) {
-		t.Fatalf("requested %v", sent.logins)
+		t.Fatalf("nudged %v", sent.logins)
 	}
 }
 
-func TestRerequestScrollsAndFiltersALongList(t *testing.T) {
+func TestNudgeScrollsAndFiltersALongList(t *testing.T) {
 	mine, review := snoozePRs()
 	m := newPaneModel(t, 120, 20, mine, review)
 	team := github.TeamRequest{Name: "acme/everyone", CodeOwner: true, Members: 50}
@@ -364,7 +457,7 @@ func TestRerequestScrollsAndFiltersALongList(t *testing.T) {
 		team.Logins = append(team.Logins, login)
 		people = append(people, github.Reviewer{Login: login, Teams: []string{team.Name}, CodeOwner: true})
 	}
-	stubReviewers(m, nil, nil, nil)
+	stubReviewers(m, github.ReviewerList{}, nil, nil)
 	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) {
 		return github.ReviewerList{Reviewers: people, Teams: []github.TeamRequest{team}}, nil
 	}
@@ -395,10 +488,10 @@ func TestRerequestScrollsAndFiltersALongList(t *testing.T) {
 	}
 }
 
-func TestRerequestSaysWhenTeamsAreNotReadable(t *testing.T) {
+func TestNudgeSaysWhenTeamsAreNotReadable(t *testing.T) {
 	mine, review := snoozePRs()
 	m := newPaneModel(t, 140, 40, mine, review)
-	stubReviewers(m, nil, nil, nil)
+	stubReviewers(m, github.ReviewerList{}, nil, nil)
 	m.listReviewers = func(context.Context, string, int) (github.ReviewerList, error) {
 		return github.ReviewerList{UnreadableTeams: 1}, nil
 	}

@@ -11,9 +11,9 @@ import (
 	"github.com/DragosMocrii/prpr/internal/github"
 )
 
-// rerequestEditor is the form that requests reviews of an authored pull
-// request again: the people who can be asked, grouped by what they can
-// answer, and which of them are chosen.
+// rerequestEditor is the form that nudges reviewers of an authored pull
+// request: the people who can be nudged, grouped by what they can answer,
+// which of them are chosen, the urgency, and an optional note.
 type rerequestEditor struct {
 	key   prKey
 	title string
@@ -26,8 +26,8 @@ type rerequestEditor struct {
 	// would not show.
 	teams      []github.TeamRequest
 	unreadable int
-	// approvers reports that an offered reviewer approved.
-	approvers bool
+	// nudged are the author's latest nudges, by lowercase login.
+	nudged map[string]github.Nudge
 	// reviewed are when the offered reviewers last reviewed, by lowercase
 	// login, as the form showed them.
 	reviewed map[string]time.Time
@@ -38,11 +38,16 @@ type rerequestEditor struct {
 	// takes the keys.
 	filter    textinput.Model
 	filtering bool
+	// urgency is the nudge's urgency; note is its optional note, and
+	// noting is set while the note takes the keys.
+	urgency github.NudgeUrgency
+	note    textinput.Model
+	noting  bool
 	// problem says why Enter sent nothing.
 	problem string
 }
 
-// reviewersListedMsg brings the reviewers of key that can be asked again.
+// reviewersListedMsg brings the reviewers of key that can be nudged.
 // noticeID is the notice that announced the lookup.
 type reviewersListedMsg struct {
 	account   uint64
@@ -54,22 +59,25 @@ type reviewersListedMsg struct {
 
 // reviewersRecheckedMsg brings the reviewers of key again when the form is
 // sent, to send what still holds: chosen logins, and when they last reviewed
-// as the form showed it.
+// as the form showed it, with the form's urgency and note.
 type reviewersRecheckedMsg struct {
 	account   uint64
 	key       prKey
 	chosen    []string
 	reviewed  map[string]time.Time
+	urgency   github.NudgeUrgency
+	note      string
 	reviewers github.ReviewerList
 	err       error
 }
 
-// reviewsRequestedMsg reports how requesting reviews of key again went;
-// skipped are the chosen logins that were not asked.
+// reviewsRequestedMsg reports how nudging reviewers of key went; skipped
+// are the chosen logins that were not nudged.
 type reviewsRequestedMsg struct {
 	account uint64
 	key     prKey
 	logins  []string
+	urgency github.NudgeUrgency
 	skipped []string
 	err     error
 }
@@ -90,15 +98,15 @@ func (m *model) modalOpen() bool {
 	return m.err != nil || m.loginActive || m.searching != nil || m.overlayOpen()
 }
 
-// rerequestSelected looks up who can be asked again to review the focused
-// row, an authored pull request; the form opens when they are known.
+// rerequestSelected looks up who can be nudged to review the focused row,
+// an authored pull request; the form opens when they are known.
 func (m *model) rerequestSelected() tea.Cmd {
 	pr, gone, ok := m.paneRow(m.focus, m.focused().table.Cursor())
 	switch {
 	case !ok:
 		return nil
 	case m.snapshot.Preview:
-		m.setNotice("Requesting reviews waits for the details to load")
+		m.setNotice("Nudging reviewers waits for the details to load")
 		return nil
 	case gone:
 		m.setNotice("Gone pull requests cannot be reviewed")
@@ -106,7 +114,7 @@ func (m *model) rerequestSelected() tea.Cmd {
 	}
 	key := keyOf(pr)
 	if _, authored := m.authoredPR(key); !authored {
-		m.setNotice("Reviews can be requested only on your own pull requests")
+		m.setNotice("Only your own pull requests can be nudged")
 		return nil
 	}
 	m.setNotice(fmt.Sprintf("Finding the reviewers of #%d…", pr.Number))
@@ -133,7 +141,7 @@ func (m *model) handleReviewersListed(msg reviewersListedMsg) tea.Cmd {
 		m.setNotice(singleLine(msg.err.Error()))
 		return nil
 	case len(msg.reviewers.Reviewers) == 0:
-		text := fmt.Sprintf("No one to ask again on #%d: nobody reviewed it or is requested to", pr.Number)
+		text := fmt.Sprintf("No one to nudge on #%d: nobody reviewed it or is requested to", pr.Number)
 		if msg.reviewers.UnreadableTeams > 0 {
 			text += "; " + unreadableTeams(msg.reviewers.UnreadableTeams)
 		}
@@ -141,7 +149,7 @@ func (m *model) handleReviewersListed(msg reviewersListedMsg) tea.Cmd {
 		return nil
 	}
 	m.notice = ""
-	m.rerequest = newRerequestEditor(msg.key, "Request reviews of "+alertName(pr), msg.reviewers, m.darkBackground)
+	m.rerequest = newRerequestEditor(msg.key, "Nudge reviewers of "+alertName(pr), msg.reviewers, m.darkBackground)
 	return nil
 }
 
@@ -160,17 +168,19 @@ func reviewWords(state string) string {
 	return "reviewed"
 }
 
-// updateRerequest passes a key to the form. Esc cancels; Enter requests
-// the chosen reviews.
+// updateRerequest passes a key to the form. Esc cancels; Enter nudges the
+// chosen people.
 func (m *model) updateRerequest(msg tea.Msg) tea.Cmd {
 	press, ok := msg.(tea.KeyPressMsg)
 	if !ok {
-		if m.rerequest.filtering {
-			var cmd tea.Cmd
+		var cmd tea.Cmd
+		switch {
+		case m.rerequest.filtering:
 			m.rerequest.filter, cmd = m.rerequest.filter.Update(msg)
-			return cmd
+		case m.rerequest.noting:
+			m.rerequest.note, cmd = m.rerequest.note.Update(msg)
 		}
-		return nil
+		return cmd
 	}
 	send, cancel, cmd := m.rerequest.update(press, m.keys.Reviewers, m.rerequestListHeight())
 	switch {
@@ -196,18 +206,19 @@ func (m *model) recheckReviewers(e *rerequestEditor) tea.Cmd {
 	if len(chosen) == 0 {
 		return nil
 	}
-	m.setNotice(fmt.Sprintf("Requesting reviews of #%d…", pr.Number))
+	m.setNotice(fmt.Sprintf("Nudging #%d…", pr.Number))
 	ctx, list, repository, number, account := m.ctx, m.listReviewers, pr.Repository, pr.Number, m.accountGeneration
-	key, reviewed := e.key, e.reviewed
+	key, reviewed, urgency, note := e.key, e.reviewed, e.urgency, e.note.Value()
 	return func() tea.Msg {
 		reviewers, err := list(ctx, repository, number)
-		return reviewersRecheckedMsg{account: account, key: key, chosen: chosen, reviewed: reviewed, reviewers: reviewers, err: err}
+		return reviewersRecheckedMsg{account: account, key: key, chosen: chosen, reviewed: reviewed,
+			urgency: urgency, note: note, reviewers: reviewers, err: err}
 	}
 }
 
-// handleReviewersRechecked sends the chosen requests that still hold. A
+// handleReviewersRechecked nudges the chosen people who still need it. A
 // reviewer who reviewed since the form opened, whatever the verdict, is not
-// asked: the review answers the request. Nor is one no longer offered.
+// nudged: the review answers it. Nor is one no longer offered.
 func (m *model) handleReviewersRechecked(msg reviewersRecheckedMsg) tea.Cmd {
 	if msg.account != m.accountGeneration {
 		return nil
@@ -238,11 +249,11 @@ func (m *model) handleReviewersRechecked(msg reviewersRecheckedMsg) tea.Cmd {
 		m.setNotice(singleLine(fmt.Sprintf("Nothing sent on #%d: %s reviewed it since", pr.Number, strings.Join(skipped, ", "))))
 		return nil
 	}
-	ctx, request, repository, number, account := m.ctx, m.nudgeReviewers, pr.Repository, pr.Number, m.accountGeneration
-	key := msg.key
+	ctx, nudge, repository, number, account := m.ctx, m.nudgeReviewers, pr.Repository, pr.Number, m.accountGeneration
+	key, urgency, note := msg.key, msg.urgency, msg.note
 	return func() tea.Msg {
-		return reviewsRequestedMsg{account: account, key: key, logins: logins, skipped: skipped,
-			err: request(ctx, repository, number, github.NudgeNormal, logins, "")}
+		return reviewsRequestedMsg{account: account, key: key, logins: logins, urgency: urgency, skipped: skipped,
+			err: nudge(ctx, repository, number, urgency, logins, note)}
 	}
 }
 
@@ -257,7 +268,7 @@ func (m *model) handleReviewsRequested(msg reviewsRequestedMsg) {
 	}
 	// The details read the reviewers again.
 	delete(m.reviewerLookups, msg.key)
-	text := fmt.Sprintf("Requested reviews of #%d from %s", msg.key.number, strings.Join(msg.logins, ", "))
+	text := fmt.Sprintf("Nudged %s on #%d (%s)", strings.Join(msg.logins, ", "), msg.key.number, msg.urgency)
 	if len(msg.skipped) > 0 {
 		text += "; not " + strings.Join(msg.skipped, ", ") + ", who reviewed it since"
 	}
