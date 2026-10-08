@@ -7,7 +7,7 @@
 // -icons nerd saves Nerd Font icons in the run's preferences, which -font must then hold.
 //
 // The font must cover the box-drawing and status glyphs prpr draws; DejaVu
-// Sans Mono does. Emoji such as 🙏 are drawn from Noto Emoji's color images
+// Sans Mono does. Emoji such as 🚨 are drawn from Noto Emoji's color images
 // (2D/png/72 of github.com/googlefonts/noto-emoji), which no font here holds.
 package main
 
@@ -76,14 +76,14 @@ var script = []step{
 	// A refresh marks what changed.
 	{600 * time.Millisecond, "G"},
 	{1000 * time.Millisecond, "r"},
-	// Review requests, one asking again with a blinking 🙏.
+	// Review requests, an urgent nudge first with a blinking 🚨.
 	{4500 * time.Millisecond, "\t"},
 	{1200 * time.Millisecond, "j"},
 	{900 * time.Millisecond, "j"},
 	// The keys, grouped.
 	{2000 * time.Millisecond, "?"},
 	{2800 * time.Millisecond, "?"},
-	// Requesting reviews: choosing one member covers both code-owner teams.
+	// Nudging reviewers: choosing one member covers both code-owner teams.
 	{800 * time.Millisecond, "\t"},
 	{600 * time.Millisecond, "g"},
 	{600 * time.Millisecond, "R"},
@@ -99,7 +99,7 @@ func main() {
 	bold := flag.String("bold", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", "bold variant of -font")
 	fallback := flag.String("fallback", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "font for glyphs -font lacks, such as the braille spinner")
 	icons := flag.String("icons", "unicode", "prpr's icon set, saved in the run's preferences: unicode or nerd")
-	emoji := flag.String("emoji", "", "directory of Noto Emoji images named emoji_u<codepoint>.png, for 🙏; without it, 🙏 is a box")
+	emoji := flag.String("emoji", "", "directory of Noto Emoji images named emoji_u<codepoint>.png, for 🚨; without it, 🚨 is a box")
 	out := flag.String("o", "../demo.gif", "output GIF")
 	flag.Parse()
 	if err := record(*regular, *bold, *fallback, *emoji, *icons, *out); err != nil {

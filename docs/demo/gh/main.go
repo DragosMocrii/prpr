@@ -47,11 +47,11 @@ type pr struct {
 	checks, decision           string
 	approvals                  int
 	created, ready, requested  time.Duration
-	// requestedBefore is an earlier request of the viewer's review; with
-	// it, the request asks again.
-	requestedBefore time.Duration
-	head            time.Duration
-	bots            bots
+	// nudged is the time since the author's urgent nudge of the viewer; 0
+	// for none.
+	nudged time.Duration
+	head   time.Duration
+	bots   bots
 }
 
 // bots describes the review-bot activity on a pull request.
@@ -117,11 +117,14 @@ func (p pr) node(full bool) map[string]any {
 			"comments": map[string]any{"nodes": []any{map[string]any{"author": map[string]any{"login": "copilot-pull-request-reviewer"}}}}})
 	}
 	requests := []any{}
-	if p.requestedBefore > 0 {
-		requests = append(requests, map[string]any{"createdAt": ago(p.requestedBefore), "requestedReviewer": map[string]any{"login": login}})
-	}
 	if p.requested > 0 {
 		requests = append(requests, map[string]any{"createdAt": ago(p.requested), "requestedReviewer": map[string]any{"login": login}})
+	}
+	activity := []any{}
+	if p.nudged > 0 {
+		activity = append(activity, map[string]any{"__typename": "IssueComment", "author": map[string]any{"login": p.author},
+			"createdAt": ago(p.nudged),
+			"body":      "@" + login + " 🚨 This is blocking: please review it as soon as you can.\n\n<!-- prpr:nudge v1 urgency=urgent to=" + login + " -->"})
 	}
 	for k, v := range map[string]any{
 		"mergeStateStatus":         p.mergeState,
@@ -135,6 +138,7 @@ func (p pr) node(full bool) map[string]any {
 		"reactions":                map[string]any{"nodes": reactions},
 		"reviewThreads":            map[string]any{"nodes": threads},
 		"requestEvents":            map[string]any{"nodes": requests},
+		"activity":                 map[string]any{"nodes": activity},
 	} {
 		n[k] = v
 	}
@@ -174,7 +178,7 @@ func reviews(changed bool) []pr {
 		decision: "REVIEW_REQUIRED", created: 8 * hour, requested: 5 * hour, head: 6 * hour, bots: bots{copilotReview: 5 * hour}}
 	offline := pr{repo: "acme/mobile", number: 530, title: "Offline mode for the order list", author: "priya-n",
 		add: 1310, del: 260, comments: 9, mergeable: "MERGEABLE", mergeState: "BLOCKED", checks: "PENDING",
-		decision: "REVIEW_REQUIRED", created: 3 * day, requestedBefore: 3 * day, requested: 2 * day, head: 4 * hour, bots: bots{copilotReview: 30 * hour, threads: 1}}
+		decision: "REVIEW_REQUIRED", created: 3 * day, requested: 2 * day, nudged: 40 * time.Minute, head: 4 * hour, bots: bots{copilotReview: 30 * hour, threads: 1}}
 	cursors := pr{repo: "acme/api", number: 418, title: "Document pagination cursors", author: "jordan-k",
 		add: 58, mergeable: "MERGEABLE", mergeState: "CLEAN", checks: "SUCCESS",
 		decision: "REVIEW_REQUIRED", created: 26 * hour, requested: 26 * hour, head: 26 * hour}
@@ -205,6 +209,7 @@ func reviewers() any {
 		"commit": map[string]any{"oid": "head"}, "onBehalfOf": map[string]any{"nodes": []any{map[string]any{"combinedSlug": "acme/mobile"}}}}
 	return map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{
 		"author": map[string]any{"login": login}, "headRefOid": "head",
+		"comments":                 map[string]any{"nodes": []any{}},
 		"latestReviews":            map[string]any{"nodes": []any{review, approval}},
 		"latestOpinionatedReviews": map[string]any{"nodes": []any{approval}},
 		"reviewRequests": map[string]any{"nodes": []any{
@@ -250,6 +255,9 @@ func main() {
 		return
 	case strings.HasPrefix(args, "auth status"):
 		return
+	case strings.Contains(args, "--method POST") && strings.Contains(args, "/comments"):
+		// A nudge: the comment is accepted and goes nowhere.
+		data = map[string]any{}
 	case !strings.HasPrefix(args, "api graphql"):
 		fmt.Fprintln(os.Stderr, "demo gh: unsupported command:", args)
 		os.Exit(1)
@@ -271,6 +279,10 @@ func main() {
 		data = map[string]any{"data": answer}
 	case strings.Contains(args, "combinedSlug"):
 		data = reviewers()
+	case strings.Contains(args, "mentions:@me"):
+		// The demo's only nudge is on a pending request. The mentions
+		// search reads one page, without --slurp, so it is one object.
+		data = map[string]any{"data": map[string]any{"search": map[string]any{"nodes": []any{}}}}
 	case strings.Contains(args, "reviewed-by:@me"):
 		// The demo has no pull requests the viewer already reviewed.
 		data = []any{map[string]any{"data": map[string]any{"search": page(nil, true)}}}

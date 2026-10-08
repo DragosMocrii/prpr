@@ -109,7 +109,7 @@ func (m *model) rerequestSelected() tea.Cmd {
 		m.setNotice("Nudging reviewers waits for the details to load")
 		return nil
 	case gone:
-		m.setNotice("Gone pull requests cannot be reviewed")
+		m.setNotice("Gone pull requests cannot be nudged")
 		return nil
 	}
 	key := keyOf(pr)

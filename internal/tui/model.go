@@ -56,7 +56,7 @@ type model struct {
 	// pull request U would unsnooze.
 	snoozeEditor *snoozeEditor
 	lastSnooze   *prKey
-	// rerequest is the form that requests reviews again, nil when closed.
+	// rerequest is the form that nudges reviewers, nil when closed.
 	// listReviewers and nudgeReviewers are the client's in the app.
 	rerequest      *rerequestEditor
 	listReviewers  func(context.Context, string, int) (github.ReviewerList, error)
