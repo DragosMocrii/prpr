@@ -71,7 +71,9 @@ type activityNode struct {
 	// SubmittedAt is null for a pending review.
 	SubmittedAt *time.Time `json:"submittedAt"`
 	CreatedAt   time.Time  `json:"createdAt"`
-	Commit      *struct {
+	// Body is a conversation comment's text; nudges are read from it.
+	Body   string `json:"body"`
+	Commit *struct {
 		Oid string `json:"oid"`
 	} `json:"commit"`
 }
