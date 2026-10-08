@@ -26,6 +26,8 @@ type fakeAPI struct {
 	failNodes bool
 	// failSignature makes signature list queries fail.
 	failSignature bool
+	// failMentions makes the mentions search fail, complete or signature.
+	failMentions bool
 	// login is the viewer's login.
 	login string
 	// onCall runs at the start of each list or detail query with its kind.
@@ -163,6 +165,9 @@ func (f *fakeAPI) call(ctx context.Context, _ string, args ...string) ([]byte, e
 		f.kinds = append(f.kinds, kind)
 		data = page("pullRequests", f.authored, f.login)
 	case strings.Contains(query, "mentions:@me"):
+		if f.failMentions {
+			return nil, errors.New("GitHub mentioned pull request query failed: boom")
+		}
 		// One page, not paginated: a single response object.
 		return json.Marshal(map[string]any{"data": map[string]any{"search": map[string]any{"nodes": f.mentions}}})
 	case strings.Contains(query, "reviewed-by:@me"):

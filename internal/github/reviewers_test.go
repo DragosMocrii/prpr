@@ -257,7 +257,8 @@ func TestNudgePostsOneComment(t *testing.T) {
 		t.Fatalf("the body went through -F, which reads files: %q", got)
 	}
 	i := slices.Index(got, "-f")
-	if i < 0 || !strings.HasPrefix(got[i+1], "body=@alice ") || !strings.Contains(got[i+1], "urgency=normal to=alice") {
+	if i < 0 || !strings.HasPrefix(got[i+1], "body=@alice ") || !strings.Contains(got[i+1], "urgency=normal to=alice") ||
+		!strings.Contains(got[i+1], "> please") {
 		t.Fatalf("body arg = %q", got)
 	}
 }

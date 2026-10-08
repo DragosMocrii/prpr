@@ -50,11 +50,12 @@ var nudgeOpening = [...]string{
 	NudgeUrgent: "🚨 This is blocking: please review it as soon as you can.",
 }
 
-// cleanNote reduces a note to one line without control characters, capped
+// cleanNote reduces a note to one line without control or format characters
+// (bidi overrides, zero-width ones) or line and paragraph separators, capped
 // at nudgeNoteMax runes.
 func cleanNote(note string) string {
 	note = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp) {
 			return ' '
 		}
 		return r

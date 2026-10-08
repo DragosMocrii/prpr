@@ -514,3 +514,40 @@ func TestIncrementalFetchEndsANudgeTheViewerAnswered(t *testing.T) {
 		t.Fatalf("second fetch was not incremental: %v", f.kinds)
 	}
 }
+
+func TestDroppedMentionInTransitionIsNotReadAgain(t *testing.T) {
+	f := newFakeAPI(t)
+	f.login = "octocat"
+	plain := prNode("PR_3", 3)
+	plain["requestEvents"] = map[string]any{"nodes": []any{}}
+	plain["commits"] = map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{
+		"committedDate": "2026-10-01T09:00:00Z", "statusCheckRollup": map[string]any{"state": "FAILURE"}}}}}
+	f.mentions = []map[string]any{plain}
+	c := f.client()
+	fetch(t, f, c)
+	if _, kind := fetch(t, f, c); kind != "signature" {
+		t.Fatalf("second fetch %s", kind)
+	}
+	if len(f.nodeIDs) != 0 {
+		t.Fatalf("detail fetched %v, want no read of the dropped mention", f.nodeIDs)
+	}
+}
+
+func TestMentionsFailureFailsCompleteAndIncrementalFetches(t *testing.T) {
+	f := cleanFake(t)
+	c := f.client()
+	f.failMentions = true
+	if _, err := c.Fetch(context.Background()); err == nil {
+		t.Fatal("complete fetch: no error")
+	}
+	f.failMentions = false
+	fetch(t, f, c)
+	f.failMentions = true
+	before := len(f.kinds)
+	if _, err := c.Fetch(context.Background()); err == nil {
+		t.Fatal("incremental fetch: no error")
+	}
+	if !slices.Contains(f.kinds[before:], "signature") {
+		t.Fatalf("failing fetch was not incremental: %v", f.kinds[before:])
+	}
+}

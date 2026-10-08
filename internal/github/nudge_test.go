@@ -7,7 +7,7 @@ import (
 )
 
 func TestFormatNudgeRoundTrips(t *testing.T) {
-	body, err := FormatNudge(NudgeUrgent, []string{"alice", "Bob-2"}, "release\tis\x1b[31m today")
+	body, err := FormatNudge(NudgeUrgent, []string{"alice", "Bob-2"}, "release\tis\x1b[31m to\u202eday\u2028now\u200b")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -18,7 +18,7 @@ func TestFormatNudgeRoundTrips(t *testing.T) {
 	if !ok || urgency != NudgeUrgent || strings.Join(to, ",") != "alice,Bob-2" {
 		t.Fatalf("parse = %v %v %v", urgency, to, ok)
 	}
-	if strings.ContainsAny(note, "\t\x1b") || !strings.Contains(note, "today") {
+	if strings.ContainsAny(note, "\t\x1b\u202e\u2028\u200b") || !strings.Contains(note, "day now") {
 		t.Fatalf("note not cleaned: %q", note)
 	}
 }

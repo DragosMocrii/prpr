@@ -234,11 +234,13 @@ func inTransition(pr PullRequest) bool {
 	return false
 }
 
-// stale lists the IDs among list whose detail must be read again.
-func stale(list []entry, cache map[string]listed) []string {
+// stale lists the IDs among list whose detail must be read again. With
+// keptOnly, a dropped row is read again only when its signature changes,
+// not while it is in transition.
+func stale(list []entry, cache map[string]listed, keptOnly bool) []string {
 	var ids []string
 	for _, e := range list {
-		if cached, ok := cache[e.id]; !ok || !cached.pr.sig.same(e.sig) || inTransition(cached.pr) {
+		if cached, ok := cache[e.id]; !ok || !cached.pr.sig.same(e.sig) || (cached.keep || !keptOnly) && inTransition(cached.pr) {
 			ids = append(ids, e.id)
 		}
 	}
@@ -293,19 +295,21 @@ func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots [
 		nodes []*pullRequestNode
 		err   error
 	}
-	start := func(list []entry, cached map[string]listed, fields string) chan read {
+	start := func(list []entry, cached map[string]listed, fields string, keptOnly bool) chan read {
 		result := make(chan read, 1)
-		ids := stale(list, cached)
+		ids := stale(list, cached, keptOnly)
 		go func() {
 			nodes, err := c.details(ctx, ids, fields)
 			result <- read{ids, nodes, err}
 		}()
 		return result
 	}
-	a := start(authored, cache.authored, authoredFields(hasBots, needs, queues))
-	r := start(requests, cache.requests, reviewFields(hasBots, activityField))
-	d := start(reviewed, cache.reviewed, reviewFields(hasBots, activityField))
-	mn := start(mentions, cache.mentions, reviewFields(hasBots, activityField))
+	// A mention without a nudge for the viewer is never shown, so only a
+	// changed signature reads it again.
+	a := start(authored, cache.authored, authoredFields(hasBots, needs, queues), false)
+	r := start(requests, cache.requests, reviewFields(hasBots, activityField), false)
+	d := start(reviewed, cache.reviewed, reviewFields(hasBots, activityField), false)
+	mn := start(mentions, cache.mentions, reviewFields(hasBots, activityField), true)
 	ra, rr, rd, rm := <-a, <-r, <-d, <-mn
 	for _, res := range []read{ra, rr, rd, rm} {
 		if res.err != nil {
