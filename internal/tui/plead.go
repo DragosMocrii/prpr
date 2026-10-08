@@ -28,11 +28,8 @@ type pleadTickMsg struct{ generation uint64 }
 // that asks the viewer again, not dismissed since it was last requested.
 // Preview rows never do, since a preview does not know.
 func (m *model) pleading(pr *github.PullRequest) bool {
-	if !pr.RequestedAgain || pr.ReviewStatus != github.ReviewRequested || m.snapshot.Preview {
-		return false
-	}
-	at, dismissed := m.dismissed[keyOf(pr)]
-	return !dismissed || pr.WaitingSince.After(at)
+	// Temporary stub: the nudge marker replaces this file.
+	return false
 }
 
 // pleadShown reports whether a visible row of Review requested shows the

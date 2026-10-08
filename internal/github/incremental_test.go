@@ -285,21 +285,6 @@ func TestDroppedReviewedPullRequestsAreCachedToo(t *testing.T) {
 	}
 }
 
-func TestRequestedAgainIsRecomputedEachFetch(t *testing.T) {
-	f := cleanFake(t)
-	f.reviewed = append(f.reviewed, prNode("PR_10", 10)) // reviewed and requested again
-	c := f.client()
-	snapshot, _ := fetch(t, f, c)
-	if !snapshot.ReviewRequests[0].RequestedAgain {
-		t.Fatal("not requested again")
-	}
-	f.reviewed = f.reviewed[:1]
-	snapshot, _ = fetch(t, f, c)
-	if snapshot.ReviewRequests[0].RequestedAgain {
-		t.Fatal("requested again stuck from the cache")
-	}
-}
-
 func TestMissingNodeFailsTheFetchAndTheNextIsComplete(t *testing.T) {
 	f := cleanFake(t)
 	c := f.client()

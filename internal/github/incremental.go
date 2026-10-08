@@ -294,8 +294,8 @@ func (c *Client) fetchIncremental(ctx context.Context, cache *fetchCache, bots [
 		return result
 	}
 	a := start(authored, cache.authored, authoredFields(hasBots, needs, queues))
-	r := start(requests, cache.requests, reviewFields(hasBots, ""))
-	d := start(reviewed, cache.reviewed, reviewFields(hasBots, reviewedExtra))
+	r := start(requests, cache.requests, reviewFields(hasBots, activityField))
+	d := start(reviewed, cache.reviewed, reviewFields(hasBots, activityField))
 	ra, rr, rd := <-a, <-r, <-d
 	for _, res := range []read{ra, rr, rd} {
 		if res.err != nil {

@@ -124,29 +124,6 @@ func assertTablesFollowPlan(t *testing.T, m *model) {
 	}
 }
 
-func TestPleadDismissalWithTheLegendLaysOutTheTablesTheFramePlans(t *testing.T) {
-	// Dismissing the only marker drops the legend's plead entry, which gives
-	// the tables a line.
-	for _, height := range []int{30, 40, 50, 60} {
-		t.Run(fmt.Sprint(height), func(t *testing.T) {
-			review := reviewPRs(21)
-			review[0].RequestedAgain = true
-			m := newPaneModel(t, 140, height, manyPRs(20), review)
-			pressL(m)
-			m.setFocus(paneReview)
-			before := m.framePlan()
-			press(m, tea.Key{Code: 'X', Text: "X"})
-			if m.pleadShown() {
-				t.Fatalf("X left the marker")
-			}
-			if m.framePlan().tables == before.tables {
-				t.Fatalf("fixture: the dismissal left the plan's tables at %v", before.tables)
-			}
-			assertTablesFollowPlan(t, m)
-		})
-	}
-}
-
 func TestReadingAWokeRowWithTheLegendLaysOutTheTablesTheFramePlans(t *testing.T) {
 	// Reading the only woke row drops the legend's woke entry, which gives
 	// the tables a line.

@@ -197,7 +197,7 @@ func statusFor(t *testing.T, m *model, id paneID, number int) string {
 
 func TestRowStatusWordsTheSelectedRow(t *testing.T) {
 	reviews := attentionReviews()
-	reviews[0].RequestedAgain, reviews[0].ReviewStatus = true, github.ReviewRequested
+	reviews[0].ReviewStatus = github.ReviewRequested
 	reviews[1].ReviewStatus, reviews[1].ReviewDecision, reviews[1].Approvals = github.ReviewNewCommits, "APPROVED", 1
 	m := newPaneModel(t, 200, 30, attentionPRs(), reviews)
 	m.bots = true
@@ -211,7 +211,6 @@ func TestRowStatusWordsTheSelectedRow(t *testing.T) {
 		{paneMine, 2, "Blocked: changes requested · CI failing"},
 		{paneMine, 3, "Has conflicts · No CI · Copilot: 2 open threads"},
 		{paneMine, 4, "Merge state unknown · No CI"},
-		{paneReview, 10, "Your review asked again · No CI"},
 		{paneReview, 11, "New commits since your review · No CI · approved (1)"},
 	} {
 		if got := statusFor(t, m, tc.id, tc.number); got != tc.want {

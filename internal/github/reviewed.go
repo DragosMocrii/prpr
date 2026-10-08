@@ -1,6 +1,7 @@
 package github
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,9 @@ const (
 	// ReviewNewActivity means none of the viewer's reviews is among the
 	// timeline items fetched, so more happened since than prpr reads.
 	ReviewNewActivity
+	// ReviewNudged means the author nudged the viewer, who was never
+	// requested directly and has not reviewed: found by the mentions search.
+	ReviewNudged
 	// The viewer reviewed, and the pull request waits on someone else:
 	ReviewWaitingOnAuthor
 	ReviewApproved
@@ -49,15 +53,17 @@ const activityItems = 50
 // each one: the head commit, recent reviews and comments, and the direct
 // review requests.
 func reviewedQuery(bots bool, now time.Time) string {
-	return searchQuery(reviewedSearch(now), bots, reviewedExtra)
+	return searchQuery(reviewedSearch(now), bots, activityField)
 }
 
-var reviewedExtra = `
+// activityField reads a review row's recent reviews and conversation
+// comments: they place a reviewed pull request and hold nudges.
+var activityField = `
         activity: timelineItems(itemTypes: [PULL_REQUEST_REVIEW, ISSUE_COMMENT], last: ` + strconv.Itoa(activityItems) + `) {
           nodes {
             __typename
             ... on PullRequestReview { author { login } state submittedAt commit { oid } }
-            ... on IssueComment { author { login } createdAt }
+            ... on IssueComment { author { login } createdAt body }
           }
         }`
 
@@ -78,6 +84,14 @@ type activityNode struct {
 	} `json:"commit"`
 }
 
+// nudge is the author's active nudge of viewer, if any.
+func (node *pullRequestNode) nudge(viewer string) *Nudge {
+	if node.Author == nil {
+		return nil
+	}
+	return activeNudge(node.Activity.Nodes, node.Author.Login, viewer)
+}
+
 // reviewedStatus places a pull request the viewer reviewed, and returns the
 // time its status started. It reports false for one where the viewer was
 // never directly requested, such as a drive-by or team-only review.
@@ -91,6 +105,12 @@ func (node *pullRequestNode) reviewedStatus(login string, head time.Time) (Revie
 	if !requested {
 		return 0, time.Time{}, false
 	}
+	status, since := node.placeReviewed(login, head)
+	return status, since, true
+}
+
+// placeReviewed places a pull request by the viewer's latest activity.
+func (node *pullRequestNode) placeReviewed(login string, head time.Time) (ReviewStatus, time.Time) {
 	author := ""
 	if node.Author != nil {
 		author = node.Author.Login
@@ -125,24 +145,30 @@ func (node *pullRequestNode) reviewedStatus(login string, head time.Time) (Revie
 				seenHead = true
 			}
 		case author != "" && strings.EqualFold(item.Author.Login, author):
+			// A nudge is covered by Nudge, never an author reply.
+			if item.Typename == "IssueComment" {
+				if _, _, _, nudge := parseNudge(item.Body); nudge {
+					continue
+				}
+			}
 			replied = laterOf(replied, at)
 		}
 	}
 	switch {
 	case !reviewed:
-		return ReviewNewActivity, node.UpdatedAt, true
+		return ReviewNewActivity, node.UpdatedAt
 	case last == "DISMISSED":
-		return ReviewDismissed, mine, true
+		return ReviewDismissed, mine
 	case node.Draft:
-		return ReviewBackInDraft, mine, true
+		return ReviewBackInDraft, mine
 	case !seenHead:
-		return ReviewNewCommits, laterOf(mine, head), true
+		return ReviewNewCommits, laterOf(mine, head)
 	case replied.After(mine):
-		return ReviewAuthorReplied, replied, true
+		return ReviewAuthorReplied, replied
 	case opinion == "APPROVED":
-		return ReviewApproved, mine, true
+		return ReviewApproved, mine
 	default:
-		return ReviewWaitingOnAuthor, mine, true
+		return ReviewWaitingOnAuthor, mine
 	}
 }
 
@@ -153,37 +179,30 @@ func laterOf(a, b time.Time) time.Time {
 	return a
 }
 
-// mergeReviews lists pending review requests first, then reviewed pull
-// requests that need the viewer, then those waiting on others, each in fetch
-// order. A pull request in both lists is a pending request, requested again.
-func mergeReviews(requests, reviewed []PullRequest) []PullRequest {
+// mergeReviews lists pending review requests first, then reviewed and
+// mentioned pull requests that need the viewer, then those waiting on
+// others, each in fetch order. A pull request in more than one list is
+// listed once: a pending request first, then a reviewed one.
+func mergeReviews(requests, reviewed, mentioned []PullRequest) []PullRequest {
 	type key struct {
 		repository string
 		number     int
 	}
-	pending := make(map[key]bool, len(requests))
-	for _, pr := range requests {
-		pending[key{strings.ToLower(pr.Repository), pr.Number}] = true
-	}
-	again := make(map[key]bool)
-	for _, pr := range reviewed {
-		if k := (key{strings.ToLower(pr.Repository), pr.Number}); pending[k] {
-			again[k] = true
-		}
-	}
+	keyOf := func(pr PullRequest) key { return key{strings.ToLower(pr.Repository), pr.Number} }
+	seen := make(map[key]bool, len(requests))
 	merged := append([]PullRequest(nil), requests...)
-	for i := range merged {
-		if again[key{strings.ToLower(merged[i].Repository), merged[i].Number}] {
-			merged[i].RequestedAgain = true
-		}
+	for _, pr := range requests {
+		seen[keyOf(pr)] = true
 	}
 	var waiting []PullRequest
-	for _, pr := range reviewed {
-		switch {
-		case pending[key{strings.ToLower(pr.Repository), pr.Number}]:
+	for _, pr := range slices.Concat(reviewed, mentioned) {
+		switch k := keyOf(pr); {
+		case seen[k]:
 		case pr.ReviewStatus.Waiting():
+			seen[k] = true
 			waiting = append(waiting, pr)
 		default:
+			seen[k] = true
 			merged = append(merged, pr)
 		}
 	}
@@ -206,6 +225,7 @@ func reviewedPullRequest(node *pullRequestNode, login string, bots []Bot) listed
 	}
 	status, since, ok := node.reviewedStatus(login, head)
 	pr.ReviewStatus, pr.WaitingSince = status, since
+	pr.Nudge = node.nudge(login)
 	return listed{pr: pr, keep: ok}
 }
 

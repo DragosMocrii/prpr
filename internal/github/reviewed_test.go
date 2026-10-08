@@ -121,24 +121,12 @@ func TestMergeReviewsPutsPendingRequestsFirstAndWaitingLast(t *testing.T) {
 		pr("acme/b", 6, ReviewAuthorReplied),
 	}
 	var got []string
-	for _, p := range mergeReviews(requests, reviewed) {
+	for _, p := range mergeReviews(requests, reviewed, nil) {
 		got = append(got, fmt.Sprintf("%d:%d", p.Number, p.ReviewStatus))
 	}
 	want := fmt.Sprintf("1:0 2:0 4:%d 6:%d 3:%d 5:%d", ReviewNewCommits, ReviewAuthorReplied, ReviewApproved, ReviewWaitingOnAuthor)
 	if strings.Join(got, " ") != want {
 		t.Fatalf("merged = %s, want %s", strings.Join(got, " "), want)
-	}
-}
-
-func TestMergeReviewsMarksPendingRequestsTheViewerReviewedAsAgain(t *testing.T) {
-	requests := []PullRequest{{Repository: "acme/a", Number: 1}, {Repository: "acme/a", Number: 2}}
-	reviewed := []PullRequest{{Repository: "ACME/A", Number: 2, ReviewStatus: ReviewWaitingOnAuthor}}
-	merged := mergeReviews(requests, reviewed)
-	if merged[0].RequestedAgain || !merged[1].RequestedAgain {
-		t.Fatalf("requested again = %t %t, want false true", merged[0].RequestedAgain, merged[1].RequestedAgain)
-	}
-	if requests[1].RequestedAgain {
-		t.Fatal("mergeReviews changed its input")
 	}
 }
 
@@ -167,5 +155,67 @@ func TestFetchFailsWhenTheReviewedQueryFailsAndPreviewSkipsIt(t *testing.T) {
 	}
 	if _, err := client.Preview(ctx); err != nil {
 		t.Fatalf("preview ran the reviewed query: %v", err)
+	}
+}
+
+func TestReviewSearchesReadNudges(t *testing.T) {
+	for name, query := range map[string]string{
+		"requests": reviewRequestsQuery(false),
+		"reviewed": reviewedQuery(false, day(9)),
+	} {
+		if !strings.Contains(query, "IssueComment { author { login } createdAt body }") {
+			t.Errorf("%s query does not read comment bodies", name)
+		}
+	}
+	if strings.Contains(pullRequestsQuery(false, Needs{}, nil), "body") || strings.Contains(previewReviewRequestsQuery(), "body") {
+		t.Error("authored or preview queries read comment bodies")
+	}
+}
+
+func TestReviewRequestsCarryTheirNudge(t *testing.T) {
+	node := reviewedNode(1, false, "", nudgeComment("bob", at(5), "urgent", "octocat"))
+	data := `[{"data":{"search":{"nodes":[` + node + `],"pageInfo":{"hasNextPage":false}}}}]`
+	prs, err := decodeReviewPages([]byte(data), "octocat", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 1 || prs[0].Nudge == nil || prs[0].Nudge.Urgency != NudgeUrgent {
+		t.Fatalf("request = %+v, want an urgent nudge", prs)
+	}
+	reviewed, err := decodeReviewedPages([]byte(data), "octocat", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviewed) != 1 || reviewed[0].Nudge == nil {
+		t.Fatalf("reviewed = %+v, want its nudge", reviewed)
+	}
+}
+
+func TestANudgeIsNotAnAuthorReply(t *testing.T) {
+	activity := review("octocat", "APPROVED", at(4), "h2") + "," + nudgeComment("bob", at(5), "low", "octocat")
+	data := `[{"data":{"search":{"nodes":[` + reviewedNode(1, false, "", activity) + `],"pageInfo":{"hasNextPage":false}}}}]`
+	prs, err := decodeReviewedPages([]byte(data), "octocat", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 1 || prs[0].ReviewStatus != ReviewApproved || prs[0].Nudge == nil {
+		t.Fatalf("reviewed = %+v, want approved and nudged", prs)
+	}
+	// An ordinary author comment still is a reply.
+	activity = review("octocat", "APPROVED", at(4), "h2") + "," + comment("bob", at(5))
+	data = `[{"data":{"search":{"nodes":[` + reviewedNode(1, false, "", activity) + `],"pageInfo":{"hasNextPage":false}}}}]`
+	if prs, _ = decodeReviewedPages([]byte(data), "octocat", nil); prs[0].ReviewStatus != ReviewAuthorReplied {
+		t.Fatalf("status = %v, want author replied", prs[0].ReviewStatus)
+	}
+}
+
+func TestRequestsAreNoLongerMarkedAskedAgain(t *testing.T) {
+	// Two requests of the viewer and a reviewed copy no longer set anything:
+	// the merged list is just requests first.
+	requests := []PullRequest{{Repository: "acme/api", Number: 1}}
+	reviewed := []PullRequest{{Repository: "acme/api", Number: 1, ReviewStatus: ReviewNewCommits}, {Repository: "acme/api", Number: 2, ReviewStatus: ReviewApproved}}
+	got := mergeReviews(requests, reviewed, nil)
+	if len(got) != 2 || got[0].Number != 1 || got[0].ReviewStatus != ReviewRequested || got[1].Number != 2 {
+		t.Fatalf("merged = %+v", got)
 	}
 }

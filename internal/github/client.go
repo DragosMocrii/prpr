@@ -45,10 +45,10 @@ type PullRequest struct {
 	// ReviewStatus places a review-pane pull request; zero for a pending
 	// request and for authored pull requests.
 	ReviewStatus ReviewStatus
-	// RequestedAgain marks a pending review request that asks the viewer
-	// again: the timeline names them in more than one request, or they
-	// reviewed it before. Set only by a full fetch.
-	RequestedAgain bool
+	// Nudge is the author's latest nudge of the viewer that the viewer has
+	// not answered, on review rows only; nil for none. Set only by a full
+	// fetch.
+	Nudge *Nudge
 	// ChangesRequested counts the latest reviews that request changes.
 	ChangesRequested int
 	// ID is GitHub's node ID.
@@ -209,7 +209,7 @@ const reviewSearch = "is:pr is:open user-review-requested:@me archived:false sor
 
 // reviewRequestsQuery lists the reviewSearch results.
 func reviewRequestsQuery(bots bool) string {
-	return searchQuery(reviewSearch, bots, "")
+	return searchQuery(reviewSearch, bots, activityField)
 }
 
 // searchQuery lists a pull request search with the review-pane fields and
@@ -365,14 +365,12 @@ func (node *pullRequestNode) pullRequest(login string, bots []Bot) PullRequest {
 	}
 	if login != "" {
 		// Timeline events are chronological, so the last match is the latest request.
-		requests := 0
 		for _, event := range node.RequestEvents.Nodes {
 			if event != nil && event.RequestedReviewer != nil && strings.EqualFold(event.RequestedReviewer.Login, login) {
 				pr.WaitingSince = event.CreatedAt
-				requests++
 			}
 		}
-		pr.RequestedAgain = requests > 1
+		pr.Nudge = node.nudge(login)
 	}
 	for _, review := range node.LatestOpinionatedReviews.Nodes {
 		switch {
@@ -573,7 +571,7 @@ func (l lists) snapshot() Snapshot {
 	}
 	requests := l.requests
 	if len(kept) > 0 {
-		requests = mergeReviews(l.requests, kept)
+		requests = mergeReviews(l.requests, kept, nil)
 	}
 	return Snapshot{Login: l.login, PullRequests: l.authored, ReviewRequests: requests}
 }
