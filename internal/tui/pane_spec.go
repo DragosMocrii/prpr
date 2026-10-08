@@ -146,7 +146,7 @@ var paneSpecs = [len(paneIDs)]paneSpec{
 			if r.gone {
 				return goneOn, goneOff
 			}
-			if r.pr.ReviewStatus.Waiting() {
+			if r.m.waiting(r.pr) {
 				return waitingOn, waitingOff
 			}
 			return "", ""

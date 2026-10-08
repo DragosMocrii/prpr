@@ -484,8 +484,8 @@ func (m *model) mergeStatus(pr *github.PullRequest) string {
 // requestStatus says where a review row stands for the viewer.
 func (m *model) requestStatus(pr *github.PullRequest) string {
 	switch {
-	case m.pleading(pr):
-		return "Your review asked again"
+	case m.nudge(pr) != nil:
+		return "Nudged by the author (" + m.nudge(pr).Urgency.String() + ")"
 	case pr.ReviewStatus == github.ReviewRequested:
 		return "Your review requested"
 	case pr.ReviewStatus == github.ReviewNewCommits:

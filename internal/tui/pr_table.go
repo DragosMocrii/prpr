@@ -136,6 +136,8 @@ func reviewStatusTag(ic *iconSet, status github.ReviewStatus) string {
 		text, icon = "approved", ic.approved
 	case github.ReviewBackInDraft:
 		text, icon = "waiting", ic.backInDraft
+	case github.ReviewNudged:
+		text, icon = "nudged", ic.bell
 	default:
 		return ""
 	}
@@ -247,6 +249,8 @@ func reviewStatusText(status github.ReviewStatus) string {
 		return "you approved"
 	case github.ReviewBackInDraft:
 		return "back in draft"
+	case github.ReviewNudged:
+		return "nudged"
 	default:
 		return ""
 	}

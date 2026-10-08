@@ -27,9 +27,9 @@ type iconSet struct {
 	// woke is the tag of a pull request that woke from a snooze; empty in the
 	// Unicode set, which writes words.
 	woke string
-	// plead marks a review request that asks the viewer again: pleadIcon in
-	// both sets, two cells wide.
-	plead string
+	// nudgeLow, nudgeNormal, and nudgeUrgent mark a review row the author
+	// nudged: the same emoji in both sets, two cells wide.
+	nudgeLow, nudgeNormal, nudgeUrgent string
 	// gap separates an icon from a number or mark after it. Nerd Font icons
 	// are often drawn wider than the one cell the terminal gives them, so
 	// whatever follows directly would be drawn over them.
@@ -43,15 +43,15 @@ type iconSet struct {
 var unicodeIcons = iconSet{
 	check: "✓", cross: "✗", pending: "●", behind: "↓", unknown: "?", none: "–",
 	passed: "✓", failed: "✗", botRunning: "◌", botFailed: "!",
-	star:       "★",
-	plead:      pleadIcon,
+	star:     "★",
+	nudgeLow: "👋", nudgeNormal: "🔔", nudgeUrgent: "🚨",
 	categories: [7]string{"✓", "✗", "✗", "✗", "✗", "●", "?"},
 }
 
 // nerdIcons are octicons in Nerd Fonts 3.
 var nerdIcons = iconSet{
-	nerd:  true,
-	plead: pleadIcon,
+	nerd:     true,
+	nudgeLow: "👋", nudgeNormal: "🔔", nudgeUrgent: "🚨",
 	check: "", cross: "", pending: "", behind: "", unknown: "", none: "",
 	passed: "", failed: "", botRunning: "", botFailed: "",
 	draft:      "",

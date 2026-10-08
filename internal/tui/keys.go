@@ -44,7 +44,7 @@ type keyMap struct {
 	Snooze          key.Binding
 	Undo            key.Binding
 	Rerequest       key.Binding
-	DismissPlead    key.Binding
+	DismissNudge    key.Binding
 	Account         key.Binding
 	Retry           key.Binding
 	Login           key.Binding
@@ -155,7 +155,7 @@ func defaultKeyMap() keyMap {
 		Snooze:         key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "snooze")),
 		Undo:           key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "undo snooze")),
 		Rerequest:      key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "request reviews again")),
-		DismissPlead:   key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "dismiss asked again")),
+		DismissNudge:   key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "dismiss nudge")),
 		Account:        key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "account")),
 		Retry:          key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry")),
 		Login:          key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "log in to GitHub")),
@@ -298,7 +298,7 @@ func (m *model) syncKeys() {
 	k.Snooze.SetEnabled(listing && rows && m.snoozeEditor == nil && m.focus != paneMerged)
 	k.Undo.SetEnabled(listing && m.snoozeEditor == nil)
 	k.Rerequest.SetEnabled(listing && rows && m.focus != paneReview && m.focus != paneMerged && m.rerequest == nil)
-	k.DismissPlead.SetEnabled(listing && rows && m.selectedPleading())
+	k.DismissNudge.SetEnabled(listing && rows && m.selectedNudged())
 	if m.focus == paneSnoozed {
 		k.Snooze.SetHelp("z", "wake")
 	} else {
@@ -406,7 +406,7 @@ func (k keyMap) errorHelp() helpKeys {
 // Every other list key is in the help overlay.
 func (k keyMap) listHelp() helpKeys {
 	return helpKeys{
-		short: []key.Binding{k.ClearFilters, k.DismissPlead, k.ClearMarks,
+		short: []key.Binding{k.ClearFilters, k.DismissNudge, k.ClearMarks,
 			k.Details, k.Open, k.Search, k.NextPane, k.Categories, k.PickRepository, k.Refresh, k.CollapseMerged},
 		pinned: []key.Binding{k.Help, k.Quit},
 	}
@@ -418,7 +418,7 @@ func (k keyMap) listGroups() []helpGroup {
 	return []helpGroup{
 		{"Move", []key.Binding{t.LineUp, t.LineDown, t.GotoTop, t.GotoBottom, t.PageUp, t.PageDown,
 			t.HalfPageUp, t.HalfPageDown, p.PrevPage, p.NextPage, k.NextPane, k.PrevPane}},
-		{"This PR", []key.Binding{k.Details, k.Open, k.Editor, k.CopyURL, k.Snooze, k.Undo, k.Rerequest, k.DismissPlead}},
+		{"This PR", []key.Binding{k.Details, k.Open, k.Editor, k.CopyURL, k.Snooze, k.Undo, k.Rerequest, k.DismissNudge}},
 		{"Filter", []key.Binding{k.Search, k.Categories, k.QuickFailing, k.QuickReady, k.Drafts, k.ClearFilters}},
 		{"View", []key.Binding{k.Legend, k.CollapseMerged, k.Icons, k.Mouse, k.Notify, k.ClearMarks}},
 		{"Scope & settings", []key.Binding{k.PickRepository, k.AllRepositories, k.Account, k.Settings,

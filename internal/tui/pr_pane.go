@@ -519,7 +519,7 @@ func (m *model) waitingCount(id paneID) int {
 	}
 	count := 0
 	for _, index := range m.panes[id].visible {
-		if m.paneSource(id)[index].ReviewStatus.Waiting() {
+		if m.waiting(&m.paneSource(id)[index]) {
 			count++
 		}
 	}

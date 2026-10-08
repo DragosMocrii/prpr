@@ -225,14 +225,14 @@ type model struct {
 	lastSuccessAt       time.Time
 	scheduleEditor      *scheduleEditor
 	quotaCancel         context.CancelFunc
-	// dismissed holds, per review request, the request time at which the
-	// viewer dismissed its request-again marker; it is saved.
+	// dismissed holds, per review row, the time of the nudge the viewer
+	// dismissed; it is saved.
 	dismissed map[prKey]time.Time
-	// pleadOff is the marker's blink phase; pleadGeneration drops ticks of
-	// an older chain, and pleadTicking says one runs.
-	pleadOff        bool
-	pleadGeneration uint64
-	pleadTicking    bool
+	// nudgeOff is the nudge marks' blink phase; nudgeGeneration drops ticks
+	// of an older chain, and nudgeTicking says one runs.
+	nudgeOff        bool
+	nudgeGeneration uint64
+	nudgeTicking    bool
 	quotaGeneration uint64
 }
 
@@ -481,7 +481,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.closeStaleDetails()
 	m.closeStaleHelp()
 	postScheduleCmd := m.reconcileSchedule()
-	return model, tea.Batch(scheduleCmd, cmd, postScheduleCmd, m.trackRest(msg), m.schedulePlead(), m.lookupDetailReviewers())
+	return model, tea.Batch(scheduleCmd, cmd, postScheduleCmd, m.trackRest(msg), m.scheduleNudge(), m.lookupDetailReviewers())
 }
 
 func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -615,8 +615,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleRest(msg)
 	case snoozeTickMsg:
 		return m, m.handleSnoozeTick(msg)
-	case pleadTickMsg:
-		return m, m.handlePleadTick(msg)
+	case nudgeTickMsg:
+		return m, m.handleNudgeTick(msg)
 	case flashTickMsg:
 		return m, m.handleFlashTick(msg)
 	case tea.FocusMsg:
@@ -785,8 +785,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.openSnooze()
 	case key.Matches(msg, k.Undo):
 		return m.undoSnooze()
-	case key.Matches(msg, k.DismissPlead):
-		m.dismissPlead()
+	case key.Matches(msg, k.DismissNudge):
+		m.dismissNudge()
 	case key.Matches(msg, k.Rerequest):
 		return m.rerequestSelected()
 	case key.Matches(msg, k.Help):
@@ -957,6 +957,9 @@ func (m *model) rebuildVisiblePRs() {
 		}
 		if id == paneMine {
 			m.sortMine(pane.visible, source)
+		}
+		if id == paneReview {
+			m.sortReview(pane.visible, source)
 		}
 		if id == paneQueue {
 			slices.SortStableFunc(pane.visible, func(a, b int) int {

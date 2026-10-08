@@ -26,7 +26,7 @@ func TestHelpOverlayListsEveryListKey(t *testing.T) {
 			t.Errorf("%s is on the help line but in no help group", binding.Help().Key)
 		}
 	}
-	for _, binding := range []key.Binding{k.Rerequest, k.DismissPlead, k.Snooze, k.Undo, k.Icons, k.Mouse, k.Notify, k.Legend, k.Drafts,
+	for _, binding := range []key.Binding{k.Rerequest, k.DismissNudge, k.Snooze, k.Undo, k.Icons, k.Mouse, k.Notify, k.Legend, k.Drafts,
 		k.QuickFailing, k.QuickReady, k.Settings, k.Schedule, k.Wake, k.Account, k.AllRepositories, k.CopyURL, k.PrevPane} {
 		if !slices.Contains(grouped, binding.Help().Key) {
 			t.Errorf("%s is in no help group", binding.Help().Key)
@@ -48,12 +48,12 @@ func TestHelpOverlayFitsAndDimsKeysThatDoNothing(t *testing.T) {
 		}
 	}
 	m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
-	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "Scope & settings") || !strings.Contains(view, "dismiss asked again") {
+	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "Scope & settings") || !strings.Contains(view, "dismiss nudge") {
 		t.Fatalf("wide help lacks groups or keys:\n%s", view)
 	}
-	// X does nothing on a row without 🙏, so it is drawn faint.
+	// X does nothing on a row without a nudge, so it is drawn faint.
 	for _, line := range m.helpBody(140) {
-		if strings.Contains(ansi.Strip(line), "dismiss asked again") && !strings.Contains(line, "\x1b[2m") {
+		if strings.Contains(ansi.Strip(line), "dismiss nudge") && !strings.Contains(line, "\x1b[2m") {
 			t.Fatalf("X is not faint: %q", line)
 		}
 	}

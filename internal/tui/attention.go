@@ -52,7 +52,7 @@ var attentionCategories = []attentionCategory{
 			return false
 		}},
 	{label: "awaiting your review", short: "to review", color: "3", pane: paneReview,
-		match: func(_ *model, pr *github.PullRequest) bool { return !pr.ReviewStatus.Waiting() }},
+		match: func(m *model, pr *github.PullRequest) bool { return !m.waiting(pr) }},
 	{label: "status unknown", short: "unknown", color: "3", both: true,
 		match: func(_ *model, pr *github.PullRequest) bool { return unknownMergeState(pr) }},
 }

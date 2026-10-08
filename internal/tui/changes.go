@@ -402,7 +402,8 @@ func rowDirection(lines []changeLine) direction {
 // A pending request is not one of these: it needs the viewer only when it
 // comes back.
 func needsYou(status github.ReviewStatus) bool {
-	return status == github.ReviewNewCommits || status == github.ReviewAuthorReplied || status == github.ReviewDismissed
+	return status == github.ReviewNewCommits || status == github.ReviewAuthorReplied || status == github.ReviewDismissed ||
+		status == github.ReviewNudged
 }
 
 func reviewWord(status github.ReviewStatus) string {

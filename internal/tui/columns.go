@@ -68,8 +68,8 @@ type tableLayout struct {
 	shared sharedRepositories
 	// repository reports whether the Repository column is drawn.
 	repository bool
-	// plead reports whether the mark column is wide enough for 🙏.
-	plead bool
+	// nudge reports whether the mark column is wide enough for a nudge icon.
+	nudge bool
 }
 
 // plainTitle is a column title drawn as words in both icon sets.
@@ -95,14 +95,14 @@ var (
 	markColumn = columnSpec{
 		title: plainTitle(""),
 		width: func(c *columnContext) int {
-			if c.id == paneReview && c.m.pleadShown() {
-				return pleadWidth
+			if c.id == paneReview && c.m.nudgeShown() {
+				return nudgeWidth
 			}
 			return 1
 		},
 		text: func(r *rowContext) string {
-			if r.layout.plead {
-				return r.m.pleadMark(r.pr, r.gone, r.markCell)
+			if r.layout.nudge {
+				return r.m.nudgeMark(r.pr, r.gone, r.markCell)
 			}
 			return r.markCell
 		},
@@ -225,8 +225,8 @@ func (m *model) layoutColumns(id paneID) tableLayout {
 			layout.widths[i] = max(8, nameWidth)
 		}
 	}
-	// The mark column, first in every pane, widens only for 🙏.
-	layout.plead = layout.widths[0] == pleadWidth
+	// The mark column, first in every pane, widens only for a nudge icon.
+	layout.nudge = layout.widths[0] == nudgeWidth
 	return layout
 }
 

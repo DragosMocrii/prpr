@@ -104,9 +104,11 @@ func (m *model) legendSections() []legendSection {
 			item(removedQueueTag(ic, github.QueueRemovedCanceled), "removed: canceled"),
 		}})
 	}
-	if m.pleadShown() {
-		sections = append(sections, legendSection{"Requests", []string{
-			item(ic.plead, "your review asked again; X dismisses"),
+	if m.nudgeShown() {
+		sections = append(sections, legendSection{"Nudges", []string{
+			item(ic.nudgeLow, "nudged"),
+			item(ic.nudgeNormal, "nudged, normal"),
+			item(ic.nudgeUrgent, "nudged, urgent; X dismisses"),
 		}})
 	}
 	if snoozePane || m.wokeShown() {
