@@ -126,6 +126,17 @@ func (c *Client) command(ctx context.Context, args ...string) (*exec.Cmd, secret
 // output runs a gh command as the pinned account. Its error names message
 // and gh's message, with any copy of the token removed.
 func (c *Client) output(ctx context.Context, message string, args ...string) ([]byte, error) {
+	data, err := c.response(ctx, message, args...)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// response runs a gh command as output does, but keeps its stdout when gh
+// fails: gh api -i prints the status line and headers before it exits 1
+// on a 304 or an error status.
+func (c *Client) response(ctx context.Context, message string, args ...string) ([]byte, error) {
 	if c.api != nil {
 		return c.api(ctx, message, args...)
 	}
@@ -139,9 +150,8 @@ func (c *Client) output(ctx context.Context, message string, args ...string) ([]
 		if token != "" {
 			err = errors.New(token.scrub(err.Error()))
 		}
-		return nil, err
 	}
-	return data, nil
+	return data, err
 }
 
 // withoutTokens drops the variables that give gh a token or make it log
