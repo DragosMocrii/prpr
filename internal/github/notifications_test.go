@@ -102,6 +102,7 @@ func TestNotificationsClassifiesFailures(t *testing.T) {
 		{"rate limited 403", notificationsResponse("HTTP/2.0 403 Forbidden", []string{date, "X-RateLimit-Remaining: 0", reset}, `{}`), errors.New("exit status 1"), NotificationsRateLimited, 10 * time.Minute},
 		{"429 retry after", notificationsResponse("HTTP/2.0 429 Too Many Requests", []string{date, "Retry-After: 30"}, `{}`), errors.New("exit status 1"), NotificationsRateLimited, 30 * time.Second},
 		{"secondary rate limit 403", notificationsResponse("HTTP/2.0 403 Forbidden", []string{date, "X-RateLimit-Remaining: 4999", "Retry-After: 60"}, `{}`), errors.New("exit status 1"), NotificationsRateLimited, time.Minute},
+		{"403 with a future reset but no Retry-After", notificationsResponse("HTTP/2.0 403 Forbidden", []string{date, "X-RateLimit-Remaining: 4999", reset}, `{}`), errors.New("exit status 1"), NotificationsUnsupported, 0},
 		{"403 without access", notificationsResponse("HTTP/2.0 403 Forbidden", []string{date, "X-RateLimit-Remaining: 4999"}, `{}`), errors.New("exit status 1"), NotificationsUnsupported, 0},
 		{"404", notificationsResponse("HTTP/2.0 404 Not Found", []string{date}, `{}`), errors.New("exit status 1"), NotificationsUnsupported, 0},
 		{"401 is the fetch's to report", notificationsResponse("HTTP/2.0 401 Unauthorized", []string{date}, `{}`), errors.New("exit status 1"), NotificationsTransient, 0},
