@@ -178,6 +178,7 @@ func (m *model) enterSleep() {
 	m.fetchQuiet = false
 	m.refetchForRules = false
 	m.invalidateQuota()
+	m.invalidateWatch()
 	m.snoozeGeneration++
 	m.stopFlash()
 	if m.activityCancel != nil {
@@ -235,6 +236,7 @@ func (m *model) reconcileSchedule() tea.Cmd {
 				m.loading = false
 			}
 			m.invalidateQuota()
+			m.invalidateWatch()
 			cmds = append(cmds, m.startAutomaticFetch(), m.pollQuota())
 		}
 	}

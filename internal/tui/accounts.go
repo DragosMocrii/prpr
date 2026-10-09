@@ -98,6 +98,7 @@ func (m *model) chooseAccount(login string) tea.Cmd {
 	m.useAccount(login)
 	m.accountGeneration++
 	m.invalidateQuota()
+	m.resetWatch()
 	m.lastSuccessAt = time.Time{}
 	if err := m.preferences.SavePinnedAccount(login); err != nil {
 		m.preferenceErr = fmt.Errorf("Account choice not saved: %w", err)

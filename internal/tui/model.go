@@ -235,6 +235,9 @@ type model struct {
 	nudgeGeneration uint64
 	nudgeTicking    bool
 	quotaGeneration uint64
+	// live is the Live updates setting; watch is its notifications chain.
+	live  bool
+	watch watchState
 }
 
 type fetchFinishedMsg struct {
@@ -293,6 +296,7 @@ func New(ctx context.Context, client *github.Client, preferences *preferences.St
 		m.preferenceErr = fmt.Errorf("Active-hours schedule needs repair: %w", m.scheduleErr)
 	}
 	m.setTitle = preferences.Title()
+	m.live = preferences.Live()
 	m.desktopNotify = notifier.Desktop()
 	m.listAccounts = client.Accounts
 	m.useAccount = client.UseAccount
@@ -458,7 +462,11 @@ func (m *model) countdownText() string {
 	if seconds >= 3600 {
 		text = fmt.Sprintf("%d:%02d:%02d", seconds/3600, seconds/60%60, seconds%60)
 	}
-	return "refresh in " + text
+	text = "refresh in " + text
+	if m.watch.live {
+		text += " · live"
+	}
+	return text
 }
 
 // refreshing reports whether a fetch is replacing rows that are still shown.
@@ -524,6 +532,8 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleRepositoryLookupFinished(msg)
 	case rateLimitMsg, quotaTickMsg:
 		return m, m.handleQuota(msg)
+	case notificationsMsg, watchTickMsg:
+		return m, m.handleWatch(msg)
 	case scheduleTickMsg:
 		return m, nil
 	case countdownTickMsg:
@@ -548,7 +558,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
-			m.refetchForRules = false
+			m.refetchForRules, m.watch.pending = false, false
 			m.closeRepositoryPicker()
 			m.searching = nil
 			keepSnapshot := quiet && m.sleeping && !m.snapshot.Preview && !m.lastSuccessAt.IsZero()
@@ -577,11 +587,11 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if quiet {
 			return m, notify
 		}
-		if m.refetchForRules {
-			m.refetchForRules = false
-			return m, tea.Batch(notify, m.startAutomaticFetch(), m.resumeQuota())
+		if m.refetchForRules || m.watch.pending {
+			m.refetchForRules, m.watch.pending = false, false
+			return m, tea.Batch(notify, m.startAutomaticFetch(), m.resumeQuota(), m.pollWatch())
 		}
-		return m, tea.Batch(notify, m.scheduleAutoRefresh(), m.resumeQuota())
+		return m, tea.Batch(notify, m.scheduleAutoRefresh(), m.resumeQuota(), m.pollWatch())
 	case previewMsg:
 		if msg.err == nil && msg.generation == m.refreshGeneration && msg.account == m.accountGeneration && m.loading && m.snapshot.Login == "" {
 			m.applySnapshot(msg.snapshot)
