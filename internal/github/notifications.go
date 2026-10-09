@@ -122,7 +122,8 @@ func parseNotifications(data []byte) (Notifications, bool) {
 		n.Status, n.Threads, n.Full = NotificationsChanged, threads, len(threads) >= notificationsPageSize
 	case status == http.StatusNotModified:
 		n.Status = NotificationsNotModified
-	case status == http.StatusTooManyRequests || status == http.StatusForbidden && header.Get("X-RateLimit-Remaining") == "0":
+	// A secondary limit is a 403 with Retry-After while calls remain.
+	case status == http.StatusTooManyRequests || status == http.StatusForbidden && (header.Get("X-RateLimit-Remaining") == "0" || retryAfter(header, n.Date) > 0):
 		n.Status, n.RetryAfter = NotificationsRateLimited, retryAfter(header, n.Date)
 	case status == http.StatusForbidden || status == http.StatusNotFound:
 		n.Status = NotificationsUnsupported
