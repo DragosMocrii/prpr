@@ -40,6 +40,21 @@ type watchState struct {
 	// pending: a relevant change came while a fetch that began before the
 	// read was running; one more fetch follows that one.
 	pending bool
+	// candidates are the unlisted pull requests (lowercased repository and
+	// number) whose review request or mention made a read relevant; the
+	// next fetch that finishes moves those it still does not list to
+	// ignored.
+	candidates map[watchKey]bool
+	// ignored are unlisted pull requests a fetch it started did not list,
+	// such as team requests, which prpr excludes; their reasons stay on
+	// the thread, so they no longer count as new. Reset forgets them.
+	ignored map[watchKey]bool
+}
+
+// watchKey names a pull request by lowercased repository and number.
+type watchKey struct {
+	repository string
+	number     int
 }
 
 type notificationsMsg struct {
@@ -106,6 +121,23 @@ func (m *model) resetWatch() {
 	m.invalidateWatch()
 	m.watch.unsupported = false
 	m.watch.since, m.watch.lastModified, m.watch.backoff = time.Time{}, "", 0
+	m.watch.candidates, m.watch.ignored = nil, nil
+}
+
+// settleWatchCandidates ends a successful fetch: candidates it still did
+// not list are ignored from now on. A fetch that failed just drops them.
+func (m *model) settleWatchCandidates(succeeded bool) {
+	if succeeded {
+		for key := range m.watch.candidates {
+			if !m.listsPullRequest(key.repository, key.number) {
+				if m.watch.ignored == nil {
+					m.watch.ignored = map[watchKey]bool{}
+				}
+				m.watch.ignored[key] = true
+			}
+		}
+	}
+	m.watch.candidates = nil
 }
 
 // handleWatch advances the chain and drops every obsolete result.
@@ -192,7 +224,10 @@ func (m *model) fetchForWatch(sent uint64) tea.Cmd {
 // watchRelevant reports whether a read holds a thread updated after since
 // that is worth a fetch: a listed pull request, a new review request or
 // mention, or CI in a repository of a listed authored pull request, all in
-// scope. A full page counts, since threads past it were not read.
+// scope. A full page counts, since threads past it were not read. A new
+// request or mention is remembered as a candidate for settleWatchCandidates;
+// a listed pull request is matched first, so ignored ones need no removal
+// once listed.
 func (m *model) watchRelevant(n github.Notifications) bool {
 	if n.Full {
 		return true
@@ -205,8 +240,13 @@ func (m *model) watchRelevant(n github.Notifications) bool {
 			if m.listsPullRequest(thread.Repository, thread.Number) {
 				return true
 			}
-			if (thread.Reason == "review_requested" || thread.Reason == "mention") &&
+			key := watchKey{strings.ToLower(thread.Repository), thread.Number}
+			if (thread.Reason == "review_requested" || thread.Reason == "mention") && !m.watch.ignored[key] &&
 				m.inRepositoryScope(&github.PullRequest{Repository: thread.Repository}) {
+				if m.watch.candidates == nil {
+					m.watch.candidates = map[watchKey]bool{}
+				}
+				m.watch.candidates[key] = true
 				return true
 			}
 		}
@@ -219,6 +259,7 @@ func (m *model) watchRelevant(n github.Notifications) bool {
 
 // listsPullRequest reports whether the authored or review list holds the
 // pull request within the repository scope; snoozed rows are in them too.
+// Hidden drafts count, since a draft leaving draft alerts.
 func (m *model) listsPullRequest(repository string, number int) bool {
 	for _, id := range []listID{listAuthored, listReview} {
 		list := m.source(id)

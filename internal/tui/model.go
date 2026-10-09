@@ -451,9 +451,13 @@ func (m *model) countdownTick() tea.Cmd {
 }
 
 // countdownText is the time left before the auto-refresh, rounded up to the
-// second, or empty when none is pending.
+// second, or empty when none is pending; with auto-refresh off, only
+// "live" while Live updates is answered.
 func (m *model) countdownText() string {
 	if m.refreshDue.IsZero() {
+		if m.watch.live {
+			return "live"
+		}
 		return ""
 	}
 	seconds := int((m.refreshDue.Sub(m.now()) + time.Second - 1) / time.Second)
@@ -557,6 +561,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cancelFetch()
 		m.loading = false
 		if msg.err != nil {
+			m.settleWatchCandidates(false)
 			m.err = msg.err
 			m.refetchForRules, m.watch.pending = false, false
 			m.closeRepositoryPicker()
@@ -582,6 +587,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.lastSuccessAt = m.now()
 		notify := m.applySnapshot(msg.snapshot)
+		if !m.watch.pending {
+			m.settleWatchCandidates(true)
+		}
 		m.fetchQuiet = false
 		m.countUnknownRechecks()
 		if quiet {

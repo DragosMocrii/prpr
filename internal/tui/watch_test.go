@@ -253,3 +253,89 @@ func TestLiveSettingWaitsForAFirstFetch(t *testing.T) {
 		t.Fatal("watcher started before any fetch succeeded")
 	}
 }
+
+func TestCountdownSaysLiveAloneWithAutoRefreshOff(t *testing.T) {
+	m := watchModel(t, 0)
+	if got := m.countdownText(); got != "live" {
+		t.Fatalf("countdown = %q", got)
+	}
+	updateWatch(m, github.Notifications{Status: github.NotificationsTransient, Err: errors.New("offline")})
+	if got := m.countdownText(); got != "" {
+		t.Fatalf("countdown while backing off = %q", got)
+	}
+}
+
+func TestWatchSleepPausesAndASuccessfulFetchResumes(t *testing.T) {
+	m, clock := scheduleModelAt(t, mondayAt(10), mondayHours("09:00", "17:00"), "alice")
+	m.live = true
+	finishFetch(m, aliceSnapshot())
+	if m.watch.cancel == nil {
+		t.Fatal("successful fetch did not start the watcher")
+	}
+	old := m.watch.generation
+	*clock = mondayAt(20)
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 32})
+	if !m.sleeping || m.watch.cancel != nil || m.watch.live || !m.watch.paused {
+		t.Fatalf("watch asleep = %+v (sleeping %v)", m.watch, m.sleeping)
+	}
+	_, cmd := m.Update(watchTickMsg{generation: old, account: m.accountGeneration})
+	if cmd != nil || m.watch.cancel != nil {
+		t.Fatal("tick from before sleep started a read")
+	}
+	*clock = mondayAt(10)
+	m.Update(tea.WindowSizeMsg{Width: 140, Height: 32})
+	if m.sleeping || !m.loading {
+		t.Fatalf("wake: sleeping %v loading %v", m.sleeping, m.loading)
+	}
+	finishFetch(m, aliceSnapshot())
+	if m.watch.cancel == nil || m.watch.paused {
+		t.Fatalf("fetch after waking did not resume the watcher: %+v", m.watch)
+	}
+}
+
+func TestWatchIgnoresAnUnlistedPullRequestAfterAFetchDidNotListIt(t *testing.T) {
+	team := thread("review_requested", "PullRequest", "acme/c", 3)
+	m := watchModel(t, time.Minute)
+	updateWatch(m, changed(team))
+	if !m.loading {
+		t.Fatal("new review request did not fetch")
+	}
+	finishFetch(m, aliceSnapshot())
+	later := changed(team)
+	later.Date = watchDate.Add(2 * time.Minute)
+	later.Threads[0].UpdatedAt = watchDate.Add(90 * time.Second)
+	updateWatch(m, later)
+	if m.loading {
+		t.Fatal("a pull request the fetch did not list fetched again")
+	}
+}
+
+func TestWatchFollowsAnIgnoredPullRequestOnceListed(t *testing.T) {
+	team := thread("review_requested", "PullRequest", "acme/c", 3)
+	m := watchModel(t, time.Minute)
+	updateWatch(m, changed(team))
+	snap := aliceSnapshot()
+	snap.snapshot.ReviewRequests = []github.PullRequest{{Number: 3, Repository: "acme/c", Author: "bob"}}
+	finishFetch(m, snap)
+	later := changed(thread("comment", "PullRequest", "acme/c", 3))
+	later.Date = watchDate.Add(2 * time.Minute)
+	later.Threads[0].UpdatedAt = watchDate.Add(90 * time.Second)
+	updateWatch(m, later)
+	if !m.loading {
+		t.Fatal("listed pull request did not fetch")
+	}
+}
+
+func TestWatchResetForgetsIgnoredPullRequests(t *testing.T) {
+	team := thread("review_requested", "PullRequest", "acme/c", 3)
+	m := watchModel(t, time.Minute)
+	updateWatch(m, changed(team))
+	finishFetch(m, aliceSnapshot())
+	m.resetWatch()
+	m.pollWatch()
+	updateWatch(m, github.Notifications{Status: github.NotificationsChanged, Date: watchDate, LastModified: "lm0"})
+	updateWatch(m, changed(team))
+	if !m.loading {
+		t.Fatal("reset kept the ignored set")
+	}
+}
