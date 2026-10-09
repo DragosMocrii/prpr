@@ -55,6 +55,7 @@ type settings struct {
 	notify         bool
 	mouse          bool
 	title          bool
+	live           bool
 	// errs say why a value was not read, by key.
 	errs map[string]error
 }
@@ -62,7 +63,7 @@ type settings struct {
 func defaultSettings() settings {
 	bots, _ := github.ParseBots(github.DefaultBots)
 	queues, _ := github.ParseQueues(github.DefaultQueues)
-	return settings{refresh: DefaultRefresh, fullRefresh: DefaultFullRefresh, bots: bots, queues: queues, merged: DefaultMerged, editor: EditorVSCode, title: true, errs: map[string]error{}}
+	return settings{refresh: DefaultRefresh, fullRefresh: DefaultFullRefresh, bots: bots, queues: queues, merged: DefaultMerged, editor: EditorVSCode, title: true, live: true, errs: map[string]error{}}
 }
 
 // decodeSettings reads the settings from the app object; a value that
@@ -72,6 +73,9 @@ func decodeSettings(app appJSON, path string) settings {
 	s.notify, s.mouse = app.Notify, app.Mouse
 	if app.Title != nil {
 		s.title = *app.Title
+	}
+	if app.Live != nil {
+		s.live = *app.Live
 	}
 	// Refresh: must be a JSON string, or nothing (not 300, not null, not an array)
 	if len(app.Refresh) != 0 && string(app.Refresh) != "null" {
@@ -162,6 +166,11 @@ func (s settings) encode(app *appJSON) {
 	if !s.title {
 		off := false
 		app.Title = &off
+	}
+	app.Live = nil
+	if !s.live {
+		off := false
+		app.Live = &off
 	}
 }
 
@@ -356,6 +365,14 @@ func (s *Store) Title() bool { return s.settings.title }
 // SaveTitle saves whether prpr sets the terminal title.
 func (s *Store) SaveTitle(on bool) error {
 	return s.saveSettings(func(c *settings) { c.title = on })
+}
+
+// Live is whether Live updates read GitHub notifications to fetch early.
+func (s *Store) Live() bool { return s.settings.live }
+
+// SaveLive saves whether Live updates are on.
+func (s *Store) SaveLive(on bool) error {
+	return s.saveSettings(func(c *settings) { c.live = on })
 }
 
 // SettingErr says why the saved value of key ("refresh", "bots", "queues",

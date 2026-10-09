@@ -210,11 +210,12 @@ type appJSON struct {
 	Notify          bool            `json:"notify,omitempty"`
 	Mouse           bool            `json:"mouse,omitempty"`
 	Title           *bool           `json:"title,omitempty"`
+	Live            *bool           `json:"live,omitempty"`
 }
 
 func (a appJSON) empty() bool {
 	return a.Account == "" && a.Icons == "" && !a.Legend && !a.Drafts && !a.MergedCollapsed && len(a.Ready) == 0 && len(a.Schedule) == 0 &&
-		len(a.Refresh) == 0 && len(a.FullRefresh) == 0 && len(a.Bots) == 0 && len(a.Queues) == 0 && len(a.Editor) == 0 && len(a.Merged) == 0 && !a.Notify && !a.Mouse && a.Title == nil
+		len(a.Refresh) == 0 && len(a.FullRefresh) == 0 && len(a.Bots) == 0 && len(a.Queues) == 0 && len(a.Editor) == 0 && len(a.Merged) == 0 && !a.Notify && !a.Mouse && a.Title == nil && a.Live == nil
 }
 
 // app is the app settings as saved.

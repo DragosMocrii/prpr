@@ -305,3 +305,44 @@ func TestMergedSettingDefaultsSavesAndFallsBack(t *testing.T) {
 		}
 	}
 }
+
+func TestLiveDefaultsOnAndSavesOff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !store.Live() {
+		t.Fatal("live updates not on by default")
+	}
+	if err := store.SaveLive(false); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Live() {
+		t.Fatal("live off not saved")
+	}
+	if err := reopened.SaveLive(true); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"live"`) {
+		t.Fatalf("default live written: %s", data)
+	}
+}
+
+func TestUnreadableLiveIsInvalidPreferences(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	if err := os.WriteFile(path, []byte(`{"app":{"live":"yes"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(path); err == nil {
+		t.Fatal("unreadable live opened")
+	}
+}
