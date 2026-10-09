@@ -40,6 +40,7 @@ func openSettingsModel(t *testing.T) *model {
 	// Test models start without the saved settings New applies.
 	m.fullRefresh = m.preferences.FullRefresh()
 	m.refreshInterval, m.setTitle, m.notify, m.mouse = m.preferences.Refresh(), m.preferences.Title(), m.preferences.Notify(), m.preferences.Mouse()
+	m.live = m.preferences.Live()
 	pressMsg(m, letter(","))
 	if m.settings == nil {
 		t.Fatal(", did not open Settings")
@@ -51,7 +52,7 @@ func TestSettingsListsEverySettingWithItsValue(t *testing.T) {
 	m := openSettingsModel(t)
 	view := settingsView(m)
 	for _, want := range []string{"Icons", "Unicode", "Show drafts", "Legend", "Mouse", "Terminal title",
-		"Refresh every", "Full refresh every", "5m", "Desktop notifications", "Review bots", "Copilot, Codex, Claude",
+		"Refresh every", "Full refresh every", "5m", "Desktop notifications", "Live updates", "Review bots", "Copilot, Codex, Claude",
 		"Merge queues", "Trunk, GitHub", "Ready-to-merge rules", "Active hours"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("Settings lacks %q:\n%s", want, view)
@@ -64,7 +65,7 @@ func TestSettingsListsEverySettingWithItsValue(t *testing.T) {
 
 func TestSettingsTogglesAndCyclesAndSaves(t *testing.T) {
 	m := openSettingsModel(t)
-	for _, label := range []string{"Icons", "Show drafts", "Legend", "Mouse", "Terminal title", "Desktop notifications"} {
+	for _, label := range []string{"Icons", "Show drafts", "Legend", "Mouse", "Terminal title", "Desktop notifications", "Live updates"} {
 		moveTo(t, m, label)
 		press(m, tea.Key{Code: tea.KeySpace, Text: " "})
 	}
@@ -72,9 +73,9 @@ func TestSettingsTogglesAndCyclesAndSaves(t *testing.T) {
 	press(m, tea.Key{Code: tea.KeyEnter})
 	store := m.preferences
 	if store.Icons() != IconsNerd || !store.ShowDrafts() || !store.Legend() || !store.Mouse() || store.Title() || !store.Notify() ||
-		store.Refresh() != 10*time.Minute {
-		t.Fatalf("saved icons %q drafts %v legend %v mouse %v title %v notify %v refresh %v", store.Icons(), store.ShowDrafts(),
-			store.Legend(), store.Mouse(), store.Title(), store.Notify(), store.Refresh())
+		store.Live() || store.Refresh() != 10*time.Minute {
+		t.Fatalf("saved icons %q drafts %v legend %v mouse %v title %v notify %v live %v refresh %v", store.Icons(), store.ShowDrafts(),
+			store.Legend(), store.Mouse(), store.Title(), store.Notify(), store.Live(), store.Refresh())
 	}
 	if !strings.Contains(settingsView(m), "Saved.") {
 		t.Fatal("no Saved. notice")

@@ -112,6 +112,18 @@ func (m *model) applyTitle(on bool) {
 	m.settingSaved(m.preferences.SaveTitle(on))
 }
 
+// applyLive turns Live updates on or off and saves it. On starts a new
+// chain, from a baseline read, once a fetch has succeeded; off stops it.
+func (m *model) applyLive(on bool) tea.Cmd {
+	m.live = on
+	m.resetWatch()
+	m.settingSaved(m.preferences.SaveLive(on))
+	if !on || m.lastSuccessAt.IsZero() {
+		return nil
+	}
+	return m.pollWatch()
+}
+
 // applyFullRefresh uses and saves how often a fetch is complete, from the
 // next fetch on.
 func (m *model) applyFullRefresh(d time.Duration) {

@@ -232,3 +232,24 @@ func TestCountdownMarksLiveOnlyWhileHealthy(t *testing.T) {
 		t.Fatalf("countdown while backing off = %q", m.countdownText())
 	}
 }
+
+func TestLiveSettingStopsAndRestartsTheWatcher(t *testing.T) {
+	m := watchModel(t, time.Minute)
+	if cmd := m.applyLive(false); cmd != nil || m.watch.cancel != nil || m.preferences.Live() {
+		t.Fatalf("off: cmd %v watch %+v saved %v", cmd != nil, m.watch, m.preferences.Live())
+	}
+	if !strings.Contains(m.countdownText(), "refresh in") || strings.Contains(m.countdownText(), "live") {
+		t.Fatalf("countdown while off = %q", m.countdownText())
+	}
+	m.watch.unsupported = true
+	if cmd := m.applyLive(true); cmd == nil || m.watch.cancel == nil || m.watch.unsupported || !m.watch.since.IsZero() {
+		t.Fatalf("on: cmd %v watch %+v", cmd != nil, m.watch)
+	}
+}
+
+func TestLiveSettingWaitsForAFirstFetch(t *testing.T) {
+	m := autoRefreshModel(t, time.Minute)
+	if cmd := m.applyLive(true); cmd != nil || m.watch.cancel != nil {
+		t.Fatal("watcher started before any fetch succeeded")
+	}
+}

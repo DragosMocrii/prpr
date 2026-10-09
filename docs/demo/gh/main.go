@@ -258,6 +258,10 @@ func main() {
 	case strings.Contains(args, "--method POST") && strings.Contains(args, "/comments"):
 		// A nudge: the comment is accepted and goes nowhere.
 		data = map[string]any{}
+	case strings.Contains(args, "notifications"):
+		// Live updates: unsupported, so the recording shows no "live".
+		fmt.Print("HTTP/2.0 404 Not Found\r\n\r\n{}")
+		os.Exit(1)
 	case !strings.HasPrefix(args, "api graphql"):
 		fmt.Fprintln(os.Stderr, "demo gh: unsupported command:", args)
 		os.Exit(1)
