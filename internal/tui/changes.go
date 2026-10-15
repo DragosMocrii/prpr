@@ -272,7 +272,6 @@ const (
 // changeLine is one changed cell of a marked row, worded from its value
 // when the row was first marked to its value now.
 type changeLine struct {
-	cell     changedCells
 	label    string
 	was, now string
 	dir      direction
@@ -286,9 +285,8 @@ var changeCells = []changedCells{cellName, cellAuthor, cellState, cellMerge, cel
 // whether the rules apply, and a wake from snooze.
 func (m *model) changeLines(id paneID, pr *github.PullRequest) []changeLine {
 	var lines []changeLine
-	cell := cellName
 	add := func(label, before, after string, dir direction) {
-		lines = append(lines, changeLine{cell, label, before, after, dir})
+		lines = append(lines, changeLine{label, before, after, dir})
 	}
 	if reason, ok := m.woke[keyOf(pr)]; ok && id != paneSnoozed {
 		add("Snooze", "", "woke: "+singleLine(reason), dirNeutral)
@@ -301,7 +299,7 @@ func (m *model) changeLines(id paneID, pr *github.PullRequest) []changeLine {
 	// Someone else's pull request needs the viewer only through its review
 	// status and nudges; its failures and conflicts are for its author.
 	review := id == paneReview || (id == paneSnoozed && m.snoozeList(pr) == listReview)
-	for _, cell = range changeCells {
+	for _, cell := range changeCells {
 		if mark.cells&cell == 0 {
 			continue
 		}
@@ -405,17 +403,6 @@ func (m *model) changeLines(id paneID, pr *github.PullRequest) []changeLine {
 		}
 	}
 	return lines
-}
-
-// cellDirection is the direction of the changes cells stands for.
-func cellDirection(lines []changeLine, cells changedCells) direction {
-	dir := dirNeutral
-	for _, line := range lines {
-		if line.cell&cells != 0 {
-			dir = max(dir, line.dir)
-		}
-	}
-	return dir
 }
 
 // rowDirection is a marked row's direction: bad when any change is, good

@@ -53,7 +53,7 @@ func goneStyle(r *rowContext) (string, string) {
 }
 
 var (
-	mergeColumn = columnSpec{title: iconTitle("Merge"), width: iconWidth(5, 1), changed: cellMerge,
+	mergeColumn = columnSpec{title: iconTitle("Merge"), width: iconWidth(5, 1),
 		text: func(r *rowContext) string {
 			// A preview has no merge state, but conflicts are already known.
 			if r.preview && r.pr.Mergeable != "CONFLICTING" {
@@ -61,12 +61,12 @@ var (
 			}
 			return r.m.mergeCell(r.pr)
 		}}
-	authorColumn = columnSpec{title: plainTitle("Author"), changed: cellAuthor,
+	authorColumn = columnSpec{title: plainTitle("Author"),
 		width: func(c *columnContext) int { return min(16, max(8, c.author)) },
 		text:  func(r *rowContext) string { return singleLine(r.pr.Author) }}
-	queueColumn = columnSpec{title: iconTitle("Queue"), width: iconWidth(9, 1), changed: cellQueue,
+	queueColumn = columnSpec{title: iconTitle("Queue"), width: iconWidth(9, 1),
 		text: func(r *rowContext) string { return queueText(r.ic, r.pr.Queue.State) }}
-	detailColumn = columnSpec{title: plainTitle("Detail"), rank: 1, changed: cellQueue,
+	detailColumn = columnSpec{title: plainTitle("Detail"), rank: 1,
 		width: func(c *columnContext) int { return min(24, max(10, c.width/6)) },
 		text:  func(r *rowContext) string { return singleLine(r.pr.Queue.Detail) }}
 	wakesColumn = columnSpec{title: iconTitle("Wakes"), width: fixedWidth(9),
@@ -113,7 +113,7 @@ var paneSpecs = [len(paneIDs)]paneSpec{
 		attention: true, quickFilters: true,
 		queueTag: true, wokeTag: true,
 		columns: []columnSpec{markColumn, mergeColumn, repositoryColumn, numberColumn,
-			nameColumn(cellName | cellState | cellQueue),
+			nameColumn,
 			ageColumn, botsColumn, ciColumn, reviewColumn, commentsColumn, sizeColumn},
 		rowStyle: goneStyle,
 	},
@@ -122,7 +122,7 @@ var paneSpecs = [len(paneIDs)]paneSpec{
 		lists: []listID{listAuthored}, tracker: listAuthored,
 		onlyWithRows: true, short: true, quickFilters: true,
 		wokeTag:  true,
-		columns:  []columnSpec{markColumn, queueColumn, repositoryColumn, numberColumn, nameColumn(cellName), detailColumn},
+		columns:  []columnSpec{markColumn, queueColumn, repositoryColumn, numberColumn, nameColumn, detailColumn},
 		rowStyle: goneStyle,
 	},
 	paneReview: {
@@ -139,7 +139,7 @@ var paneSpecs = [len(paneIDs)]paneSpec{
 		// Review requested gives up Review first: a pending request mostly
 		// shows it as required.
 		columns: []columnSpec{markColumn, repositoryColumn, numberColumn,
-			nameColumn(cellName | cellState), authorColumn,
+			nameColumn, authorColumn,
 			ranked(ageColumn, 1), ranked(botsColumn, 2), ranked(ciColumn, 3),
 			ranked(reviewColumn, 6), ranked(commentsColumn, 4), ranked(sizeColumn, 5)},
 		rowStyle: func(r *rowContext) (string, string) {
@@ -156,7 +156,7 @@ var paneSpecs = [len(paneIDs)]paneSpec{
 		name: "Snoozed", empty: fixedText("Nothing snoozed"),
 		lists: []listID{listAuthored, listReview}, perRowTracker: true,
 		onlyWithRows: true, short: true, quickFilters: true,
-		columns: []columnSpec{markColumn, wakesColumn, repositoryColumn, numberColumn, nameColumn(cellName), fromColumn},
+		columns: []columnSpec{markColumn, wakesColumn, repositoryColumn, numberColumn, nameColumn, fromColumn},
 		rowStyle: func(r *rowContext) (string, string) {
 			if r.gone {
 				return goneOn, goneOff
@@ -170,7 +170,7 @@ var paneSpecs = [len(paneIDs)]paneSpec{
 		onlyWithRows: true, leftover: true,
 		collapsible: true, saveCollapsed: (*preferences.Store).SaveMergedCollapsed,
 		// Merged rows are never gone: falling out of the last N is not news.
-		columns: []columnSpec{markColumn, mergedAtColumn, repositoryColumn, numberColumn, nameColumn(cellName), mergedByColumn},
+		columns: []columnSpec{markColumn, mergedAtColumn, repositoryColumn, numberColumn, nameColumn, mergedByColumn},
 	},
 }
 

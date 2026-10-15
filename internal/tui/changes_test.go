@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,8 +34,32 @@ func changesModel(t *testing.T, mine ...github.PullRequest) *model {
 	return m
 }
 
-// underlined marks a changed cell.
-const underlined = "\x1b[4;58;5;"
+// changeLabels lists the labels of a row's change lines, in order.
+func changeLabels(t *testing.T, m *model, id paneID, row int) []string {
+	t.Helper()
+	pr, _, ok := m.paneRow(id, row)
+	if !ok {
+		t.Fatalf("no row %d", row)
+	}
+	var labels []string
+	for _, line := range m.changeLines(id, pr) {
+		labels = append(labels, line.label)
+	}
+	return labels
+}
+
+// assertMarksOnlyInMarkColumn fails when clearing a pane's marks changes
+// any of its listed rows beyond the mark column: a change shows there alone.
+func assertMarksOnlyInMarkColumn(t *testing.T, m *model, id paneID) {
+	t.Helper()
+	marked := m.panes[id].table.Rows()
+	press(m, tea.Key{Code: 'x', Text: "x"})
+	for i, row := range m.panes[id].table.Rows() {
+		if !slices.Equal(row[1:], marked[i][1:]) {
+			t.Errorf("row %d cells = %q, marked %q", i, row[1:], marked[i][1:])
+		}
+	}
+}
 
 // rest lets the cursor rest on its row until the row's mark counts as read.
 func rest(m *model) {
@@ -80,15 +105,8 @@ func TestRefreshMarksNewChangedActivityAndGoneRows(t *testing.T) {
 	if got := markers(m, paneMine); got != " ▲·+−" {
 		t.Fatalf("markers = %q, want unchanged, changed, activity, new, gone", got)
 	}
-	for _, title := range []string{"CI", "Comments"} {
-		if cell := cellOf(t, m, paneMine, 1, title); !strings.Contains(cell, underlined) {
-			t.Errorf("changed %s cell not highlighted: %q", title, cell)
-		}
-	}
-	for _, title := range []string{"PR name", "Merge", "Review", "Size"} {
-		if cell := cellOf(t, m, paneMine, 1, title); strings.Contains(cell, underlined) {
-			t.Errorf("unchanged %s cell highlighted: %q", title, cell)
-		}
+	if got := changeLabels(t, m, paneMine, 1); !slices.Equal(got, []string{"CI", "Comments"}) {
+		t.Errorf("change lines = %v, want CI and Comments", got)
 	}
 	gone := m.panes[paneMine].table.Rows()[4]
 	for _, cell := range gone[1:] {
@@ -103,6 +121,7 @@ func TestRefreshMarksNewChangedActivityAndGoneRows(t *testing.T) {
 	if selected, ok := m.selectedPR(); !ok || selected.Number != 4 || selected.URL != four.URL {
 		t.Fatalf("gone row selection = %+v, %v", selected, ok)
 	}
+	assertMarksOnlyInMarkColumn(t, m, paneMine)
 }
 
 func TestMarksAccumulateAcrossRefreshesAndFailedFetches(t *testing.T) {
@@ -118,10 +137,8 @@ func TestMarksAccumulateAcrossRefreshesAndFailedFetches(t *testing.T) {
 	if got := markers(m, paneMine); got != "▲−" {
 		t.Fatalf("markers after failed fetch = %q, want changed and gone", got)
 	}
-	for _, title := range []string{"CI", "Review"} {
-		if cell := cellOf(t, m, paneMine, 0, title); !strings.Contains(cell, underlined) {
-			t.Errorf("%s change lost across refreshes: %q", title, cell)
-		}
+	if got := changeLabels(t, m, paneMine, 0); !slices.Equal(got, []string{"CI", "Review"}) {
+		t.Errorf("change lines after refreshes = %v, want CI and Review", got)
 	}
 
 	// A gone PR that comes back is new again and leaves the gone rows.
@@ -242,9 +259,10 @@ func TestReviewPaneMarksAuthorChanges(t *testing.T) {
 	if got := markers(m, paneReview); got != "•" {
 		t.Fatalf("review markers = %q", got)
 	}
-	if cell := cellOf(t, m, paneReview, 0, "Author"); !strings.Contains(cell, underlined) {
-		t.Fatalf("author change not highlighted: %q", cell)
+	if got := changeLabels(t, m, paneReview, 0); !slices.Equal(got, []string{"Author"}) {
+		t.Fatalf("change lines = %v, want Author", got)
 	}
+	assertMarksOnlyInMarkColumn(t, m, paneReview)
 }
 
 func TestPaneWithOnlyGoneRowsShowsThem(t *testing.T) {

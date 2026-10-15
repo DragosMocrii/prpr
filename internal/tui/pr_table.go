@@ -104,10 +104,8 @@ func nameTagSeparator(ic *iconSet) string {
 const (
 	reverseOn  = "\x1b[7m"
 	reverseOff = "\x1b[27m"
-	// underlineOff ends underlineOn.
-	underlineOff = "\x1b[24;59m"
-	goneOn       = "\x1b[2;9m"
-	goneOff      = "\x1b[22;29m"
+	goneOn     = "\x1b[2;9m"
+	goneOff    = "\x1b[22;29m"
 	// waitingOn marks a reviewed pull request that waits on someone else.
 	waitingOn  = "\x1b[2;3m"
 	waitingOff = "\x1b[22;23m"
@@ -290,11 +288,6 @@ func directionColor(dir direction) string {
 	default:
 		return "3"
 	}
-}
-
-// underlineOn underlines a changed cell in its direction's color.
-func underlineOn(dir direction) string {
-	return "\x1b[4;58;5;" + directionColor(dir) + "m"
 }
 
 // restyle applies on to the whole of text, turning it back on after every

@@ -17,8 +17,6 @@ type columnSpec struct {
 	title func(ic *iconSet) string
 	width func(c *columnContext) int
 	text  func(r *rowContext) string
-	// changed is the change bits that underline the cell; 0 never.
-	changed changedCells
 	// name is the PR name column, which takes the width the others leave.
 	name bool
 	// present reports whether the column is drawn at all; nil means always.
@@ -125,27 +123,25 @@ var (
 	}
 )
 
-// nameColumn is the PR name, underlined by changed.
-func nameColumn(changed changedCells) columnSpec {
-	return columnSpec{title: plainTitle("PR name"), name: true, changed: changed,
-		text: func(r *rowContext) string { return r.name }}
-}
+// nameColumn is the PR name.
+var nameColumn = columnSpec{title: plainTitle("PR name"), name: true,
+	text: func(r *rowContext) string { return r.name }}
 
 // The statistics columns, in drawn order, ranked as My PRs
 // drops them: Size first, Age last.
 var (
 	ageColumn = columnSpec{title: iconTitle("Age"), width: iconWidth(4, 4), rank: 1, preview: true,
 		text: func(r *rowContext) string { return ageText(r.pr.WaitingSince, r.now) }}
-	botsColumn = columnSpec{title: iconTitle("Bots"), width: iconWidth(4, 4), rank: 2, preview: true, changed: cellBots,
+	botsColumn = columnSpec{title: iconTitle("Bots"), width: iconWidth(4, 4), rank: 2, preview: true,
 		text:    func(r *rowContext) string { return botsText(r.ic, r.pr.Bots) },
 		present: func(c *columnContext) bool { return c.m.bots }}
-	ciColumn = columnSpec{title: iconTitle("CI"), width: iconWidth(2, 1), rank: 3, preview: true, changed: cellCI,
+	ciColumn = columnSpec{title: iconTitle("CI"), width: iconWidth(2, 1), rank: 3, preview: true,
 		text: func(r *rowContext) string { return checksIcon(r.ic, r.pr.Checks) }}
-	reviewColumn = columnSpec{title: iconTitle("Review"), width: iconWidth(6, 4), rank: 4, preview: true, changed: cellReview,
+	reviewColumn = columnSpec{title: iconTitle("Review"), width: iconWidth(6, 4), rank: 4, preview: true,
 		text: func(r *rowContext) string { return reviewText(r.ic, r.pr.ReviewDecision, r.pr.Approvals) }}
-	commentsColumn = columnSpec{title: iconTitle("Comments"), width: iconWidth(8, 4), rank: 5, preview: true, changed: cellComments,
+	commentsColumn = columnSpec{title: iconTitle("Comments"), width: iconWidth(8, 4), rank: 5, preview: true,
 		text: func(r *rowContext) string { return strconv.Itoa(r.pr.Comments) }}
-	sizeColumn = columnSpec{title: iconTitle("Size"), width: iconWidth(11, 11), rank: 6, changed: cellSize,
+	sizeColumn = columnSpec{title: iconTitle("Size"), width: iconWidth(11, 11), rank: 6,
 		text: func(r *rowContext) string { return sizeText(r.pr.Additions, r.pr.Deletions) }}
 )
 
@@ -259,16 +255,12 @@ func (m *model) buildRows(id paneID, layout tableLayout) []table.Row {
 		r.name = m.nameText(spec, r)
 		cells := make(table.Row, len(layout.columns))
 		for i, column := range layout.columns {
-			// Unknown in a preview: pending, never underlined.
+			// Unknown in a preview: pending.
 			if r.preview && column.preview {
 				cells[i] = pendingText
 				continue
 			}
-			text := column.text(r)
-			if column.changed != 0 && r.mark.kind == markChanged && r.mark.cells&column.changed != 0 {
-				text = restyle(text, underlineOn(cellDirection(r.lines, column.changed)), underlineOff)
-			}
-			cells[i] = text
+			cells[i] = column.text(r)
 		}
 		if spec.rowStyle != nil {
 			if on, off := spec.rowStyle(r); on != "" {

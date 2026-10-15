@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -160,22 +161,18 @@ func TestRemovedPullRequestsAreTaggedInMyPRs(t *testing.T) {
 	}
 }
 
-func TestQueueChangeUnderlinesTheNameInMyPRs(t *testing.T) {
+func TestQueueChangeMarksTheRowInMyPRs(t *testing.T) {
 	m := newPaneModel(t, 140, 30, manyPRs(2), nil)
 	snapshot := m.snapshot
 	snapshot.PullRequests = manyPRs(2)
 	snapshot.PullRequests[0].Queue = &github.QueueEntry{Provider: "Trunk", State: github.QueueRemovedFailed}
 	m.applySnapshot(snapshot)
-	var found bool
-	for _, row := range m.buildRows(paneMine, m.layoutColumns(paneMine)) {
-		for _, cell := range row {
-			if strings.Contains(cell, "queue failed") && strings.Contains(cell, underlined) {
-				found = true
-			}
-		}
+	pr := &m.snapshot.PullRequests[0]
+	if mark := m.tracker(paneMine).mark(pr); mark.kind != markChanged {
+		t.Fatalf("mark = %+v, want changed", mark)
 	}
-	if !found {
-		t.Fatal("name is not underlined after a queue change")
+	if !slices.ContainsFunc(m.changeLines(paneMine, pr), func(line changeLine) bool { return line.label == "Queue" }) {
+		t.Fatal("no queue change line after a queue change")
 	}
 }
 
@@ -347,16 +344,8 @@ func TestLeavingTheQueueIsMarkedWithoutAnEntry(t *testing.T) {
 	if mark := m.tracker(paneMine).mark(pr); mark.kind != markChanged || mark.cells&cellQueue == 0 {
 		t.Fatalf("mark = %+v, want changed queue cell", mark)
 	}
-	var reversed bool
-	for _, row := range m.buildRows(paneMine, m.layoutColumns(paneMine)) {
-		for _, cell := range row {
-			if strings.Contains(cell, "title") && strings.Contains(cell, underlined) {
-				reversed = true
-			}
-		}
-	}
-	if !reversed {
-		t.Fatal("name is not underlined after leaving the queue")
+	if !slices.ContainsFunc(m.changeLines(paneMine, pr), func(line changeLine) bool { return line.label == "Queue" }) {
+		t.Fatal("no queue change line after leaving the queue")
 	}
 }
 
