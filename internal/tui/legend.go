@@ -66,11 +66,12 @@ func (m *model) legendSections() []legendSection {
 			item(checksIcon(ic, ""), "none"),
 		}},
 		legendSection{"Review", []string{
-			item(reviewText(ic, "APPROVED", 0), "approved"),
-			item(reviewText(ic, "CHANGES_REQUESTED", 0), "changes requested"),
-			item(reviewText(ic, "REVIEW_REQUIRED", 0), "review required"),
-			item(reviewText(ic, "", 0), "no decision"),
-			item(reviewText(ic, "APPROVED", 0)+ic.gap+"N", "N approvals"),
+			item(reviewText(ic, "APPROVED", 0, 0), "approved"),
+			item(reviewText(ic, "CHANGES_REQUESTED", 0, 0), "changes requested"),
+			item(reviewText(ic, "REVIEW_REQUIRED", 0, 0), "review required"),
+			item(reviewText(ic, "", 0, 0), "no decision"),
+			item(reviewText(ic, "APPROVED", 0, 0)+ic.gap+"N", "N approvals"),
+			item(ic.requested+ic.gap+"N", "N requested, not answered yet"),
 		}})
 	if m.bots {
 		bot := func(state github.BotState) string { return botStateText(ic, github.BotReview{State: state}) }

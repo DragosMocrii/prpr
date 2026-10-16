@@ -128,10 +128,30 @@ func TestFailedIconSaveKeepsTheIconsAndWarns(t *testing.T) {
 	}
 }
 
+func TestReviewCellCountsApprovalsAndUnansweredRequests(t *testing.T) {
+	ic := &unicodeIcons
+	for _, tc := range []struct {
+		decision             string
+		approvals, requested int
+		want                 string
+	}{
+		{"APPROVED", 2, 1, ic.passed + "2 " + ic.requested + "1"},
+		{"REVIEW_REQUIRED", 0, 3, ic.pending + " " + ic.requested + "3"},
+		{"", 0, 3, ic.requested + "3"},
+		{"", 1, 0, ic.passed + "1"},
+		{"", 0, 0, ic.none},
+	} {
+		if got := ansi.Strip(reviewText(ic, tc.decision, tc.approvals, tc.requested)); got != tc.want {
+			t.Errorf("review %q, %d approvals, %d requested = %q, want %q", tc.decision, tc.approvals, tc.requested, got, tc.want)
+		}
+	}
+}
+
 func TestNerdIconsKeepNumbersOffTheIcon(t *testing.T) {
 	ic := &nerdIcons
 	for _, text := range []string{
-		reviewText(ic, "APPROVED", 2),
+		reviewText(ic, "APPROVED", 2, 0),
+		reviewText(ic, "", 0, 2),
 		botStateText(ic, github.BotReview{State: github.BotConcerns, Concerns: 3}),
 		botStateText(ic, github.BotReview{State: github.BotStale}),
 	} {
@@ -140,7 +160,7 @@ func TestNerdIconsKeepNumbersOffTheIcon(t *testing.T) {
 			t.Errorf("%q does not separate the icon from what follows", plain)
 		}
 	}
-	if got := ansi.Strip(reviewText(&unicodeIcons, "APPROVED", 2)); got != "✓2" {
+	if got := ansi.Strip(reviewText(&unicodeIcons, "APPROVED", 2, 0)); got != "✓2" {
 		t.Errorf("unicode review = %q, want it unchanged", got)
 	}
 }

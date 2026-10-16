@@ -13,6 +13,8 @@ type iconSet struct {
 	nerd bool
 	// Merge, CI, review, and bot states.
 	check, cross, pending, behind, unknown, none string
+	// requested counts review requests nobody has answered yet.
+	requested string
 	// Bigger variants for CI and review, and the bot states that have no
 	// merge counterpart.
 	passed, failed, botRunning, botFailed string
@@ -42,7 +44,8 @@ type iconSet struct {
 
 var unicodeIcons = iconSet{
 	check: "✓", cross: "✗", pending: "●", behind: "↓", unknown: "?", none: "–",
-	passed: "✓", failed: "✗", botRunning: "◌", botFailed: "!",
+	requested: "◷",
+	passed:    "✓", failed: "✗", botRunning: "◌", botFailed: "!",
 	star:     "★",
 	nudgeLow: "👋", nudgeNormal: "🔔", nudgeUrgent: "🚨",
 	categories: [7]string{"✓", "✗", "✗", "✗", "✗", "●", "?"},
@@ -53,7 +56,8 @@ var nerdIcons = iconSet{
 	nerd:     true,
 	nudgeLow: "👋", nudgeNormal: "🔔", nudgeUrgent: "🚨",
 	check: "", cross: "", pending: "", behind: "", unknown: "", none: "",
-	passed: "", failed: "", botRunning: "", botFailed: "",
+	requested: "\uf415", // person
+	passed:    "", failed: "", botRunning: "", botFailed: "",
 	draft:      "",
 	newCommits: "", replied: "", dismissed: "", activity: "",
 	waiting: "", approved: "", backInDraft: "",

@@ -190,7 +190,7 @@ Drafts are tagged `draft` before their name. The first column of **My PRs** show
 
 - **Age**: how long the PR has waited. In **My PRs** it counts from when the PR was last marked ready for review, or from when it was opened if it was never a draft; drafts show `—`. In **Review requested** it counts from the latest review request naming you directly, and falls back to the ready-for-review time when that request is not found; for a pull request you already reviewed, it counts from your latest review or comment, or from the change that needs you again; for one listed only for a nudge, from the nudge. Ages are computed when the lists load, refresh, resize, or change scope, so between refreshes they show the age as of the last update.
 - **CI**: the head commit's check rollup — passing, failing, pending, or `–` when there are no checks.
-- **Review**: the review decision (approved, changes requested, review required, or `–` when none applies) followed by the number of current approvals.
+- **Review**: the review decision (approved, changes requested, review required, or `–` when none applies) followed by the number of current approvals; approvals in a repository that requires no reviews still show as approved. On your own pull requests, `◷` and a number follow: review requests to people or teams that nobody has answered yet (for example `✓2 ◷1`, or `◷3` before anyone reviewed). An approval GitHub dismissed, as repositories that dismiss stale approvals do on a push, no longer counts.
 - **Comments**: the number of conversation comments, bots included. Code review comments are not counted.
 - **Size**: lines added and removed.
 - **Bots**: the most pressing state among the configured review bots. The same rule applies to every bot; severity is not read.

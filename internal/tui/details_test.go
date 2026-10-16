@@ -49,7 +49,7 @@ func TestMergeDetailNamesOnlyProvenBlockers(t *testing.T) {
 			}
 		}
 	}
-	if got := reviewDetail("", 0); strings.Contains(got, "Approved") || strings.Contains(got, "required") {
+	if got := reviewDetail("", 0, 0); strings.Contains(got, "Approved") || strings.Contains(got, "required") {
 		t.Errorf("null review decision reads as known: %q", got)
 	}
 	if got := checksDetail(""); strings.Contains(got, "passed") {

@@ -137,8 +137,10 @@ var (
 		present: func(c *columnContext) bool { return c.m.bots }}
 	ciColumn = columnSpec{title: iconTitle("CI"), width: iconWidth(2, 1), rank: 3, preview: true,
 		text: func(r *rowContext) string { return checksIcon(r.ic, r.pr.Checks) }}
-	reviewColumn = columnSpec{title: iconTitle("Review"), width: iconWidth(6, 4), rank: 4, preview: true,
-		text: func(r *rowContext) string { return reviewText(r.ic, r.pr.ReviewDecision, r.pr.Approvals) }}
+	reviewColumn = columnSpec{title: iconTitle("Review"), width: iconWidth(6, 8), rank: 4, preview: true,
+		text: func(r *rowContext) string {
+			return reviewText(r.ic, r.pr.ReviewDecision, r.pr.Approvals, r.pr.PendingReviews)
+		}}
 	commentsColumn = columnSpec{title: iconTitle("Comments"), width: iconWidth(8, 4), rank: 5, preview: true,
 		text: func(r *rowContext) string { return strconv.Itoa(r.pr.Comments) }}
 	sizeColumn = columnSpec{title: iconTitle("Size"), width: iconWidth(11, 11), rank: 6,

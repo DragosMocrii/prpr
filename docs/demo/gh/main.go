@@ -46,7 +46,9 @@ type pr struct {
 	mergeable, mergeState      string
 	checks, decision           string
 	approvals                  int
-	created, ready, requested  time.Duration
+	// pending counts review requests nobody has answered; authored only.
+	pending                   int
+	created, ready, requested time.Duration
 	// nudged is the time since the author's urgent nudge of the viewer; 0
 	// for none.
 	nudged time.Duration
@@ -126,6 +128,9 @@ func (p pr) node(full bool) map[string]any {
 			"createdAt": ago(p.nudged),
 			"body":      "@" + login + " 🚨 This is blocking: please review it as soon as you can.\n\n<!-- prpr:nudge v1 urgency=urgent to=" + login + " -->"})
 	}
+	if p.author == login {
+		n["pendingReviews"] = map[string]any{"totalCount": p.pending}
+	}
 	for k, v := range map[string]any{
 		"mergeStateStatus":         p.mergeState,
 		"reviewDecision":           decision,
@@ -152,10 +157,10 @@ func mine(changed bool) []pr {
 		bots: bots{copilotReview: 18 * hour}}
 	settings := pr{repo: "acme/web", number: 1287, title: "Migrate the settings page to the new design system", author: login,
 		add: 612, del: 418, comments: 3, mergeable: "MERGEABLE", mergeState: "BLOCKED", checks: "PENDING",
-		decision: "REVIEW_REQUIRED", created: 2 * day, head: 3 * hour, bots: bots{copilotReview: 2 * hour, threads: 2}}
+		decision: "REVIEW_REQUIRED", pending: 2, created: 2 * day, head: 3 * hour, bots: bots{copilotReview: 2 * hour, threads: 2}}
 	flaky := pr{repo: "acme/web", number: 1301, title: "Fix the flaky checkout test", author: login,
 		add: 12, del: 9, comments: 1, mergeable: "MERGEABLE", mergeState: "BEHIND", checks: "SUCCESS",
-		decision: "APPROVED", approvals: 1, created: 30 * hour, head: 26 * hour, bots: bots{codexReaction: 28 * hour}}
+		decision: "APPROVED", approvals: 1, pending: 1, created: 30 * hour, head: 26 * hour, bots: bots{codexReaction: 28 * hour}}
 	state := pr{repo: "acme/infra", number: 88, title: "Split staging and production Terraform state", author: login,
 		add: 240, del: 197, comments: 11, mergeable: "CONFLICTING", mergeState: "DIRTY", checks: "FAILURE",
 		decision: "CHANGES_REQUESTED", created: 6 * day, head: 5 * hour, bots: bots{claudeRunning: true}}
@@ -164,7 +169,7 @@ func mine(changed bool) []pr {
 	if !changed {
 		return []pr{settings, flaky, limits, state, retries}
 	}
-	settings.checks, settings.decision, settings.approvals, settings.comments = "SUCCESS", "APPROVED", 1, 5
+	settings.checks, settings.decision, settings.approvals, settings.pending, settings.comments = "SUCCESS", "APPROVED", 1, 1, 5
 	limits.comments = 8
 	bump := pr{repo: "acme/api", number: 423, title: "Bump Go to 1.26", author: login,
 		add: 6, del: 6, mergeable: "MERGEABLE", mergeState: "BLOCKED", checks: "SUCCESS",

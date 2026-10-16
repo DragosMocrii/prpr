@@ -192,7 +192,7 @@ func (m *model) detailRows(pr *github.PullRequest, gone bool) []detailRowText {
 		add("Queue", values...)
 	}
 	add("CI", pending(checksDetail(pr.Checks)))
-	add("Review", pending(reviewDetail(pr.ReviewDecision, pr.Approvals)))
+	add("Review", pending(reviewDetail(pr.ReviewDecision, pr.Approvals, pr.PendingReviews)))
 	if _, authored := m.detailsAuthoredPR(); authored && !review {
 		rows = append(rows, m.reviewerDetailRows(pr)...)
 	}
@@ -311,7 +311,7 @@ func checksDetail(state string) string {
 	}
 }
 
-func reviewDetail(decision string, approvals int) string {
+func reviewDetail(decision string, approvals, requested int) string {
 	var text string
 	switch decision {
 	case "APPROVED":
@@ -323,7 +323,11 @@ func reviewDetail(decision string, approvals int) string {
 	default:
 		text = "No review decision from GitHub"
 	}
-	return text + " · " + plural(approvals, "approval")
+	text += " · " + plural(approvals, "approval")
+	if requested > 0 {
+		text += " · " + plural(requested, "review request") + " not answered"
+	}
+	return text
 }
 
 func botDetail(review github.BotReview) string {

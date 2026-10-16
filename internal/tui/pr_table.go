@@ -349,22 +349,36 @@ func checksIcon(ic *iconSet, state string) string {
 }
 
 // reviewText shows the review decision followed by the current approval count.
-func reviewText(ic *iconSet, decision string, approvals int) string {
+// reviewText draws GitHub's review decision, the approvals, and the review
+// requests nobody has answered yet. Approvals without a decision, where the
+// repository requires no reviews, still show as approved.
+func reviewText(ic *iconSet, decision string, approvals, pending int) string {
 	var icon string
-	switch decision {
-	case "APPROVED":
+	switch {
+	case decision == "APPROVED", decision == "" && approvals > 0:
 		icon = coloredIcon(ic.passed, "2")
-	case "CHANGES_REQUESTED":
+	case decision == "CHANGES_REQUESTED":
 		icon = coloredIcon(ic.failed, "1")
-	case "REVIEW_REQUIRED":
+	case decision == "REVIEW_REQUIRED":
 		icon = coloredIcon(ic.pending, "3")
+	case pending > 0:
+		// No decision and no approvals: the requests say it all.
+		return requestedText(ic, pending)
 	default:
 		icon = ic.none
 	}
 	if approvals > 0 {
 		icon += ic.gap + strconv.Itoa(approvals)
 	}
+	if pending > 0 {
+		icon += " " + requestedText(ic, pending)
+	}
 	return icon
+}
+
+// requestedText counts the review requests nobody has answered yet.
+func requestedText(ic *iconSet, pending int) string {
+	return ic.requested + ic.gap + strconv.Itoa(pending)
 }
 
 // botsText shows the most attention-worthy bot state; concerns are summed

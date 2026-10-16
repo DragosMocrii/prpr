@@ -35,6 +35,9 @@ type PullRequest struct {
 	// or not applicable.
 	ReviewDecision string
 	Approvals      int
+	// PendingReviews counts review requests not answered yet, on authored
+	// pull requests only; zero elsewhere and in previews.
+	PendingReviews int
 	Additions      int
 	Deletions      int
 	Checks         string
@@ -175,9 +178,12 @@ func pullRequestFields(bots bool) string {
         } } }` + extra
 }
 
-// authoredFields are the authored list's fields.
+// authoredFields are the authored list's fields. pendingReviews counts the
+// user and team review requests nobody has answered yet: GitHub drops a
+// request when its reviewer, or a member for a team, reviews.
 func authoredFields(bots bool, needs Needs, queues []Queue) string {
-	return pullRequestFields(bots) + needsFields(needs) + queueFields(queues)
+	return pullRequestFields(bots) + `
+        pendingReviews: reviewRequests { totalCount }` + needsFields(needs) + queueFields(queues)
 }
 
 // reviewFields are a review search's fields plus extra.
@@ -302,6 +308,9 @@ type pullRequestNode struct {
 			State string `json:"state"`
 		} `json:"nodes"`
 	} `json:"latestOpinionatedReviews"`
+	PendingReviews *struct {
+		TotalCount int `json:"totalCount"`
+	} `json:"pendingReviews"`
 	Commits struct {
 		Nodes []*struct {
 			Commit struct {
@@ -371,6 +380,9 @@ func (node *pullRequestNode) pullRequest(login string, bots []Bot) PullRequest {
 			}
 		}
 		pr.Nudge = node.nudge(login)
+	}
+	if node.PendingReviews != nil {
+		pr.PendingReviews = node.PendingReviews.TotalCount
 	}
 	for _, review := range node.LatestOpinionatedReviews.Nodes {
 		switch {
