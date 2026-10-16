@@ -287,6 +287,10 @@ func (m *model) nameText(spec *paneSpec, r *rowContext) string {
 	if pr.Draft && pr.ReviewStatus != github.ReviewBackInDraft {
 		name = ic.draftTag() + nameTagSeparator(ic) + name
 	}
+	// A pending request has no status tag, so the tag leads the name.
+	if spec.statusTag && !r.preview && !r.gone && lastBlocker(pr) {
+		name = lastBlockerTag(ic) + nameTagSeparator(ic) + name
+	}
 	if spec.statusTag {
 		if status := reviewStatusTag(ic, pr.ReviewStatus, m.waiting(pr)); status != "" && ic.nerd {
 			name = status + " " + name

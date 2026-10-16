@@ -35,7 +35,8 @@ func checksFailing(state string) bool {
 // alerts compares a full fetch with the change baseline of each pane, before
 // the baseline is replaced. Only authored pull requests listed in both
 // fetches alert; a review row alerts when it arrives, stops waiting on
-// others, or is nudged at normal or urgent, but never when it starts waiting. A pull request a merge queue
+// others, is nudged at normal or urgent, or turns its last blocker
+// (lastBlocker), but never when it starts waiting. A pull request a merge queue
 // removed for failed tests alerts once; queued ones never alert, except that
 // a submitted one still alerts on failing CI and changes requested, which
 // keep it from entering the queue. readiness is each
@@ -100,9 +101,17 @@ func (m *model) alerts() []prAlert {
 	for i := range reviewBaseline {
 		reviews[keyOf(&reviewBaseline[i])] = &reviewBaseline[i]
 	}
+	blocking := make(map[prKey]bool)
 	for i := range m.snapshot.ReviewRequests {
 		pr := &m.snapshot.ReviewRequests[i]
-		if _, ok := m.snoozes[keyOf(pr)]; ok {
+		key := keyOf(pr)
+		wasBlocking, knewBlocking := m.blocking[key]
+		if !unknownMergeState(pr) {
+			blocking[key] = lastBlocker(pr)
+		} else if knewBlocking {
+			blocking[key] = wasBlocking
+		}
+		if _, ok := m.snoozes[key]; ok {
 			continue
 		}
 		old, listed := reviews[keyOf(pr)]
@@ -118,18 +127,31 @@ func (m *model) alerts() []prAlert {
 		}
 		nudge := m.nudge(pr)
 		nudged := nudgeAlert(oldNudge, nudge, listed)
-		if m.quiet(pr) || pr.Draft || !m.inScope(pr) ||
-			(listed && !m.quiet(old) && !old.Draft && m.inScope(old) && !nudged) {
+		// It also alerts when the viewer becomes its last blocker, against
+		// the last known result, so a merge state GitHub briefly reports as
+		// unknown does not alert again.
+		becameBlocking := lastBlocker(pr) && !(knewBlocking && wasBlocking)
+		arrived := !listed || m.quiet(old) || old.Draft || !m.inScope(old) || nudged
+		if m.quiet(pr) || pr.Draft || !m.inScope(pr) || (!arrived && !becameBlocking) {
 			continue
 		}
-		kind := "review requested"
-		if nudged {
-			kind = "nudged (" + nudgeWord(nudge) + ")"
-		} else if text := reviewStatusText(pr.ReviewStatus); text != "" {
-			kind = text
+		var kinds []string
+		switch {
+		case nudged:
+			kinds = append(kinds, "nudged ("+nudgeWord(nudge)+")")
+		case !arrived:
+			// Still needing the viewer: only the blocking is news.
+		case reviewStatusText(pr.ReviewStatus) != "":
+			kinds = append(kinds, reviewStatusText(pr.ReviewStatus))
+		default:
+			kinds = append(kinds, "review requested")
 		}
-		found = append(found, prAlert{pr: pr, kinds: []string{kind}, urgent: nudged && nudge.Urgency == github.NudgeUrgent})
+		if becameBlocking {
+			kinds = append(kinds, lastBlockerText)
+		}
+		found = append(found, prAlert{pr: pr, kinds: kinds, urgent: nudged && nudge.Urgency == github.NudgeUrgent})
 	}
+	m.blocking = blocking
 	return found
 }
 
@@ -162,6 +184,17 @@ func (m *model) resetReadiness() {
 	for i := range m.snapshot.PullRequests {
 		if result := m.readyResult(&m.snapshot.PullRequests[i]); result.Known {
 			m.readiness[keyOf(&m.snapshot.PullRequests[i])] = result.Ready
+		}
+	}
+}
+
+// resetBlocking records the review rows' known lastBlocker results without
+// alerting, for a new baseline.
+func (m *model) resetBlocking() {
+	m.blocking = make(map[prKey]bool)
+	for i := range m.snapshot.ReviewRequests {
+		if pr := &m.snapshot.ReviewRequests[i]; !unknownMergeState(pr) {
+			m.blocking[keyOf(pr)] = lastBlocker(pr)
 		}
 	}
 }

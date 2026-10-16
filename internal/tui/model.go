@@ -157,6 +157,8 @@ type model struct {
 	// readiness is each authored pull request's last known merge readiness.
 	notify    bool
 	readiness map[prKey]bool
+	// blocking is each review row's last known lastBlocker result.
+	blocking map[prKey]bool
 	// icons draws status symbols: unicodeIcons or nerdIcons.
 	icons *iconSet
 	// rules decide when an authored pull request is ready to merge;
@@ -1070,6 +1072,7 @@ func (m *model) applySnapshot(snapshot github.Snapshot) tea.Cmd {
 			m.changesLogin = snapshot.Login
 			if reset {
 				m.resetReadiness()
+				m.resetBlocking()
 			} else {
 				alerts = m.alerts()
 			}

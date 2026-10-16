@@ -112,6 +112,11 @@ func (m *model) legendSections() []legendSection {
 			item(ic.nudgeUrgent, "nudged, urgent; X dismisses"),
 		}})
 	}
+	if m.lastBlockerShown() {
+		sections = append(sections, legendSection{"Blocking", []string{
+			item(lastBlockerTag(ic), lastBlockerText),
+		}})
+	}
 	if snoozePane || m.wokeShown() {
 		sections = append(sections, legendSection{"Snoozed", []string{
 			item(wokeTag(ic, "reason"), "woke from a snooze"),

@@ -326,6 +326,10 @@ GitHub withdraws a review request as soon as you submit a review, even a single 
 
 Only the author's replies count; other reviewers and bots do not, and neither does a [nudge](#nudges). When the author requests your review again, the row is a review request again.
 
+### Only your review left
+
+A pending request in **Review requested** shows `⚑` (a key in the Nerd Font set) before its name when your review is all that is left: GitHub still requires a review, nobody else's review request, user or team, is open, and nothing else is known to block it (not a draft, no conflicts, a known merge state, and CI neither failing nor running; no CI counts). The details add a **Blocking** row and the status line says `only your review left`. GitHub does not tell you how many approvals a branch needs unless you administer the repository, so the mark means nobody else is asked, not that your approval alone lets it merge.
+
 ### GitHub accounts
 
 prpr follows gh's active account unless you pin one. Press `a` to list the accounts gh has stored for github.com (`gh auth status --json hosts`) and choose one; the first row, **Follow gh's active account**, unpins. A pinned account stays in use when gh's active account changes, for example after `gh auth switch` in another terminal, and the title marks it `(pinned)`. The choice is saved across runs.
@@ -374,7 +378,8 @@ Notifications are off until you turn on Desktop notifications in [Settings](#set
 
 - one of your pull requests became ready to merge (the green `✓`, by your [rules](#ready-to-merge-rules)), its CI started failing, or a reviewer requested changes;
 - a new review request arrived, or a pull request you reviewed needs you again (`new commits`, `replied`, `dismissed`, `activity`). Starting to wait on the author never alerts;
-- the author of a pull request nudged you at normal or urgent, again later, or more urgently (see [Nudges](#nudges)); low nudges never alert.
+- the author of a pull request nudged you at normal or urgent, again later, or more urgently (see [Nudges](#nudges)); low nudges never alert;
+- you became the only review left on a pull request requesting yours (see [Only your review left](#only-your-review-left)).
 
 Only changes alert, not the current state: the first load, a switch to another GitHub account, and pull requests you just opened never do, and a failed refresh is skipped. A merge state that GitHub briefly reports as unknown is compared with the last known one. Pull requests outside the repository filter are ignored; search and quick filters are not. A notification names one pull request with its title, or the first two and a count of the rest, and the same text appears in the status line until the next key press.
 

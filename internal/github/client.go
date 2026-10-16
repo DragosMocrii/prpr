@@ -38,9 +38,12 @@ type PullRequest struct {
 	// PendingReviews counts review requests not answered yet, on authored
 	// pull requests only; zero elsewhere and in previews.
 	PendingReviews int
-	Additions      int
-	Deletions      int
-	Checks         string
+	// OpenRequests counts review requests not answered yet, on review rows
+	// only; zero elsewhere and in previews.
+	OpenRequests int
+	Additions    int
+	Deletions    int
+	Checks       string
 	// Comments counts conversation comments, not code review comments.
 	Comments int
 	// Bots follows the client's configured bots; nil when none are configured.
@@ -186,9 +189,12 @@ func authoredFields(bots bool, needs Needs, queues []Queue) string {
         pendingReviews: reviewRequests { totalCount }` + needsFields(needs) + queueFields(queues)
 }
 
-// reviewFields are a review search's fields plus extra.
+// reviewFields are a review search's fields plus extra. openRequests counts
+// the unanswered user and team review requests, as pendingReviews does for
+// authored pull requests.
 func reviewFields(bots bool, extra string) string {
 	return pullRequestFields(bots) + `
+        openRequests: reviewRequests { totalCount }
         author { login }
         requestEvents: timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) {
           nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { ... on User { login } } } }
@@ -311,6 +317,9 @@ type pullRequestNode struct {
 	PendingReviews *struct {
 		TotalCount int `json:"totalCount"`
 	} `json:"pendingReviews"`
+	OpenRequests *struct {
+		TotalCount int `json:"totalCount"`
+	} `json:"openRequests"`
 	Commits struct {
 		Nodes []*struct {
 			Commit struct {
@@ -383,6 +392,9 @@ func (node *pullRequestNode) pullRequest(login string, bots []Bot) PullRequest {
 	}
 	if node.PendingReviews != nil {
 		pr.PendingReviews = node.PendingReviews.TotalCount
+	}
+	if node.OpenRequests != nil {
+		pr.OpenRequests = node.OpenRequests.TotalCount
 	}
 	for _, review := range node.LatestOpinionatedReviews.Nodes {
 		switch {

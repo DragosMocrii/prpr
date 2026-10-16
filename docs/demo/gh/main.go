@@ -46,7 +46,7 @@ type pr struct {
 	mergeable, mergeState      string
 	checks, decision           string
 	approvals                  int
-	// pending counts review requests nobody has answered; authored only.
+	// pending counts review requests nobody has answered.
 	pending                   int
 	created, ready, requested time.Duration
 	// nudged is the time since the author's urgent nudge of the viewer; 0
@@ -130,6 +130,8 @@ func (p pr) node(full bool) map[string]any {
 	}
 	if p.author == login {
 		n["pendingReviews"] = map[string]any{"totalCount": p.pending}
+	} else {
+		n["openRequests"] = map[string]any{"totalCount": p.pending}
 	}
 	for k, v := range map[string]any{
 		"mergeStateStatus":         p.mergeState,
@@ -180,19 +182,19 @@ func mine(changed bool) []pr {
 func reviews(changed bool) []pr {
 	avatars := pr{repo: "acme/web", number: 1290, title: "Cache avatar images at the edge", author: "sam-lee",
 		add: 77, del: 21, comments: 4, mergeable: "MERGEABLE", mergeState: "BLOCKED", checks: "SUCCESS",
-		decision: "REVIEW_REQUIRED", created: 8 * hour, requested: 5 * hour, head: 6 * hour, bots: bots{copilotReview: 5 * hour}}
+		decision: "REVIEW_REQUIRED", pending: 1, created: 8 * hour, requested: 5 * hour, head: 6 * hour, bots: bots{copilotReview: 5 * hour}}
 	offline := pr{repo: "acme/mobile", number: 530, title: "Offline mode for the order list", author: "priya-n",
 		add: 1310, del: 260, comments: 9, mergeable: "MERGEABLE", mergeState: "BLOCKED", checks: "PENDING",
-		decision: "REVIEW_REQUIRED", created: 3 * day, requested: 2 * day, nudged: 40 * time.Minute, head: 4 * hour, bots: bots{copilotReview: 30 * hour, threads: 1}}
+		decision: "REVIEW_REQUIRED", pending: 2, created: 3 * day, requested: 2 * day, nudged: 40 * time.Minute, head: 4 * hour, bots: bots{copilotReview: 30 * hour, threads: 1}}
 	cursors := pr{repo: "acme/api", number: 418, title: "Document pagination cursors", author: "jordan-k",
 		add: 58, mergeable: "MERGEABLE", mergeState: "CLEAN", checks: "SUCCESS",
-		decision: "REVIEW_REQUIRED", created: 26 * hour, requested: 26 * hour, head: 26 * hour}
+		decision: "REVIEW_REQUIRED", pending: 2, created: 26 * hour, requested: 26 * hour, head: 26 * hour}
 	if !changed {
 		return []pr{avatars, offline, cursors}
 	}
 	rotate := pr{repo: "acme/infra", number: 91, title: "Rotate database credentials automatically", author: "sam-lee",
 		add: 143, del: 38, mergeable: "MERGEABLE", mergeState: "BLOCKED", checks: "PENDING",
-		decision: "REVIEW_REQUIRED", created: 15 * time.Minute, requested: 15 * time.Minute, head: 15 * time.Minute}
+		decision: "REVIEW_REQUIRED", pending: 1, created: 15 * time.Minute, requested: 15 * time.Minute, head: 15 * time.Minute}
 	return []pr{rotate, avatars, offline, cursors}
 }
 

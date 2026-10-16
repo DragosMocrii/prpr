@@ -326,6 +326,40 @@ func TestOnlyTheAuthoredQueryCountsPendingReviewRequests(t *testing.T) {
 	}
 }
 
+func TestReviewQueriesCountOpenReviewRequests(t *testing.T) {
+	for name, query := range map[string]string{
+		"review":   reviewRequestsQuery(false),
+		"reviewed": reviewedQuery(false, time.Now()),
+		"mentions": mentionsQuery(false, time.Now()),
+	} {
+		if !strings.Contains(query, "openRequests: reviewRequests { totalCount }") {
+			t.Errorf("%s query does not count open review requests", name)
+		}
+	}
+	for name, query := range map[string]string{
+		"authored":       pullRequestsQuery(false, Needs{}, nil),
+		"review preview": previewReviewRequestsQuery(),
+	} {
+		if strings.Contains(query, "openRequests") {
+			t.Errorf("%s query counts open review requests", name)
+		}
+	}
+}
+
+func TestDecodeReviewPagesCountsOpenRequests(t *testing.T) {
+	data := []byte(`[{"data":{"search":{"nodes":[
+		{"number":1,"url":"https://github.com/acme/api/pull/1","createdAt":"2026-06-01T00:00:00Z","openRequests":{"totalCount":1}},
+		{"number":2,"url":"https://github.com/acme/api/pull/2","createdAt":"2026-06-01T00:00:00Z"}
+	]}}}]`)
+	prs, err := decodeReviewPages(data, "octocat", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prs[0].OpenRequests != 1 || prs[0].PendingReviews != 0 || prs[1].OpenRequests != 0 {
+		t.Fatalf("open requests = %d, %d (pending %d)", prs[0].OpenRequests, prs[1].OpenRequests, prs[0].PendingReviews)
+	}
+}
+
 func TestReviewRequestsQueryExcludesTeamRequests(t *testing.T) {
 	for _, query := range []string{reviewRequestsQuery(false), reviewRequestsQuery(true), previewReviewRequestsQuery()} {
 		if !strings.Contains(query, `"is:pr is:open user-review-requested:@me archived:false sort:updated-desc"`) ||

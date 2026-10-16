@@ -197,6 +197,9 @@ func TestEveryIconIsInTheLegend(t *testing.T) {
 		// A nudged review row puts the nudge icons on screen.
 		review := reviewPRs(1)
 		review[0].Nudge = &github.Nudge{Urgency: github.NudgeNormal, At: time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)}
+		// A review row waiting on the viewer alone puts the last-blocker icon on screen.
+		review[0].ReviewDecision, review[0].OpenRequests = "REVIEW_REQUIRED", 1
+		review[0].Mergeable, review[0].MergeState, review[0].Checks = "MERGEABLE", "BLOCKED", "SUCCESS"
 		m := newPaneModel(t, 240, 80, mine, review)
 		m.icons = set
 		m.bots = true

@@ -171,6 +171,9 @@ func (m *model) detailRows(pr *github.PullRequest, gone bool) []detailRowText {
 			}
 			add("Nudged", text)
 		}
+		if !gone && !preview && lastBlocker(pr) {
+			add("Blocking", lastBlockerText+": no other review request is open and nothing else is known to block it")
+		}
 	}
 	merge := mergeDetail(pr.Draft, pr.Mergeable, pr.MergeState, pr.ReviewDecision, pr.Checks)
 	if preview && pr.Mergeable != "CONFLICTING" {
@@ -433,6 +436,9 @@ func (m *model) rowStatus() []string {
 	status := reviewStatus(pr.ReviewDecision, pr.Approvals)
 	if review {
 		facts = append(facts, m.requestStatus(pr))
+		if lastBlocker(pr) {
+			facts = append(facts, lastBlockerText)
+		}
 		// A review is required of every pending request; others' verdicts
 		// are the news.
 		if pr.ReviewDecision == "REVIEW_REQUIRED" {

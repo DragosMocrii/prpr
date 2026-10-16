@@ -32,6 +32,9 @@ type iconSet struct {
 	// nudgeLow, nudgeNormal, and nudgeUrgent mark a review row the author
 	// nudged: the same emoji in both sets, two cells wide.
 	nudgeLow, nudgeNormal, nudgeUrgent string
+	// lastBlocker leads the name of a review row whose only unanswered
+	// review request is the viewer's.
+	lastBlocker string
 	// gap separates an icon from a number or mark after it. Nerd Font icons
 	// are often drawn wider than the one cell the terminal gives them, so
 	// whatever follows directly would be drawn over them.
@@ -44,8 +47,8 @@ type iconSet struct {
 
 var unicodeIcons = iconSet{
 	check: "✓", cross: "✗", pending: "●", behind: "↓", unknown: "?", none: "–",
-	requested: "◷",
-	passed:    "✓", failed: "✗", botRunning: "◌", botFailed: "!",
+	requested: "◷", lastBlocker: "⚑",
+	passed: "✓", failed: "✗", botRunning: "◌", botFailed: "!",
 	star:     "★",
 	nudgeLow: "👋", nudgeNormal: "🔔", nudgeUrgent: "🚨",
 	categories: [7]string{"✓", "✗", "✗", "✗", "✗", "●", "?"},
@@ -56,8 +59,9 @@ var nerdIcons = iconSet{
 	nerd:     true,
 	nudgeLow: "👋", nudgeNormal: "🔔", nudgeUrgent: "🚨",
 	check: "", cross: "", pending: "", behind: "", unknown: "", none: "",
-	requested: "\uf415", // person
-	passed:    "", failed: "", botRunning: "", botFailed: "",
+	requested:   "\uf415", // person
+	lastBlocker: "\uf43d", // key
+	passed:      "", failed: "", botRunning: "", botFailed: "",
 	draft:      "",
 	newCommits: "", replied: "", dismissed: "", activity: "",
 	waiting: "", approved: "", backInDraft: "",
